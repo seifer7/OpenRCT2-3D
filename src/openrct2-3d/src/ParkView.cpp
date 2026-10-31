@@ -23,9 +23,9 @@
 #include <openrct2/config/Config.h>
 #include <openrct2/drawing/Drawing.Sprite.h>
 #include <openrct2/drawing/Drawing.h>
-#include <openrct2/drawing/PaletteType.h>
-#include <openrct2/drawing/Palette.h>
 #include <openrct2/drawing/LightFX.h>
+#include <openrct2/drawing/Palette.h>
+#include <openrct2/drawing/PaletteType.h>
 #include <openrct2/drawing/RenderTarget.h>
 #include <openrct2/interface/Viewport.h>
 #include <openrct2/interface/Window.h>
@@ -928,8 +928,7 @@ namespace OpenRCT2::View3D::Park
         void decodeSurface(const TerrainSurfaceObject& surface)
         {
             const auto selectedColour = surface.getPreviewColour();
-            const ImageId image =
-                surface.GetImageId({}, TerrainSurfaceObject::kNoValue, 0, 0, false, false, selectedColour);
+            const ImageId image = surface.GetImageId({}, TerrainSurfaceObject::kNoValue, 0, 0, false, false, selectedColour);
             const G1Element* sprite = GfxGetG1Element(image);
             if (sprite == nullptr || sprite->width <= 0 || sprite->height <= 0 || sprite->width > 256 || sprite->height > 256)
             {

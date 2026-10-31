@@ -1,11 +1,6 @@
----
-cursor:
-  subagentId: "bc-e129bd64-f4c7-58b8-bdff-f1aefd6cd124"
----
-
 # Scenery sprites, angles, and 3D view survey
 
-Read-only exploration of `/workspace` (OpenRCT2 fork) plus local RCT2 install at `/opt/rct2` and official objects zip v1.7.11.
+Checked against `develop` at `cba2102` (this branch’s parent) and the files already on this branch. Commercial RCT2 data and the official objects zip are not in the repository. Paths such as `/opt/rct2` and `/tmp/orct2-objects` are example locations from an old VM, not paths in this repo. Numbers taken from those files are marked unverified.
 
 ## 1. Where object / scenery sprites live
 
@@ -13,55 +8,54 @@ Read-only exploration of `/workspace` (OpenRCT2 fork) plus local RCT2 install at
 
 | Source | Path / pattern | Format |
 | --- | --- | --- |
-| Legacy RCT2 objects | `{rct2}/ObjData/*.DAT` (e.g. `/opt/rct2/ObjData/`) | 16-byte `RCTObjectEntry` + Sawyer-chunked payload; image table at end of decoded chunk |
-| OpenRCT2 object catalog | `objects.zip` → `rct2/scenery_small/*.json` (and ww/tt/…) | JSON metadata; images usually reference DAT via `$RCT2:OBJDATA/NAME.DAT[0..N]` |
-| Official / custom park objects | `official/**/*.parkobj` (zip) | `object.json` + `images.dat` (LGX/G1 archive) via `$LGX:images.dat[0..N]` |
-| OpenRCT2 install objects dir | `DirBase::openrct2` + `DirId::objects` | scanned as `*.dat;*.pob;*.json;*.parkobj` (`ObjectRepository.cpp`) |
-| User objects | `DirBase::user` + `DirId::objects` (e.g. `~/.config/OpenRCT2/object/`) | same patterns |
-| Global UI / terrain sprites | `{rct2}/Data/g1.dat`, OpenRCT2 `resources/g2/` | G1/GX; **not** per-object scenery art |
+| Legacy RCT2 objects | `{rct2}/ObjData/*.DAT` (example: `/opt/rct2/ObjData/`) | 16-byte `RCTObjectEntry` (`Object.h`, comment `size: 0x10`) plus a Sawyer chunk (`ObjectFactory.cpp`). For small scenery, `SmallSceneryObject::ReadLegacy` reads the image table last, after the string table, scenery group, and optional frame offsets |
+| OpenRCT2 object catalog | `objects.zip` | `assets.json` points at `https://github.com/OpenRCT2/objects/releases/download/v1.8.0/objects.zip`. The zip’s layout is **unverified** (not in this repo) |
+| Official / custom park objects | `*.parkobj` | A zip. `CreateObjectFromZipFile` requires `object.json`. Image strings may use `$LGX:` (`ImageTable.cpp`). Whether that archive is always named `images.dat` is **unverified** |
+| OpenRCT2 install objects dir | `DirBase::openrct2` + `DirId::objects` | scanned as `*.dat;*.pob;*.json;*.parkobj` (`ObjectRepository.cpp`, `kPattern`) |
+| User objects | `DirBase::user` + `DirId::objects` | Same patterns. On Linux the user base is `$XDG_CONFIG_HOME/OpenRCT2`, or `~/.config/OpenRCT2` when that variable is unset (`Platform.Linux.cpp`, `CreatePlatformEnvironment`), then `object` |
+| Global UI / terrain sprites | `{rct2}/Data/g1.dat`, OpenRCT2 `resources/g2/` | `g1.dat` is install data, not in this repo. `resources/g2/` is in the repo. These are not per-object scenery art |
 
-`PlatformEnvironment` maps `DirBase::rct2` + `DirId::objects` → `ObjData`.
-
-`assets.json` pulls official extras from `https://github.com/OpenRCT2/objects/releases/.../objects.zip` (JSON stubs + `.parkobj`, not a full DAT dump).
+`PlatformEnvironment.cpp` maps `DirId` object under `DirBase::rct2` to `ObjData`.
 
 ### In-memory format
 
-- `ImageTable` (`src/openrct2/object/ImageTable.{h,cpp}`) holds `G1Element` entries (`src/openrct2/drawing/G1Element.h`): width/height, x/y offsets, flags, zoom, paletted pixel data.
-- JSON image refs parsed in `ImageTable::ParseImages`: `$RCT2:OBJDATA/…`, `$LGX:…`, `$G1[…]`, `$CSG[…]`, or raw PNG paths (imported via `ImageImporter`).
-- Small scenery object type: `ObjectType::smallScenery` / JSON `"scenery_small"`; loader `SmallSceneryObject`.
+- `ImageTable` (`src/openrct2/object/ImageTable.h`) holds `std::vector<G1Element>`. `G1Element` (`src/openrct2/drawing/G1Element.h`) has width, height, `xOffset`, `yOffset`, flags, `zoomedOffset`, and a pointer to the pixel bytes.
+- `ImageTable::ParseImages` accepts `$RCT2:OBJDATA/…`, `$LGX:…`, `$G1`, `$CSG`, or another string loaded with `Imaging::ReadFromBuffer` and `ImageImporter` (PNG is one import format in that file).
+- Small scenery object type: `ObjectType::smallScenery`. JSON object type string `"scenery_small"` (`ObjectFactory.cpp`). Loader: `SmallSceneryObject`.
 
-### Typical 1×1 / quadrant scenery with 4 angles
+### Quadrant scenery and four directions
 
-Most static small scenery JSON uses exactly four images:
+`SmallSceneryObject::ReadJson` sets footprint flags from `properties.shape`: `"4/4"` sets `occupiesFullTile`, `"2/4"` also sets `occupiesHalfTile`, `"3/4"` also sets `occupiesThreeQuarters`. A shape that matches none of those, including `"1/4"`, leaves `occupiesFullTile` unset. The tile painter then uses the quadrant offset path (`Paint.SmallScenery.cpp`).
 
-```json
-"images": [ "$RCT2:OBJDATA/TBN.DAT[0..3]" ]
-```
+For an object that is not withering, glass, or animated, the painter uses `sceneryEntry->image + direction` with `direction` in 0..3, so that path needs four images. Whether most official JSON files contain exactly four images is **unverified** (those files are not in this repo).
 
-Paint selects with `sceneryEntry->image + direction` (`Paint.SmallScenery.cpp`). Shape `"1/4"` = quadrant (not full tile); `"4/4"` = full tile.
+## 2. Four-angle sprites
 
----
+### Direction mapping
 
-## 2. Example: four-angle sprites
+`TileElementBase.h` defines, in order, starting at 0:
 
-### Angle / direction mapping
+| Index | Name |
+| --- | --- |
+| 0 | `TILE_ELEMENT_DIRECTION_WEST` |
+| 1 | `TILE_ELEMENT_DIRECTION_NORTH` |
+| 2 | `TILE_ELEMENT_DIRECTION_EAST` |
+| 3 | `TILE_ELEMENT_DIRECTION_SOUTH` |
 
-Directions (`TileElementBase.h` / `DirectionFromTo` in `Location.hpp`):
+`Paint.TileElement.cpp` sets `direction = tile_element->getDirectionWithOffset(rotation)` and passes it to `PaintSmallScenery`. `getDirectionWithOffset` adds the offset and masks with `kTileElementDirectionMask` (2 bits). `PaintSmallSceneryBody` then uses `baseImageIndex = sceneryEntry->image + direction`. Viewport rotation therefore selects which of the four images is drawn for a placed facing.
 
-| Index | Compass | Used as |
-| --- | --- | --- |
-| 0 | West | `TILE_ELEMENT_DIRECTION_WEST` |
-| 1 | North | `TILE_ELEMENT_DIRECTION_NORTH` |
-| 2 | East | `TILE_ELEMENT_DIRECTION_EAST` |
-| 3 | South | `TILE_ELEMENT_DIRECTION_SOUTH` |
+`DirectionFromTo` in `Location.hpp` returns 0 for negative X, 2 for positive X, 3 for negative Y, and 1 for positive Y, which are those same indices.
 
-Paint path: `direction = tile_element->getDirectionWithOffset(session.CurrentRotation)` then `baseImageIndex = sceneryEntry->image + direction`. Viewport rotation cycles which of the four sprites is shown for a given placement facing.
+Extra images, from `Paint.SmallScenery.cpp` unless noted:
 
-Wither / overlay / glass / animation add further +4 (or larger) strides on top of the base quartet (`Paint.SmallScenery.cpp`). Clocks use `[0..115]` etc.—avoid those for first GLB conversions.
+- Wither (`canWither`): `+4` at the first age threshold, and another `+4` at the second, on top of `image + direction`.
+- Glass (`hasGlass`): child image at `baseImageIndex + 4`, drawn with `ImageId::WithTransparency(primaryColour)`.
+- Animation strides are larger than `+4` for some flags. A fountain uses `image + 4` plus a 0..15 frame. A clock’s hour frame is `image + 68 + index` with `index` reduced into 0..47, so the highest hour offset in this function is `image + 115`. The minute hand uses `image + 8` plus a minute offset reduced into 0..59.
+- Overlay (`hasOverlayImage`) is not painted in `Paint.SmallScenery.cpp`. `SmallSceneryObject::DrawPreview` draws `image + 4` when that flag is set. The scenery window checks the same flag.
 
-**Note:** `seifer7-image-to-blender` composite sheets put “front” at the **top of the sheet** and match other views by landmarks—not by assuming DAT index order is clockwise FRBL.
+### Example sprite sizes (unverified)
 
-### Concrete sizes (decoded from `/opt/rct2/ObjData`)
+The sizes below were decoded on an old VM from example paths `/opt/rct2/ObjData` and an unpacked objects zip at `/tmp/orct2-objects`. Those files are not in this repo, so every object id, display name, height, pixel size, and flag in this table is **unverified**.
 
 | Object ID | DAT | Name | Height (world Z) | Sprite sizes (dirs 0–3) | Notes |
 | --- | --- | --- | --- | --- | --- |
@@ -75,133 +69,123 @@ Wither / overlay / glass / animation add further +4 (or larger) strides on top o
 | `rct2.scenery_small.tl0` | `TL0.DAT` | Tree | 134 | ~56–64 × 135–139 | 4/4 tall tree |
 | `official.scenery_small.support_structure_half` | parkobj `images.dat` | Support Structure | 16 | 64×48 ×4 (xOff=-32,yOff=-20) | `$LGX:`; **hasPrimaryColour** |
 
-G1 flags on samples were typically `5` = `hasTransparency` + `hasRLECompression`.
+The claim that sample G1 flags were typically `5` (`hasTransparency` plus `hasRLECompression`) is **unverified**. The flag names exist on `G1Flag`. `hasTransparency` is the first enumerator and `hasRLECompression` is the third.
 
-There are no per-angle PNG filenames for vanilla RCT2 scenery—only DAT/LGX indices. Official JSON path examples:
+There are no per-angle PNG filenames in this repo for vanilla RCT2 scenery. Example locations, not repo paths:
 
-- `/tmp/orct2-objects/rct2/scenery_small/rct2.scenery_small.tbn.json` (from objects.zip)
-- Game file: `/opt/rct2/ObjData/TBN.DAT`
+- `/tmp/orct2-objects/rct2/scenery_small/rct2.scenery_small.tbn.json`
+- `/opt/rct2/ObjData/TBN.DAT`
 
----
+## 3. 3D rendering on `develop`
 
-## 3. Existing 3D rendering / model work
+All 3D work in this repository is on `develop`. There is no `3d` branch.
 
-**Not on current `develop` checkout**—lives on fork branches:
+### `src/openrct2-3d/`
 
-### A. `origin/3d` + PR [#3](https://github.com/seifer7/openrct2/pull/3) (“Draw 3D terrain and water…”)
+These are on `develop`:
 
-- Docs: `docs/3d-viewer.md`, `src/openrct2-3d/README.md`
-- Code: `src/openrct2-3d/` (bgfx/bx/bimg submodules, `ParkView`, `BgfxRenderer`, `View3D`)
-- Goal: View-menu toggle; keep 2D default; UI composited over 3D; scenery/track still placeholders (boxes or billboards from g1) until meshes exist
-- Notes.md task **RCT-2** tracks this PR
+- `docs/3d-viewer.md` is the implementation plan. It says the 3D mode is a second view of `GameState`, bgfx draws the meshes, and `OpenGLDrawingEngine` (`src/openrct2-ui/drawing/engines/opengl/`) stays the 2D paletted compositor. It also says track and scenery have no 3D meshes today, and that a missing piece should be a coloured box or a camera-facing sprite from the loaded `g1` images until real art exists.
+- `src/openrct2-3d/README.md` says this directory holds the viewer and will also hold the extractor, meshes, and the UI composite.
+- `src/openrct2-3d/src/ParkView.cpp` and `ParkView.hpp` (`OpenRCT2::View3D::Park`) draw terrain, water, and path tiles. A comment in `ParkView.cpp` says tracks are not meshed yet. No scenery mesh draw was found in `src/openrct2-3d/`.
+- `src/openrct2-3d/src/BgfxRenderer.cpp` and `BgfxRenderer.hpp` only define `View3D::bgfxLibraryName()`.
+- `src/openrct2-3d/src/View3D.cpp` and `src/openrct2-ui/drawing/View3D.h` are the View menu toggle, bgfx present, and the paletted UI composite. `docs/3d-viewer.md` names `View3D::present()`.
 
-### B. `origin/view3d`
+The name `SceneExtractor` appears in `docs/3d-viewer.md` and not in `src/openrct2-3d/`. Terrain and path meshing is inside `ParkView.cpp`.
 
-- Earlier integrated module under `src/openrct2-ui/view3d/` (`OpenGLRenderer`, `MapAdapter`, `TileTexture`, `TerrainGeometry`, README)
-- Reuses loaded terrain/path sprites as textures; translucent water; placeholders for other objects
-- Tests under `test/tests/view3d/`
+The coloured-box and `g1` billboard placeholders are the plan in `docs/3d-viewer.md`. They were not found as draws in `src/openrct2-3d/`.
 
-### C. `origin/seifer7-image-to-blender`
+### OpenGL drawing engine
 
-- Offline asset pipeline (not engine): `.github/agents/image-to-blender.agent.md`, `scripts/image-to-blender/`
-- Four-view isometric → Blender → paired `.blend` / `.glb` (4 Blender units per tile)
-- Style refs: `references/isometric sample.png`, `ParkEntrance.glb`
+`src/openrct2-ui/drawing/engines/opengl/` is the 2D paletted compositor. `docs/3d-viewer.md` says not to hang the 3D world on `OpenGLDrawingEngine`.
 
-### D. Upstream OpenGL (on develop)
+No GLB or glTF loader was found in this tree (no loader type or `.glb` / glTF reference under `src/`).
 
-- `src/openrct2-ui/drawing/engines/opengl/` — **2D paletted** compositor, not a 3D park renderer (`docs/3d-viewer.md` on `3d` branch explicitly says so)
-
-No GLB/glTF **loader** in the game tree on develop; GLB is an export target of the Blender agent only so far.
-
----
-
-## 4. Grid units ↔ pixels / heights
+## 4. Grid units, pixels, and heights
 
 From `src/openrct2/world/MapLimits.h`:
 
 ```text
-kCoordsXYStep      = 32   // one tile edge in world XY
-kCoordsXYHalfTile  = 16
-kCoordsZStep       = 8    // one height unit in world Z
-kLandHeightStep    = 16   // 2 * kCoordsZStep; one slope corner rise
-kWaterHeightStep   = 16
+kCoordsXYStep      = 32
+kCoordsXYHalfTile  = kCoordsXYStep / 2    // 16
+kCoordsZStep       = 8
+kLandHeightStep    = 2 * kCoordsZStep     // 16
+kWaterHeightStep   = 2 * kCoordsZStep     // 16
 kCoordsZPerTinyZ   = 16
 ```
 
-Isometric projection (`Viewport.cpp` `Translate3DTo2DWithZ`):
+`Translate3DTo2DWithZ` in `src/openrct2/interface/Viewport.cpp`:
 
 ```text
-screen = (y' - x', ((x' + y') >> 1) - z)   after rotating by viewport
+rotated = pos.rotate(rotation)
+screen = (rotated.y - rotated.x, ((rotated.x + rotated.y) >> 1) - pos.z)
 ```
 
-One tile → screen diamond **64×32** pixels. World Z subtracts 1:1 from screen Y.
+World Z is subtracted 1:1 from screen Y. For a tile of `kCoordsXYStep` (32) at rotation 0, the four corners span 64 pixels in screen X and 32 pixels in screen Y.
 
-Small-scenery `properties.height` / `SmallSceneryEntry::height` is in **world Z units** (same space as paint `baseZ`), not tile-index steps. Example: bone height 32 = 4×`kCoordsZStep` = 2×`kLandHeightStep`.
+`SmallSceneryEntry::height` is a `uint8_t` loaded from JSON `properties.height` (`SmallSceneryObject::ReadJson`). `SetSupportHeights` adds that field to the element’s base Z before calling `PaintUtilSetGeneralSupportHeight`, so the field is in the same Z units as paint `baseZ`. If a height value is 32, that is `4 * kCoordsZStep` and `2 * kLandHeightStep`. The bone height 32 in the table above is **unverified**.
 
-**3D viewer doc scale** (`docs/3d-viewer.md` on `3d`): viewer space `x/32, y/32, z/16` → 1 tile = 1 unit, 1 land step = 1 unit. `view3d` `TerrainGeometry` builds vertices with raw `kCoordsXYStep` / corner heights in world Z.
+RCT1 `Limits::kCoordsZStep` is 4 in `src/openrct2/rct1/Limits.h`. `S4Importer.cpp` uses it when converting imported heights.
 
-**Image-to-Blender:** 1 source tile = **4 Blender units**; native +Z up, −Y front, +X right; GLB export Y-up via glTF exporter.
+### Scale
 
-RCT1 uses `kCoordsZStep = 4` in `rct1/Limits.h` (import conversion only).
+3D scenery and object models use **1 Blender unit per game tile**. That matches the viewer space in `docs/3d-viewer.md`: sim `x / 32`, `y / 32`, `z / 16`. One tile is 1 unit, and one land step (`kLandHeightStep` = 16) is 1 unit.
 
----
+`ParkView.cpp` places the camera target at `map.x / 32` and `map.y / 32` (one tile = 1 unit). Mesh heights go through `worldZ`, which multiplies world Z by `kLandStepHeight / 16` with `kLandStepHeight = 0.5f`. One land step is 0.5 viewer units in that mesh (world Z / 32). The comment there says a full tile of height (`1.0`) read as too steep. That 0.5 factor is the current terrain mesh, not the model scale.
 
-## 5. Remappable colours / transparency (GLB impact)
+## 5. Remappable colours and transparency
 
 ### Transparency
 
-- `PaletteIndex::transparent = 0` (UI / viewport hole).
-- `G1Flag::hasTransparency`: documentation says transparent pixels are `0xFF` in non-RLE data; RLE sprites encode skips (flags bit pattern `5` = transparency + RLE on samples).
-- Glass scenery: extra image at `base+4` drawn with `ImageId::WithTransparency(primaryColour)` (blend remap, not opaque RGB).
+- `PaletteIndex::transparent = 0` (`PaletteIndex.h`). `docs/3d-viewer.md` uses that index as the UI hole.
+- `G1Flag::hasTransparency` is commented in `G1Element.h` as transparent pixels `0xFF` which are not rendered. `Drawing.Sprite.h` also says a pixel value of 0 is transparent on some blit paths. RLE is `G1Flag::hasRLECompression`.
+- Glass scenery: `ImageId(baseImageIndex + 4).WithTransparency(primaryColour)` in `Paint.SmallScenery.cpp`.
 
-### Colour remaps (`PaletteIndex.h` / `ImageImporter.h`)
+### Colour remaps
+
+`PaletteIndex.h` and `ImageImporter::GetPaletteIndexType` agree:
 
 | Role | Palette indices |
 | --- | --- |
-| Primary remap | 243–254 (`primaryRemap0`…) |
-| Secondary remap | 202–213 (`secondaryRemap0` / hot pink range) |
-| Tertiary remap | 46–57 (yellow range) |
+| Primary remap | 243–254 (`primaryRemap0` … `primaryRemap11`) |
+| Secondary remap | 202–213 (`secondaryRemap0` … `secondaryRemap11`) |
+| Tertiary remap | 46–57 (`tertiaryRemap0` … `tertiaryRemap11`) |
 
-Object flags: `hasPrimaryColour`, `hasSecondaryColour`, `hasTertiaryColour`, `hasGlass`, `supportsHavePrimaryColour` (`SmallSceneryEntry.h` / JSON).
+`SmallSceneryEntry.h` has `hasPrimaryColour`, `hasSecondaryColour`, `hasTertiaryColour`, `hasGlass`, and `supportsHavePrimaryColour`.
 
-Paint applies remaps via `ImageId.WithPrimary/Secondary/Tertiary` when not already a ghost/remap template.
+`PaintSmallSceneryBody` applies `WithPrimary`, `WithSecondary`, and `WithTertiary` when `imageTemplate.IsRemap()` is false. A ghost or a selected element sets a remap template first, so those pixels are not recoloured on top of that template. Supports use `WithPrimary` when `supportsHavePrimaryColour` is set, unless the image template is already a remap (`PaintSmallScenerySupports`).
 
-Decoded DAT heuristic: `BRBASE` (remap flagged) has ~1537 primary-range bytes per sprite; `TBN`/`TERS` (no remap flags) have ~0–2—safe “baked colour” candidates.
+A byte-count comparison of decoded `BRBASE` against `TBN` / `TERS` is **unverified** (the DAT files are not in this repo).
 
-**GLB conversion implications:**
+Consequences of the palette and paint code for a later mesh conversion:
 
-1. Must decode paletted G1 → RGBA using the game palette; treat 0 / RLE gaps as alpha.
-2. Remap-index pixels are **placeholders**, not final colours—either bake a default colour map or keep remap masks/materials for runtime tinting.
-3. Glass / overlay / animated / withering objects need extra images or layers—poor first conversion targets.
-4. Nearest-neighbour / sprite-scale fidelity matters (Blender agent guidance).
+1. Paletted G1 has to be decoded with the game palette. Index 0 is the named transparent index; the `hasTransparency` comment names `0xFF` for that flag.
+2. Remap-range pixels are palette slots, not a finished RGB colour.
+3. Glass, overlay, animated, and withering objects use extra images beyond the four direction slots.
 
----
+## 6. Small conversion candidates
 
-## 6. Good small conversion candidates
+Prefer objects whose paint path is `image + direction` only: no animation, glass, or overlay, no primary remap, and shape `1/4` or `4/4`. The rows below are the unverified examples from section 2. They are not confirmed against files in this repo.
 
-Prefer: `[0..3]` only, no animation/glass/overlay, no primary remap, small bounding boxes, `shape` `1/4` or simple `4/4`.
-
-| Priority | Object ID | Path(s) | Why |
+| Priority | Object ID | Example path | Why (unverified sizes) |
 | --- | --- | --- | --- |
-| 1 | `rct2.scenery_small.tbn` | JSON `rct2/scenery_small/rct2.scenery_small.tbn.json`; DAT `/opt/rct2/ObjData/TBN.DAT` | Tiny asymmetric bone; 4 clear views; ~12–17×30–35 |
-| 2 | `rct2.scenery_small.tml` | `…/rct2.scenery_small.tml.json`; `TML.DAT` | Logs; ~23×18 |
-| 3 | `rct2.scenery_small.ters` | `…ters.json`; `TERS.DAT` | Ruined statue; ~30×20 |
-| 4 | `rct2.scenery_small.tcd` | `…tcd.json`; `TCD.DAT` | Cauldron; ~24×24 |
-| 5 | `rct2.scenery_small.tdm` | `…tdm.json`; `TDM.DAT` | Small prop; ~17×32 |
-| 6 | `rct2.scenery_small.tq1` | `…tq1.json`; `TQ1.DAT` | Chess queen; identical 20×49 frames—good symmetry check |
-| Optional harder | `rct2.scenery_small.ts0` / `tm0` / `tl0` | `TS0.DAT` / `TM0.DAT` / `TL0.DAT` | Trees; larger; organic silhouette |
-| Remap test (later) | `official.scenery_small.support_structure_half` | parkobj in objects.zip | Clean 64×48 LGX + `hasPrimaryColour` |
+| 1 | `rct2.scenery_small.tbn` | example `TBN.DAT` under `/opt/rct2/ObjData` | Tiny asymmetric bone; 4 views; ~12–17×30–35 |
+| 2 | `rct2.scenery_small.tml` | example `TML.DAT` | Logs; ~23×18 |
+| 3 | `rct2.scenery_small.ters` | example `TERS.DAT` | Ruined statue; ~30×20 |
+| 4 | `rct2.scenery_small.tcd` | example `TCD.DAT` | Cauldron; ~24×24 |
+| 5 | `rct2.scenery_small.tdm` | example `TDM.DAT` | Small prop; ~17×32. Not in the size table above; **unverified** |
+| 6 | `rct2.scenery_small.tq1` | example `TQ1.DAT` | Chess queen; identical 20×49 frames |
+| Optional harder | `rct2.scenery_small.ts0` / `tm0` / `tl0` | example `TS0.DAT` / `TM0.DAT` / `TL0.DAT` | Trees; larger |
+| Remap test (later) | `official.scenery_small.support_structure_half` | parkobj inside objects.zip (**unverified**) | 64×48 and `hasPrimaryColour` |
 
-Avoid initially: `tck` (clock, 116 images), fountains, glass, wither trees, anything with `hasPrimaryColour` until remap strategy exists.
-
----
+The clock paint path indexes through `image + 115`. Which object id that is, and whether it stores 116 images, is **unverified**.
 
 ## Key source files
 
-- `src/openrct2/world/MapLimits.h` — coordinate constants  
-- `src/openrct2/object/SmallSceneryObject.cpp`, `SmallSceneryEntry.h`  
-- `src/openrct2/object/ImageTable.cpp` — image ref syntax / G1 load  
-- `src/openrct2/paint/tile_element/Paint.SmallScenery.cpp` — `image + direction`  
-- `src/openrct2/drawing/G1Element.h`, `PaletteIndex.h`, `ImageId.hpp`  
-- `src/openrct2/interface/Viewport.cpp` — `Translate3DTo2DWithZ`  
-- Branches: `origin/3d`, `origin/view3d`, `origin/seifer7-image-to-blender`
+- `src/openrct2/world/MapLimits.h` — coordinate constants
+- `src/openrct2/object/SmallSceneryObject.cpp`, `SmallSceneryEntry.h`
+- `src/openrct2/object/ImageTable.cpp` — image ref syntax and G1 load
+- `src/openrct2/paint/tile_element/Paint.SmallScenery.cpp` — `image + direction`
+- `src/openrct2/paint/tile_element/Paint.TileElement.cpp` — `getDirectionWithOffset(rotation)`
+- `src/openrct2/drawing/G1Element.h`, `PaletteIndex.h`, `ImageId.hpp`
+- `src/openrct2/interface/Viewport.cpp` — `Translate3DTo2DWithZ`
+- `docs/3d-viewer.md`, `src/openrct2-3d/` — 3D view on `develop`

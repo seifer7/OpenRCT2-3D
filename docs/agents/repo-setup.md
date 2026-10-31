@@ -39,5 +39,5 @@ From the previous project, and in scope only as this decision: 3D scenery and ob
 
 ## What does not match
 
-- `AGENTS.md` still calls this branch `3d`. There is no `3d` branch. The squashed commit and the PR base are `develop`.
+- There is no `3d` branch. `AGENTS.md` on `develop` refers to `develop`. The PR base is `develop`.
 - Submodule paths and pins match. Their contents are missing from the working tree (not an auth or branch failure).

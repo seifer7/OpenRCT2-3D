@@ -1,6 +1,6 @@
 # OpenRCT2 3D
 
-This branch (`3d`) is an attempt to add a 3D viewing mode to OpenRCT2. Read [docs/3d-viewer.md](docs/3d-viewer.md) before changing rendering, the viewport, or the frame loop. That document is the memory of the decisions already made.
+This branch (`develop`) is an attempt to add a 3D viewing mode to OpenRCT2. Read [docs/3d-viewer.md](docs/3d-viewer.md) before changing rendering, the viewport, or the frame loop. That document is the memory of the decisions already made.
 
 ## Rule
 

@@ -8,6 +8,7 @@ taskPrefix: RCT
 
 ### In Progress
 - [ ] **RCT-4** Commit agent notes to the repo [Agent working notes](bc-a3eabb6a-577f-567f-87c5-c3d28db75196) [#3](https://github.com/seifer7/OpenRCT2-3D/pull/3)
+- [ ] **RCT-5** Save GLB pipeline recommendation
 
 ### Done
 - [x] **RCT-1** Confirm repo access and record setup [Setup](/cursor/stores/self/docs/project-context.md)

@@ -58,5 +58,7 @@ namespace OpenRCT2::Ui
 
         void ApplyTransparency(ApplyTransparencyShader& shader, GLuint paletteTex, GLuint blendPaletteTex);
         void Clear();
+        // The rect shader discards palette index 0, so a transparent fill leaves the previous frame in place.
+        void ClearColour();
     };
 } // namespace OpenRCT2::Ui

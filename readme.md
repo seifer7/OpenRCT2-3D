@@ -6,9 +6,9 @@
   </a>
 </p>
 
-<h1 align="center">OpenRCT2</h1>
+<h1 align="center">OpenRCT2 3D</h1>
 
-<h3 align="center">An open-source re-implementation of RollerCoaster Tycoon 2, a construction and management simulation video game that simulates amusement park management.</h3>
+<h3 align="center">An attempt to build a 3D version of RollerCoaster Tycoon 2. The original 2D game stays, and the View menu can switch the park to 3D.</h3>
 
 ---
 
@@ -62,6 +62,10 @@ If you want to help translate the game to your language, please stop by the Loca
 ---
 
 # 1. Introduction
+
+**This project is an attempt to build a 3D version of RollerCoaster Tycoon 2.** It is based on OpenRCT2. The original 2D renderer remains the normal way to play, and it must keep working. Guests, rides, park economy, and the original game tick stay in that simulation. The View menu gains an option that switches the main park view to 3D, drawn with the existing [bgfx](https://github.com/bkaradzic/bgfx) renderer, and switches it back to the original 2D renderer. The original interface stays. In 3D it is drawn over the view, with the main park viewport left transparent. Implementation notes are in [docs/3d-viewer.md](docs/3d-viewer.md).
+
+The paragraphs below describe the OpenRCT2 simulation this fork builds on.
 
 **OpenRCT2** is an open-source re-implementation of RollerCoaster Tycoon 2 (RCT2). The gameplay revolves around building and maintaining an amusement park containing attractions, shops and facilities. The player must try to make a profit and maintain a good park reputation whilst keeping the guests happy. OpenRCT2 allows for both scenario and sandbox play. Scenarios require the player to complete a certain objective in a set time limit whilst sandbox allows the player to build a more flexible park with optionally no restrictions or finance.
 

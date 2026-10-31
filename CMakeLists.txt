@@ -395,6 +395,10 @@ include("${ROOT_DIR}/src/openrct2/CMakeLists.txt" NO_POLICY_SCOPE)
 include("${ROOT_DIR}/src/openrct2-cli/CMakeLists.txt" NO_POLICY_SCOPE)
 if(NOT DISABLE_GUI)
     include("${ROOT_DIR}/src/openrct2-ui/CMakeLists.txt" NO_POLICY_SCOPE)
+    # The web build does not use the desktop 3D viewer.
+    if(NOT EMSCRIPTEN)
+        add_subdirectory("${ROOT_DIR}/src/openrct2-3d")
+    endif()
 endif()
 
 # graphics files (g2.dat, fonts.dat, palettes.dat, tracks.dat)

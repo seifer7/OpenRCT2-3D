@@ -13,11 +13,19 @@
 #include <SDL_render.h>
 #include <SDL_version.h>
 #include <cmath>
+#include <cstddef>
+#include <cstdio>
+#include <cstring>
 #include <memory>
+#include <openrct2-ui/drawing/View3D.h>
 #include <openrct2/Diagnostic.h>
 #include <openrct2/Game.h>
 #include <openrct2/config/Config.h>
 #include <openrct2/core/Guard.hpp>
+#include <openrct2/drawing/PaletteType.h>
+#include <openrct2/drawing/Palette.h>
+#include <openrct2/drawing/Drawing.h>
+#include <openrct2/drawing/Drawing.Screen.h>
 #include <openrct2/drawing/IDrawingEngine.h>
 #include <openrct2/drawing/LightFX.h>
 #include <openrct2/drawing/X8DrawingEngine.h>
@@ -25,6 +33,12 @@
 #include <openrct2/paint/Paint.h>
 #include <openrct2/ui/UiContext.h>
 #include <vector>
+
+static_assert(sizeof(OpenRCT2::View3D::ColourBGRA) == sizeof(OpenRCT2::Drawing::BGRAColour));
+static_assert(offsetof(OpenRCT2::View3D::ColourBGRA, blue) == offsetof(OpenRCT2::Drawing::BGRAColour, blue));
+static_assert(offsetof(OpenRCT2::View3D::ColourBGRA, green) == offsetof(OpenRCT2::Drawing::BGRAColour, green));
+static_assert(offsetof(OpenRCT2::View3D::ColourBGRA, red) == offsetof(OpenRCT2::Drawing::BGRAColour, red));
+static_assert(offsetof(OpenRCT2::View3D::ColourBGRA, alpha) == offsetof(OpenRCT2::Drawing::BGRAColour, alpha));
 
 using namespace OpenRCT2;
 using namespace OpenRCT2::Drawing;
@@ -61,16 +75,8 @@ public:
 
     ~HardwareDisplayDrawingEngine() override
     {
-        if (_screenTexture != nullptr)
-        {
-            SDL_DestroyTexture(_screenTexture);
-        }
-        if (_scaledScreenTexture != nullptr)
-        {
-            SDL_DestroyTexture(_scaledScreenTexture);
-        }
-        SDL_FreeFormat(_screenTextureFormat);
-        SDL_DestroyRenderer(_sdlRenderer);
+        View3D::shutdown();
+        releaseGpuDisplay();
     }
 
     void Initialise() override
@@ -83,6 +89,10 @@ public:
         if (_useVsync != vsync)
         {
             _useVsync = vsync;
+            if (_sdlRenderer == nullptr)
+            {
+                return;
+            }
 #if SDL_VERSION_ATLEAST(2, 0, 18)
             SDL_RenderSetVSync(_sdlRenderer, vsync ? 1 : 0);
 #else
@@ -102,18 +112,39 @@ public:
             return;
         }
 
+        // The 3D view owns the window's GL context, so the indexed buffer is resized without an SDL texture.
+        if (_sdlRenderer == nullptr)
+        {
+            X8DrawingEngine::Resize(width, height);
+            return;
+        }
+
+        if (!createScreenTexture(width, height))
+        {
+            return;
+        }
+        X8DrawingEngine::Resize(width, height);
+    }
+
+    bool createScreenTexture(uint32_t width, uint32_t height)
+    {
         if (_screenTexture != nullptr)
         {
             SDL_DestroyTexture(_screenTexture);
+            _screenTexture = nullptr;
         }
-        SDL_FreeFormat(_screenTextureFormat);
+        if (_screenTextureFormat != nullptr)
+        {
+            SDL_FreeFormat(_screenTextureFormat);
+            _screenTextureFormat = nullptr;
+        }
 
         SDL_RendererInfo rendererInfo = {};
         int32_t result = SDL_GetRendererInfo(_sdlRenderer, &rendererInfo);
         if (result < 0)
         {
             LOG_WARNING("HWDisplayDrawingEngine::Resize error: %s", SDL_GetError());
-            return;
+            return false;
         }
         uint32_t pixelFormat = SDL_PIXELFORMAT_UNKNOWN;
         for (uint32_t i = 0; i < rendererInfo.num_texture_formats; i++)
@@ -142,6 +173,7 @@ public:
             if (_scaledScreenTexture != nullptr)
             {
                 SDL_DestroyTexture(_scaledScreenTexture);
+                _scaledScreenTexture = nullptr;
             }
 
             char scaleQualityBuffer[4];
@@ -175,8 +207,45 @@ public:
         uint32_t format;
         SDL_QueryTexture(_screenTexture, &format, nullptr, nullptr, nullptr);
         _screenTextureFormat = SDL_AllocFormat(format);
+        return true;
+    }
 
-        X8DrawingEngine::Resize(width, height);
+    void releaseGpuDisplay()
+    {
+        if (_screenTexture != nullptr)
+        {
+            SDL_DestroyTexture(_screenTexture);
+            _screenTexture = nullptr;
+        }
+        if (_scaledScreenTexture != nullptr)
+        {
+            SDL_DestroyTexture(_scaledScreenTexture);
+            _scaledScreenTexture = nullptr;
+        }
+        if (_screenTextureFormat != nullptr)
+        {
+            SDL_FreeFormat(_screenTextureFormat);
+            _screenTextureFormat = nullptr;
+        }
+        if (_sdlRenderer != nullptr)
+        {
+            SDL_DestroyRenderer(_sdlRenderer);
+            _sdlRenderer = nullptr;
+        }
+    }
+
+    void restoreGpuDisplay()
+    {
+        if (_sdlRenderer != nullptr || _width == 0 || _height == 0)
+        {
+            return;
+        }
+        Initialise();
+        if (_sdlRenderer == nullptr || !createScreenTexture(_width, _height))
+        {
+            return;
+        }
+        SetPalette(gPalette);
     }
 
     void SetPalette(const GamePalette& palette) override
@@ -202,6 +271,12 @@ public:
 
     void BeginDraw() override
     {
+        // The main viewport is not repainted while the 3D view is on, so mark it dirty every frame and the
+        // window fill keeps palette index 0 in the park area.
+        if (View3D::isActive())
+        {
+            GfxInvalidateScreen();
+        }
         X8DrawingEngine::BeginDraw();
     }
 
@@ -233,25 +308,122 @@ protected:
     }
 
 private:
+    bool rendererIsOpenGL() const
+    {
+        if (_sdlRenderer == nullptr)
+        {
+            return false;
+        }
+        SDL_RendererInfo info{};
+        if (SDL_GetRendererInfo(_sdlRenderer, &info) != 0 || info.name == nullptr)
+        {
+            return false;
+        }
+        return std::strncmp(info.name, "opengl", 6) == 0;
+    }
+
+    void logRendererOnce()
+    {
+        static bool logged = false;
+        if (logged || !View3D::isActive() || _sdlRenderer == nullptr)
+        {
+            return;
+        }
+        logged = true;
+        SDL_RendererInfo info{};
+        const char* name = "unknown";
+        if (SDL_GetRendererInfo(_sdlRenderer, &info) == 0 && info.name != nullptr)
+        {
+            name = info.name;
+        }
+        std::fprintf(stderr, "View3D: SDL renderer is %s\n", name);
+    }
+
     void Display()
     {
-        auto* viewport = WindowGetViewport(WindowGetMain());
+        logRendererOnce();
 
-        if (Config::Get().general.enableLightFx && viewport != nullptr)
+        // OpenGL hardware display (Linux) hands the game window to bgfx. That path already showed the park.
+        // Direct3D (the Windows default) keeps its presenter and copies the frame in: replacing that window
+        // with GL freezes the last picture, and tearing the context down on toggle-off stalls the process.
+        const bool handWindowToBgfx = _sdlRenderer == nullptr || rendererIsOpenGL();
+        if (handWindowToBgfx && (View3D::hasDevice() || (View3D::isActive() && !View3D::hasFailed())))
         {
-            void* pixels;
-            int32_t pitch;
-            if (SDL_LockTexture(_screenTexture, nullptr, &pixels, &pitch) == 0)
+            if (_sdlRenderer != nullptr)
             {
-                LightFx::RenderToTexture(
-                    *viewport, pixels, pitch, _bits, _width, _height, _paletteHWMapped, _lightPaletteHWMapped);
-                SDL_UnlockTexture(_screenTexture);
+                releaseGpuDisplay();
+            }
+            const bool presented = View3D::present(
+                _window, reinterpret_cast<const uint8_t*>(_bits), static_cast<int32_t>(_width), static_cast<int32_t>(_height),
+                static_cast<int32_t>(_pitch), reinterpret_cast<const View3D::ColourBGRA*>(gPalette.data()), nullptr,
+                View3D::isActive());
+            if (presented)
+            {
+                return;
+            }
+            if (_sdlRenderer == nullptr)
+            {
+                restoreGpuDisplay();
             }
         }
-        else
+        else if (handWindowToBgfx && !View3D::isActive() && View3D::hasFailed())
         {
-            CopyBitsToTexture(
-                _screenTexture, _bits, static_cast<int32_t>(_width), static_cast<int32_t>(_height), _paletteHWMapped);
+            View3D::shutdown();
+            if (_sdlRenderer == nullptr)
+            {
+                restoreGpuDisplay();
+            }
+        }
+        else if (!handWindowToBgfx && !View3D::isActive() && View3D::hasFailed() && !View3D::hasDevice())
+        {
+            View3D::shutdown();
+        }
+
+        if (_sdlRenderer == nullptr || _screenTexture == nullptr)
+        {
+            if (_sdlRenderer == nullptr)
+            {
+                restoreGpuDisplay();
+            }
+            if (_sdlRenderer == nullptr || _screenTexture == nullptr)
+            {
+                return;
+            }
+        }
+
+        bool showed3d = false;
+        if (!handWindowToBgfx && View3D::isActive() && !View3D::hasFailed())
+        {
+            std::vector<uint8_t> rgba(static_cast<size_t>(_width) * _height * 4);
+            showed3d = View3D::capture(
+                _window, reinterpret_cast<const uint8_t*>(_bits), static_cast<int32_t>(_width), static_cast<int32_t>(_height),
+                static_cast<int32_t>(_pitch), reinterpret_cast<const View3D::ColourBGRA*>(gPalette.data()), rgba.data());
+            if (showed3d)
+            {
+                CopyRgbaToTexture(_screenTexture, rgba.data(), static_cast<int32_t>(_width), static_cast<int32_t>(_height));
+            }
+        }
+
+        if (!showed3d)
+        {
+            auto* viewport = WindowGetViewport(WindowGetMain());
+
+            if (Config::Get().general.enableLightFx && viewport != nullptr)
+            {
+                void* pixels;
+                int32_t pitch;
+                if (SDL_LockTexture(_screenTexture, nullptr, &pixels, &pitch) == 0)
+                {
+                    LightFx::RenderToTexture(
+                        *viewport, pixels, pitch, _bits, _width, _height, _paletteHWMapped, _lightPaletteHWMapped);
+                    SDL_UnlockTexture(_screenTexture);
+                }
+            }
+            else
+            {
+                CopyBitsToTexture(
+                    _screenTexture, _bits, static_cast<int32_t>(_width), static_cast<int32_t>(_height), _paletteHWMapped);
+            }
         }
         if (smoothNN)
         {
@@ -272,6 +444,32 @@ private:
         }
 
         SDL_RenderPresent(_sdlRenderer);
+    }
+
+    void CopyRgbaToTexture(SDL_Texture* texture, const uint8_t* rgba, int32_t width, int32_t height)
+    {
+        void* pixels;
+        int32_t pitch;
+        if (SDL_LockTexture(texture, nullptr, &pixels, &pitch) != 0 || _screenTextureFormat == nullptr)
+        {
+            return;
+        }
+
+        const int32_t bytesPerPixel = static_cast<int32_t>(_screenTextureFormat->BytesPerPixel);
+        auto* dstBytes = static_cast<uint8_t*>(pixels);
+        for (int32_t y = 0; y < height; y++)
+        {
+            uint8_t* row = dstBytes + static_cast<ptrdiff_t>(y) * pitch;
+            const uint8_t* src = rgba + static_cast<ptrdiff_t>(y) * width * 4;
+            for (int32_t x = 0; x < width; x++)
+            {
+                const uint32_t mapped = SDL_MapRGBA(_screenTextureFormat, src[0], src[1], src[2], src[3]);
+                std::memcpy(row, &mapped, static_cast<size_t>(bytesPerPixel));
+                row += bytesPerPixel;
+                src += 4;
+            }
+        }
+        SDL_UnlockTexture(texture);
     }
 
     void CopyBitsToTexture(SDL_Texture* texture, PaletteIndex* src, int32_t width, int32_t height, const uint32_t* palette)

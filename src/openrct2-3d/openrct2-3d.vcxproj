@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!--
+    Static library for the 3D view. Visual Studio builds this with the rest of openrct2.sln.
+    bx and bgfx are their amalgamated sources. bimg is image.cpp only, which is what bgfx links.
+    Only the OpenGL renderer is compiled. The viewer creates an OpenGL context on the SDL window,
+    and the other bgfx backends would pull in Direct3D, Vulkan, and WebGPU.
+  -->
+  <PropertyGroup>
+    <SolutionDir Condition="'$(SolutionDir)'==''">..\..\</SolutionDir>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|arm64">
+      <Configuration>Debug</Configuration>
+      <Platform>arm64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="ReleaseLTCG|arm64">
+      <Configuration>ReleaseLTCG</Configuration>
+      <Platform>arm64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="ReleaseLTCG|Win32">
+      <Configuration>ReleaseLTCG</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="ReleaseLTCG|x64">
+      <Configuration>ReleaseLTCG</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|arm64">
+      <Configuration>Release</Configuration>
+      <Platform>arm64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{3D4E8A21-6B17-4F0C-9C55-A1E2D83F70B4}</ProjectGuid>
+    <RootNamespace>openrct2-3d</RootNamespace>
+    <ProjectName>openrct2-3d</ProjectName>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+  </PropertyGroup>
+  <Import Project="..\..\openrct2.common.props" />
+  <!--
+    The rest of this solution finds headers through IncludePath. MSBuildThisFileDirectory is the
+    directory of this vcxproj, with a trailing slash, so these paths stay absolute.
+  -->
+  <PropertyGroup>
+    <View3DIncludes>$(MSBuildThisFileDirectory)src;$(MSBuildThisFileDirectory)third_party\bgfx\include;$(MSBuildThisFileDirectory)third_party\bgfx\3rdparty;$(MSBuildThisFileDirectory)third_party\bgfx\3rdparty\khronos;$(MSBuildThisFileDirectory)third_party\bx\include;$(MSBuildThisFileDirectory)third_party\bx\3rdparty;$(MSBuildThisFileDirectory)third_party\bx\include\compat\msvc;$(MSBuildThisFileDirectory)third_party\bimg\include</View3DIncludes>
+    <IncludePath>$(View3DIncludes);$(IncludePath)</IncludePath>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <!-- bgfx headers warn under the solution's warnings-as-errors setting. -->
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <AdditionalOptions>/Zc:__cplusplus /Zc:preprocessor %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(View3DIncludes);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;__STDC_CONSTANT_MACROS;BGFX_CONFIG_RENDERER_OPENGL=43;BGFX_CONFIG_MULTITHREADED=1;BGFX_CONFIG_VIDEO=0;BIMG_CONFIG_DECODE_ASTC=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)'=='Debug'">BX_CONFIG_DEBUG=1;BGFX_CONFIG_DEBUG_ANNOTATION=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)'!='Debug'">BX_CONFIG_DEBUG=0;BGFX_CONFIG_DEBUG_ANNOTATION=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Lib>
+      <TargetMachine Condition="'$(Platform)'=='Win32'">MachineX86</TargetMachine>
+      <TargetMachine Condition="'$(Platform)'=='x64'">MachineX64</TargetMachine>
+      <TargetMachine Condition="'$(Platform)'=='arm64'">MachineARM64</TargetMachine>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="src\BgfxRenderer.hpp" />
+    <ClInclude Include="src\ParkView.hpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\BgfxRenderer.cpp" />
+    <ClCompile Include="src\ParkView.cpp" />
+    <ClCompile Include="src\View3D.cpp" />
+    <ClCompile Include="third_party\bimg\src\image.cpp">
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="third_party\bgfx\src\amalgamated.cpp">
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <ObjectFileName>$(IntDir)bgfx_amalgamated.obj</ObjectFileName>
+      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="third_party\bx\src\amalgamated.cpp">
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <ObjectFileName>$(IntDir)bx_amalgamated.obj</ObjectFileName>
+      <ExceptionHandling>false</ExceptionHandling>
+      <PreprocessorDefinitions>_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\openrct2-deps\openrct2-deps.vcxproj">
+      <Project>{c453da76-44b3-4ac8-aaa2-2b64a76993a5}</Project>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="InitView3DSubmodules" Condition="!Exists('$(MSBuildThisFileDirectory)third_party\bgfx\include\bgfx\bgfx.h') Or !Exists('$(MSBuildThisFileDirectory)third_party\bx\include\bx\bx.h') Or !Exists('$(MSBuildThisFileDirectory)third_party\bimg\include\bimg\bimg.h')">
+    <PropertyGroup>
+      <View3DGit Condition="'$(View3DGit)' == '' and Exists('$(ProgramW6432)\Git\cmd\git.exe')">$(ProgramW6432)\Git\cmd\git.exe</View3DGit>
+      <View3DGit Condition="'$(View3DGit)' == '' and Exists('$(ProgramFiles)\Git\cmd\git.exe')">$(ProgramFiles)\Git\cmd\git.exe</View3DGit>
+      <View3DGit Condition="'$(View3DGit)' == '' and Exists('$(VsInstallRoot)\Common7\IDE\CommonExtensions\Microsoft\TeamFoundation\Team Explorer\Git\cmd\git.exe')">$(VsInstallRoot)\Common7\IDE\CommonExtensions\Microsoft\TeamFoundation\Team Explorer\Git\cmd\git.exe</View3DGit>
+      <View3DGit Condition="'$(View3DGit)' == ''">git</View3DGit>
+    </PropertyGroup>
+    <Message Importance="high" Text="Fetching bx, bimg, and bgfx. These are git submodules and are not in the clone until this step." />
+    <Exec Command="&quot;$(View3DGit)&quot; -C &quot;$(MSBuildThisFileDirectory)..\..&quot; submodule update --init -- src/openrct2-3d/third_party/bx src/openrct2-3d/third_party/bimg src/openrct2-3d/third_party/bgfx src/openrct2-3d/third_party/bgfx.cmake" />
+  </Target>
+  <Target Name="CheckView3DSources" BeforeTargets="PrepareForBuild" DependsOnTargets="InitView3DSubmodules">
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)third_party\bgfx\include\bgfx\bgfx.h')" Text="bgfx headers are still missing at $(MSBuildThisFileDirectory)third_party\bgfx\include\bgfx\bgfx.h. The fetch step did not populate the submodule. From the repository root, run: git submodule update --init -- src/openrct2-3d/third_party/bx src/openrct2-3d/third_party/bimg src/openrct2-3d/third_party/bgfx" />
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)third_party\bx\include\bx\bx.h')" Text="bx headers are still missing at $(MSBuildThisFileDirectory)third_party\bx\include\bx\bx.h. From the repository root, run: git submodule update --init -- src/openrct2-3d/third_party/bx src/openrct2-3d/third_party/bimg src/openrct2-3d/third_party/bgfx" />
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)third_party\bimg\include\bimg\bimg.h')" Text="bimg headers are still missing at $(MSBuildThisFileDirectory)third_party\bimg\include\bimg\bimg.h. From the repository root, run: git submodule update --init -- src/openrct2-3d/third_party/bx src/openrct2-3d/third_party/bimg src/openrct2-3d/third_party/bgfx" />
+  </Target>
+</Project>

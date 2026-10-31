@@ -9,11 +9,13 @@
 
 #include "MouseInput.h"
 
+#include <SDL.h>
 #include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <iterator>
 #include <openrct2-ui/UiContext.h>
+#include <openrct2-ui/drawing/View3D.h>
 #include <openrct2-ui/input/InputManager.h>
 #include <openrct2-ui/interface/Dropdown.h>
 #include <openrct2-ui/interface/ViewportInteraction.h>
@@ -587,7 +589,20 @@ namespace OpenRCT2
         }
         else if (differentialCoords.x != 0 || differentialCoords.y != 0)
         {
-            if (!w->flags.has(WindowFlag::noScrolling))
+            if (View3D::isActive() && w->classification == WindowClass::mainWindow)
+            {
+                _ticksSinceDragStart = std::nullopt;
+                int32_t dx = differentialCoords.x;
+                int32_t dy = differentialCoords.y;
+                if (Config::Get().general.invertViewportDrag)
+                {
+                    dx = -dx;
+                    dy = -dy;
+                }
+                const auto modifiers = SDL_GetModState();
+                View3D::cameraDrag(dx, dy, (modifiers & KMOD_SHIFT) != 0, (modifiers & KMOD_CTRL) != 0);
+            }
+            else if (!w->flags.has(WindowFlag::noScrolling))
             {
                 // User dragged a scrollable viewport
 
@@ -1648,6 +1663,10 @@ namespace OpenRCT2
 
     void InputScrollViewport(const ScreenCoordsXY& scrollScreenCoords)
     {
+        // Arrow keys and the screen edge move the 2D viewport. The 3D camera has its own controls.
+        if (View3D::isActive())
+            return;
+
         WindowBase* mainWindow = WindowGetMain();
         if (mainWindow == nullptr)
             return;
@@ -1727,6 +1746,10 @@ namespace OpenRCT2
         }
 
         if (targetWindow->flags.has(WindowFlag::noScrolling))
+        {
+            return;
+        }
+        if (View3D::isActive() && targetWindow->classification == WindowClass::mainWindow)
         {
             return;
         }

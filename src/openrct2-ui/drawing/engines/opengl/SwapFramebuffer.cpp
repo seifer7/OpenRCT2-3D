@@ -63,4 +63,10 @@ void SwapFramebuffer::Clear()
     glCall(glClearBufferfv, GL_DEPTH, 0, kDepthValue);
 }
 
+void SwapFramebuffer::ClearColour()
+{
+    _opaqueFramebuffer.Bind();
+    glCall(glClearBufferuiv, GL_COLOR, 0, kIndexValue);
+}
+
 #endif /* DISABLE_OPENGL */

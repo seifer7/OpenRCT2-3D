@@ -191,8 +191,9 @@ namespace OpenRCT2::Ui
 
     inline void CheckGLError()
     {
+        // With no current context, glGetError keeps returning INVALID_OPERATION and this loop never ends.
         GLenum error = glGetError();
-        while (error != GL_NO_ERROR)
+        for (int guard = 0; error != GL_NO_ERROR && guard < 8; ++guard)
         {
             LOG_ERROR("OpenGL Error 0x%04X", error);
             error = glGetError();

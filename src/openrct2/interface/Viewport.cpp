@@ -501,6 +501,16 @@ namespace OpenRCT2
         }
     }
 
+    namespace
+    {
+        bool _mainScrollSuppressed = false;
+    }
+
+    void ViewportSetMainScrollSuppressed(bool suppressed)
+    {
+        _mainScrollSuppressed = suppressed;
+    }
+
     /**
      *
      *  rct2: 0x006E7A3A
@@ -513,6 +523,9 @@ namespace OpenRCT2
 
         Viewport* viewport = window->viewport;
         if (viewport == nullptr)
+            return;
+
+        if (_mainScrollSuppressed && window->classification == WindowClass::mainWindow)
             return;
 
         if (!window->viewportSmartFollowSprite.IsNull())

@@ -815,6 +815,11 @@ private:
         if (Config::Get().general.drawingEngine == DrawingEngine::openGL)
         {
             flags |= SDL_WINDOW_OPENGL;
+#if defined(__linux__) && !defined(__ANDROID__)
+            // bgfx's Linux OpenGL backend is EGL and borrows this window's context for the 3D view.
+            // The hint has to be set before the window exists, or SDL stays on GLX.
+            SDL_SetHint(SDL_HINT_VIDEO_X11_FORCE_EGL, "1");
+#endif
         }
 
         _window = SDL_CreateWindow(OPENRCT2_NAME, windowPos.x, windowPos.y, width, height, flags);

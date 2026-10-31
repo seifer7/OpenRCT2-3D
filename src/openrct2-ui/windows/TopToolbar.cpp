@@ -11,6 +11,7 @@
 #include "../interface/InGameConsole.h"
 #include "../scripting/CustomMenu.h"
 
+#include <openrct2-ui/drawing/View3D.h>
 #include <openrct2-ui/interface/Chat.h>
 #include <openrct2-ui/interface/Dropdown.h>
 #include <openrct2-ui/interface/Widget.h>
@@ -31,6 +32,7 @@
 #include <openrct2/config/Config.h>
 #include <openrct2/core/Numerics.hpp>
 #include <openrct2/core/String.hpp>
+#include <openrct2/drawing/Drawing.Screen.h>
 #include <openrct2/drawing/Drawing.h>
 #include <openrct2/drawing/Text.h>
 #include <openrct2/interface/ColourWithFlags.h>
@@ -133,6 +135,8 @@ namespace OpenRCT2::Ui::Windows
         DDIDX_HIGHLIGHT_PATH_ISSUES = 19,
         // separator
         DDIDX_TRANSPARENCY = 21,
+        // separator
+        DDIDX_VIEW_3D = 23,
 
         TOP_TOOLBAR_VIEW_MENU_COUNT,
     };
@@ -300,6 +304,8 @@ namespace OpenRCT2::Ui::Windows
                 ToggleOption(DDIDX_HIGHLIGHT_PATH_ISSUES, STR_HIGHLIGHT_PATH_ISSUES_MENU),
                 ExtSeparator(),
                 ToggleOption(DDIDX_TRANSPARENCY, STR_TRANSPARENCY_OPTIONS),
+                ExtSeparator(),
+                ToggleOption(DDIDX_VIEW_3D, STR_VIEW_3D),
             };
 
             static_assert(ItemIDsMatchIndices(items));
@@ -328,6 +334,7 @@ namespace OpenRCT2::Ui::Windows
             gDropdown.items[DDIDX_PATH_HEIGHTS].setChecked(mvpFlags.has(ViewportFlag::pathHeights));
             gDropdown.items[DDIDX_VIEW_CLIPPING].setChecked(mvpFlags.has(ViewportFlag::clipView));
             gDropdown.items[DDIDX_HIGHLIGHT_PATH_ISSUES].setChecked(mvpFlags.has(ViewportFlag::highlightPathIssues));
+            gDropdown.items[DDIDX_VIEW_3D].setChecked(View3D::isActive());
 
             gDropdown.defaultIndex = DDIDX_UNDERGROUND_INSIDE;
         }
@@ -404,6 +411,10 @@ namespace OpenRCT2::Ui::Windows
                         break;
                     case DDIDX_TRANSPARENCY:
                         ContextOpenWindow(WindowClass::transparency);
+                        break;
+                    case DDIDX_VIEW_3D:
+                        View3D::toggle();
+                        Drawing::GfxInvalidateScreen();
                         break;
                     default:
                         return;
@@ -811,10 +822,24 @@ namespace OpenRCT2::Ui::Windows
                         WindowZoomIn(*mainWindow, false);
                     break;
                 case WIDX_ROTATE_CLOCKWISE:
-                    ViewportRotateAll(1);
+                    if (View3D::isActive())
+                    {
+                        View3D::cameraTurnQuarter(1);
+                    }
+                    else
+                    {
+                        ViewportRotateAll(1);
+                    }
                     break;
                 case WIDX_ROTATE_ANTI_CLOCKWISE:
-                    ViewportRotateAll(-1);
+                    if (View3D::isActive())
+                    {
+                        View3D::cameraTurnQuarter(-1);
+                    }
+                    else
+                    {
+                        ViewportRotateAll(-1);
+                    }
                     break;
                 case WIDX_CLEAR_SCENERY:
                     ToggleClearSceneryWindow();

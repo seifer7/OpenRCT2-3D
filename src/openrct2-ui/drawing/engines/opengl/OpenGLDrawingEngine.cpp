@@ -27,7 +27,11 @@
     #include <algorithm>
     #include <cassert>
     #include <cmath>
+    #include <cstddef>
+    #include <cstdio>
+    #include <openrct2-ui/drawing/View3D.h>
     #include <openrct2/config/Config.h>
+    #include <openrct2/drawing/Drawing.Screen.h>
     #include <openrct2/drawing/Drawing.Sprite.h>
     #include <openrct2/drawing/Drawing.String.h>
     #include <openrct2/drawing/Drawing.h>
@@ -42,6 +46,13 @@
     #include <openrct2/interface/Window.h>
     #include <openrct2/ui/UiContext.h>
     #include <openrct2/world/Weather.h>
+    #include <vector>
+
+static_assert(sizeof(OpenRCT2::View3D::ColourBGRA) == sizeof(OpenRCT2::Drawing::BGRAColour));
+static_assert(offsetof(OpenRCT2::View3D::ColourBGRA, blue) == offsetof(OpenRCT2::Drawing::BGRAColour, blue));
+static_assert(offsetof(OpenRCT2::View3D::ColourBGRA, green) == offsetof(OpenRCT2::Drawing::BGRAColour, green));
+static_assert(offsetof(OpenRCT2::View3D::ColourBGRA, red) == offsetof(OpenRCT2::Drawing::BGRAColour, red));
+static_assert(offsetof(OpenRCT2::View3D::ColourBGRA, alpha) == offsetof(OpenRCT2::Drawing::BGRAColour, alpha));
 
 using namespace OpenRCT2;
 using namespace OpenRCT2::Drawing;
@@ -209,6 +220,11 @@ private:
     uint32_t _pitch = 0;
     size_t _bitsSize = 0;
     std::unique_ptr<PaletteIndex[]> _bits;
+    bool _view3dWasActive = false;
+    GLuint _capturedProgram = 0;
+    GLuint _capturedVao = 0;
+    GLuint _capturedVbo = 0;
+    GLuint _capturedTexture = 0;
 
     RenderTarget _mainRT = {};
 
@@ -240,22 +256,178 @@ public:
 
     ~OpenGLDrawingEngine() override
     {
+        if (_context != nullptr)
+        {
+            SDL_GL_MakeCurrent(_window, _context);
+            DestroyCapturedPresent();
+        }
+        View3D::shutdown();
+        SDL_GL_MakeCurrent(_window, _context);
         SDL_GL_DeleteContext(_context);
+    }
+
+    void DestroyCapturedPresent()
+    {
+        if (_capturedTexture != 0)
+        {
+            glDeleteTextures(1, &_capturedTexture);
+            _capturedTexture = 0;
+        }
+        if (_capturedVbo != 0)
+        {
+            glDeleteBuffers(1, &_capturedVbo);
+            _capturedVbo = 0;
+        }
+        if (_capturedVao != 0)
+        {
+            glDeleteVertexArrays(1, &_capturedVao);
+            _capturedVao = 0;
+        }
+        if (_capturedProgram != 0)
+        {
+            glDeleteProgram(_capturedProgram);
+            _capturedProgram = 0;
+        }
+    }
+
+    bool EnsureCapturedPresent()
+    {
+        if (_capturedProgram != 0)
+        {
+            return true;
+        }
+
+        const char* vertexSource = R"(#version 330 core
+layout(location = 0) in vec2 aPos;
+layout(location = 1) in vec2 aUv;
+out vec2 vUv;
+void main()
+{
+    vUv = aUv;
+    gl_Position = vec4(aPos, 0.0, 1.0);
+}
+)";
+        const char* fragmentSource = R"(#version 330 core
+in vec2 vUv;
+out vec4 oColour;
+uniform sampler2D uTex;
+void main()
+{
+    oColour = texture(uTex, vUv);
+}
+)";
+
+        const auto compile = [](GLenum type, const char* source) -> GLuint {
+            GLuint shader = glCreateShader(type);
+            glShaderSource(shader, 1, &source, nullptr);
+            glCompileShader(shader);
+            GLint ok = GL_FALSE;
+            glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
+            if (ok != GL_TRUE)
+            {
+                glDeleteShader(shader);
+                return 0;
+            }
+            return shader;
+        };
+
+        const GLuint vertex = compile(GL_VERTEX_SHADER, vertexSource);
+        const GLuint fragment = compile(GL_FRAGMENT_SHADER, fragmentSource);
+        if (vertex == 0 || fragment == 0)
+        {
+            if (vertex != 0)
+            {
+                glDeleteShader(vertex);
+            }
+            if (fragment != 0)
+            {
+                glDeleteShader(fragment);
+            }
+            return false;
+        }
+
+        _capturedProgram = glCreateProgram();
+        glAttachShader(_capturedProgram, vertex);
+        glAttachShader(_capturedProgram, fragment);
+        glBindFragDataLocation(_capturedProgram, 0, "oColour");
+        glLinkProgram(_capturedProgram);
+        glDeleteShader(vertex);
+        glDeleteShader(fragment);
+        GLint linked = GL_FALSE;
+        glGetProgramiv(_capturedProgram, GL_LINK_STATUS, &linked);
+        if (linked != GL_TRUE)
+        {
+            DestroyCapturedPresent();
+            return false;
+        }
+
+        const float vertices[] = {
+            -1.0f, -1.0f, 0.0f, 1.0f, 3.0f, -1.0f, 2.0f, 1.0f, -1.0f, 3.0f, 0.0f, -1.0f,
+        };
+        glGenVertexArrays(1, &_capturedVao);
+        glGenBuffers(1, &_capturedVbo);
+        glBindVertexArray(_capturedVao);
+        glBindBuffer(GL_ARRAY_BUFFER, _capturedVbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4, nullptr);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4, reinterpret_cast<void*>(sizeof(float) * 2));
+        glBindVertexArray(0);
+
+        glGenTextures(1, &_capturedTexture);
+        glBindTexture(GL_TEXTURE_2D, _capturedTexture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glUseProgram(_capturedProgram);
+        glUniform1i(glGetUniformLocation(_capturedProgram, "uTex"), 0);
+        return true;
+    }
+
+    void DrawCapturedFrame(const uint8_t* rgba, int32_t width, int32_t height)
+    {
+        if (!EnsureCapturedPresent())
+        {
+            return;
+        }
+
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_BLEND);
+        glDisable(GL_SCISSOR_TEST);
+        glDisable(GL_CULL_FACE);
+        glDisable(GL_STENCIL_TEST);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, _capturedTexture);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+        glUseProgram(_capturedProgram);
+        glBindVertexArray(_capturedVao);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glBindVertexArray(0);
     }
 
     void Initialise() override
     {
-        OpenGLVersion requiredVersion = kOpenGLMinimumRequiredVersion;
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, requiredVersion.Major);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, requiredVersion.Minor);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-
-        _context = SDL_GL_CreateContext(_window);
-        if (_context == nullptr)
+        // bgfx compiles its park shaders as GLSL 430 and borrows this context. Fall back to the
+        // drawing engine's own minimum when 4.3 is not available; the 3D view then stays off.
+        const auto tryContext = [this](int32_t major, int32_t minor) {
+            SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, major);
+            SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, minor);
+            SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+            _context = SDL_GL_CreateContext(_window);
+            return _context != nullptr;
+        };
+        if (!tryContext(4, 3))
         {
-            char szRequiredVersion[32];
-            snprintf(szRequiredVersion, 32, "OpenGL %d.%d", requiredVersion.Major, requiredVersion.Minor);
-            throw std::runtime_error(std::string(szRequiredVersion) + std::string(" not available."));
+            SDL_ClearError();
+            if (!tryContext(kOpenGLMinimumRequiredVersion.Major, kOpenGLMinimumRequiredVersion.Minor))
+            {
+                throw std::runtime_error("OpenGL 3.3 not available.");
+            }
         }
         SDL_GL_MakeCurrent(_window, _context);
 
@@ -268,6 +440,9 @@ public:
 
         _applyPaletteShader = std::make_unique<ApplyPaletteShader>();
         _copyRectShader = std::make_unique<CopyRectShader>();
+
+        const OpenGLVersion version = GetOpenGLVersion();
+        std::fprintf(stderr, "OpenGL drawing engine: %d.%d\n", version.Major, version.Minor);
     }
 
     void Resize(uint32_t width, uint32_t height) override
@@ -331,6 +506,17 @@ public:
     {
         assert(_screenFramebuffer != nullptr);
 
+        const bool view3d = View3D::isActive();
+        // The indexed texture keeps the previous frame. Invalidate once after leaving 3D so the park is redrawn.
+        if (view3d || _view3dWasActive)
+        {
+            OpenRCT2::Drawing::GfxInvalidateScreen();
+        }
+        _view3dWasActive = view3d;
+        if (View3D::hasDevice())
+        {
+            SDL_GL_MakeCurrent(_window, _context);
+        }
         _drawingContext->StartNewDraw();
     }
 
@@ -338,7 +524,42 @@ public:
     {
         _drawingContext->FlushCommandBuffers();
 
+        bool parkUnderUi = false;
+        if (View3D::isActive() && !View3D::hasFailed())
+        {
+            // Borrow this context. A second GL context on the window replaces the picture with black,
+            // and the following glGetError call then never returns.
+            std::vector<uint8_t> rgba(static_cast<size_t>(_mainRT.width) * static_cast<size_t>(_mainRT.height) * 4);
+            parkUnderUi = View3D::renderPark(_window, _mainRT.width, _mainRT.height, rgba.data());
+            SDL_GL_MakeCurrent(_window, _context);
+            OpenGLState::Reset();
+            GLenum leftover = glGetError();
+            for (int guard = 0; leftover != GL_NO_ERROR && guard < 8; ++guard)
+            {
+                leftover = glGetError();
+            }
+            if (parkUnderUi)
+            {
+                if (_scaleFramebuffer != nullptr)
+                {
+                    _scaleFramebuffer->Bind();
+                }
+                else
+                {
+                    _screenFramebuffer->Bind();
+                }
+                DrawCapturedFrame(rgba.data(), _mainRT.width, _mainRT.height);
+            }
+        }
+        else if (View3D::hasDevice())
+        {
+            // Leave the device up. Shutting it down while the window still has this GL context stalls on Windows.
+            SDL_GL_MakeCurrent(_window, _context);
+            OpenGLState::Reset();
+        }
+
         glDisable(GL_DEPTH_TEST);
+        glDisable(GL_SCISSOR_TEST);
         if (_scaleFramebuffer != nullptr)
         {
             // Render to intermediary RGB buffer for GL_LINEAR
@@ -349,9 +570,21 @@ public:
             _screenFramebuffer->Bind();
         }
 
+        // Index 0 is stored with alpha 0, so the paletted UI draws over the park and the hole stays transparent.
+        if (parkUnderUi)
+        {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        }
+        else
+        {
+            glDisable(GL_BLEND);
+        }
+
         _applyPaletteShader->Use();
         _applyPaletteShader->SetTexture(_drawingContext->GetFinalFramebuffer().GetTexture());
         _applyPaletteShader->Draw();
+        glDisable(GL_BLEND);
 
         if (_smoothScaleFramebuffer != nullptr)
         {
@@ -672,6 +905,12 @@ void OpenGLDrawingContext::StartNewDraw()
 
     _drawCount = 0;
     _swapFramebuffer->Clear();
+    // The whole screen is invalidated while the 3D view is on, so clearing to index 0 leaves a hole
+    // where the park is not redrawn. A FillRect of index 0 does not, because the rect shader discards it.
+    if (View3D::isActive())
+    {
+        _swapFramebuffer->ClearColour();
+    }
     _inDraw = true;
 }
 

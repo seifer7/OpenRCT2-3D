@@ -7,11 +7,17 @@
  * OpenRCT2 is licensed under the GNU General Public License version 3.
  *****************************************************************************/
 
+#include <algorithm>
+#include <openrct2-ui/drawing/View3D.h>
 #include <openrct2-ui/interface/Widget.h>
 #include <openrct2-ui/interface/Window.h>
 #include <openrct2-ui/windows/Windows.h>
 #include <openrct2/Context.h>
 #include <openrct2/config/Config.h>
+#include <openrct2/drawing/IDrawingEngine.h>
+#include <openrct2/drawing/PaletteIndex.h>
+#include <openrct2/drawing/Rectangle.h>
+#include <openrct2/drawing/RenderTarget.h>
 #include <openrct2/interface/Viewport.h>
 #include <openrct2/ui/WindowManager.h>
 
@@ -46,6 +52,26 @@ namespace OpenRCT2::Ui::Windows
 
         void onDraw(Drawing::RenderTarget& rt) override
         {
+            if (View3D::isActive())
+            {
+                // Index 0 is the hole the 3D frame discards. OpenGL records fills on the GPU and then
+                // overwrites rt.bits from that texture, so a write into the CPU buffer never reaches the screen.
+                if (viewport != nullptr && viewport->width > 0 && viewport->height > 0 && rt.bits != nullptr
+                    && rt.DrawingEngine != nullptr && rt.DrawingEngine->GetDrawingContext() != nullptr)
+                {
+                    const int32_t left = std::max(viewport->pos.x, rt.x);
+                    const int32_t top = std::max(viewport->pos.y, rt.y);
+                    const int32_t right = std::min(viewport->pos.x + viewport->width, rt.x + rt.width);
+                    const int32_t bottom = std::min(viewport->pos.y + viewport->height, rt.y + rt.height);
+                    if (right > left && bottom > top)
+                    {
+                        // FillRect treats the right and bottom edges as inclusive.
+                        Drawing::Rectangle::fill(
+                            rt, { { left, top }, { right - 1, bottom - 1 } }, Drawing::PaletteIndex::transparent);
+                    }
+                }
+                return;
+            }
             ViewportRender(rt, viewport);
         }
 

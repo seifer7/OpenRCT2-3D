@@ -59,7 +59,7 @@
       <AdditionalOptions>$(OPENRCT2_CL_ADDITIONALOPTIONS) %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>libopenrct2.lib;libopenrct2ui.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>libopenrct2.lib;libopenrct2ui.lib;openrct2-3d.lib;psapi.lib;gdi32.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ProgramDatabaseFile>$(OutDir)openrct2-win.pdb</ProgramDatabaseFile>
       <SubSystem>Console</SubSystem>
       <StackReserveSize>8388608</StackReserveSize>
@@ -88,6 +88,9 @@
     </ProjectReference>
     <ProjectReference Include="..\openrct2\libopenrct2.vcxproj">
       <Project>{d24d94f6-2a74-480c-b512-629c306ce92f}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\openrct2-3d\openrct2-3d.vcxproj">
+      <Project>{3d4e8a21-6b17-4f0c-9c55-a1e2d83f70b4}</Project>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

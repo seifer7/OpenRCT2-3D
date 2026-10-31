@@ -216,6 +216,8 @@ jobs:
           fi
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - name: Install MSVC problem matcher
         uses: ammaraskar/msvc-problem-matcher@master
       - name: Build OpenRCT2
@@ -345,6 +347,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2.21
         with:
@@ -387,6 +391,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2.21
         with:
@@ -490,6 +496,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2.21
         with:
@@ -519,6 +527,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2.21
         with:
@@ -574,6 +584,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2.21
         with:
@@ -590,6 +602,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2.21
         with:

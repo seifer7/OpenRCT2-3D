@@ -15,6 +15,7 @@
 #include <SDL_timer.h>
 #include <cmath>
 #include <openrct2-ui/UiContext.h>
+#include <openrct2-ui/drawing/View3D.h>
 #include <openrct2-ui/input/MouseInput.h>
 #include <openrct2-ui/input/ShortcutManager.h>
 #include <openrct2-ui/interface/Chat.h>
@@ -466,6 +467,14 @@ void InputManager::processHoldEvents()
     std::memcpy(_keyboardState.data(), keys, numkeys);
 
     // Check view scroll shortcuts
+    _viewScroll.x = 0;
+    _viewScroll.y = 0;
+
+    // Taken before the analogue stick is added. Typing and shortcut rebinding leave these clear.
+    bool mapUp = false;
+    bool mapDown = false;
+    bool mapLeft = false;
+    bool mapRight = false;
     if (!hasTextInputFocus())
     {
         auto& shortcutManager = GetShortcutManager();
@@ -475,9 +484,24 @@ void InputManager::processHoldEvents()
             processViewScrollEvent(ShortcutId::kViewScrollDown, { 0, 1 });
             processViewScrollEvent(ShortcutId::kViewScrollLeft, { -1, 0 });
             processViewScrollEvent(ShortcutId::kViewScrollRight, { 1, 0 });
+            mapUp = _viewScroll.y < 0;
+            mapDown = _viewScroll.y > 0;
+            mapLeft = _viewScroll.x < 0;
+            mapRight = _viewScroll.x > 0;
         }
 
         updateAnalogueScroll();
+    }
+
+    // Scroll Map slides the 3D camera along the current view. Up is toward the top of the
+    // screen. The shortcuts do not turn the camera or change its height.
+    if (View3D::isActive())
+    {
+        View3D::cameraSetMovement(mapUp, mapDown, mapLeft, mapRight);
+    }
+    else
+    {
+        View3D::cameraSetMovement(false, false, false, false);
     }
 }
 

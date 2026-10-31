@@ -1,0 +1,12 @@
+[submodule "src/openrct2-3d/third_party/bgfx.cmake"]
+	path = src/openrct2-3d/third_party/bgfx.cmake
+	url = https://github.com/bkaradzic/bgfx.cmake.git
+[submodule "src/openrct2-3d/third_party/bx"]
+	path = src/openrct2-3d/third_party/bx
+	url = https://github.com/bkaradzic/bx.git
+[submodule "src/openrct2-3d/third_party/bimg"]
+	path = src/openrct2-3d/third_party/bimg
+	url = https://github.com/bkaradzic/bimg.git
+[submodule "src/openrct2-3d/third_party/bgfx"]
+	path = src/openrct2-3d/third_party/bgfx
+	url = https://github.com/bkaradzic/bgfx.git

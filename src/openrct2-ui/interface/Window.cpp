@@ -14,6 +14,7 @@
 
 #include <SDL_video.h>
 #include <algorithm>
+#include <openrct2-ui/drawing/View3D.h>
 #include <openrct2-ui/windows/Windows.h>
 #include <openrct2/Context.h>
 #include <openrct2/GameState.h>
@@ -146,6 +147,12 @@ namespace OpenRCT2::Ui
     {
         if (gLegacyScene == LegacyScene::trackDesignsManager || gLegacyScene == LegacyScene::titleSequence)
             return;
+
+        if (View3D::isActive() && w.classification == WindowClass::mainWindow)
+        {
+            View3D::cameraScroll(wheel);
+            return;
+        }
 
         if (wheel < 0)
             Windows::WindowZoomIn(w, true);

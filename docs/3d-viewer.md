@@ -71,9 +71,9 @@ The world is already spatial:
 
 Sim position to viewer space:
 
-- `x / 32`, `y / 32`, `z / 16`
+- `x / 32`, `y / 32`, `z / 32`
 
-Dividing Z by 16 makes one slope step one vertical unit. A later pick ray converts a 3D point back to `CoordsXYZ` when a click should call an existing game action. The first mode does not need that. Camera movement stays inside the viewer.
+One tile is one unit on every axis, so one slope step (16) is half a vertical unit. `ParkView.cpp` converts heights in `worldZ` as world Z times `kLandStepHeight / 16`, with `kLandStepHeight = 0.5f` (world Z / 32). A height unit (8) is 0.25. A later pick ray converts a 3D point back to `CoordsXYZ` when a click should call an existing game action. The first mode does not need that. Camera movement stays inside the viewer.
 
 The terrain and water mesh is rebuilt when a surface tile's height, slope, water, or surface type changes, and when remove base land or remove vertical faces is toggled. Other frames reuse the mesh already on the GPU. A later pass can rebuild the changed tiles instead of the whole park.
 

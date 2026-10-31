@@ -128,9 +128,11 @@ RCT1 `Limits::kCoordsZStep` is 4 in `src/openrct2/rct1/Limits.h`. `S4Importer.cp
 
 ### Scale
 
-3D scenery and object models use **1 Blender unit per game tile**. That matches the viewer space in `docs/3d-viewer.md`: sim `x / 32`, `y / 32`, `z / 16`. One tile is 1 unit, and one land step (`kLandHeightStep` = 16) is 1 unit.
+3D scenery and object models use **1 Blender unit = 1 tile = 32 sim units on every axis**. Viewer space is sim `x / 32`, `y / 32`, `z / 32`. One tile is 1 unit, one land step (`kLandHeightStep` = 16) is 0.5 units, and one height unit (`kCoordsZStep` = 8) is 0.25.
 
-`ParkView.cpp` places the camera target at `map.x / 32` and `map.y / 32` (one tile = 1 unit). Mesh heights go through `worldZ`, which multiplies world Z by `kLandStepHeight / 16` with `kLandStepHeight = 0.5f`. One land step is 0.5 viewer units in that mesh (world Z / 32). The comment there says a full tile of height (`1.0`) read as too steep. That 0.5 factor is the current terrain mesh, not the model scale.
+`ParkView.cpp` places the camera target at `map.x / 32` and `map.y / 32`. Mesh heights go through `worldZ`, which multiplies world Z by `kLandStepHeight / 16` with `kLandStepHeight = 0.5f`. That product is world Z / 32, the same scale as X and Y, and `static_assert(worldZ(16) == kLandStepHeight)` checks one land step. The comment on `kLandStepHeight` says a full tile of height (`1.0`) read as too steep, and `0.5` is half of that. Land, cliffs, water, paths, and the camera ground point all use this factor. Models use the same scale.
+
+RCT’s sprite projection draws 1 px per world Z (`Translate3DTo2DWithZ` subtracts `pos.z` from screen Y). A true orthographic camera at 30° shows uniformly scaled models about 22% taller than the 2D sprites. The factor that matches the sprites exactly is `sqrt(2/3)` ≈ 0.8165. That is a camera and projection matter. The model scale stays sim / 32 on every axis.
 
 ## 5. Remappable colours and transparency
 

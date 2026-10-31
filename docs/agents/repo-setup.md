@@ -31,11 +31,11 @@ From `docs/3d-viewer.md` and `AGENTS.md` only:
 - Do not grow the 3D world inside `OpenGLDrawingEngine`. A prototype may use the SDL window’s existing OpenGL 3.3 context; the committed direction is bgfx.
 - 2D stays the default. The View menu (`WIDX_VIEW_MENU`) switches the main park view. In 3D, bgfx draws the park and composites the original paletted UI, with palette index 0 as the hole. Ride, guest, and staff windows keep their small 2D viewports.
 - `gameStateTick()` is the only simulation. A read-only extractor turns that state into meshes. The 3D view does not advance the park.
-- Viewer space is sim `x / 32`, `y / 32`, `z / 16`.
+- Viewer space is sim `x / 32`, `y / 32`, `z / 32`. `ParkView.cpp` converts heights in `worldZ` as world Z times `kLandStepHeight / 16`, with `kLandStepHeight = 0.5f` (world Z / 32).
 
 ## Model scale
 
-From the previous project, and in scope only as this decision: 3D scenery and object models use 1 Blender unit per game tile, matching the 3D viewer.
+From the previous project, and in scope only as this decision: 3D scenery and object models use 1 Blender unit = 1 tile = 32 sim units on every axis, matching the 3D viewer (Z = world Z / 32).
 
 ## What does not match
 

@@ -40,7 +40,7 @@ Mask textures plus per-instance colour.
 
 ## 5. Risks and gotchas
 
-- **Scale and axes:** glTF is Y-up, right-handed; the viewer is `x/32, y/32, z/16` with Z up. Pick one conversion matrix in the loader and document it for Blender exports (+Y up). 1 Blender unit = 1 tile horizontally means 1 Blender unit vertically = 2 RCT height units = 16 sim Z (one land step). Authors must know this or heights will be off. Note: the current terrain mesh in `ParkView.cpp` draws one land step as 0.5 viewer units (`kLandStepHeight = 0.5f`), unlike `docs/3d-viewer.md`; this needs a decision before height-sensitive models go in.
+- **Scale and axes:** glTF is Y-up, right-handed; the viewer is `x/32, y/32, z/32` with Z up. Pick one conversion matrix in the loader and document it for Blender exports (+Y up). 1 Blender unit = 1 tile = 32 sim units on every axis. 1 Blender unit vertically = 4 RCT height units = 32 sim Z (two land steps). `ParkView.cpp` converts heights in `worldZ` as world Z times `kLandStepHeight / 16`, with `kLandStepHeight = 0.5f`, so one land step is 0.5 viewer units and one height unit (8) is 0.25. Authors use that scale.
 - **Pivot and footprint:** define the origin (tile min-corner or centre), document it, keep rotation to 90° steps about the tile centre. Large scenery spans several tiles: either one mesh for the whole footprint placed at the primary tile (simpler) or one mesh per sub-tile.
 - **Object identity:** key GLBs to the object identifier (`rct2.scenery_small.xyz` or the JSON object id), not file name, so custom objects and `.parkobj` packaging can carry a GLB alongside existing images.
 - **Texture memory:** 1,000 types × 512² RGBA with mips ≈ 1.3 GB uncompressed. Compress at conversion (BC7/BC1 desktop, KTX2/ETC mobile).
@@ -51,7 +51,7 @@ Mask textures plus per-instance colour.
 
 ## Recommended pipeline
 
-1. **Author:** Blender exports one `.glb` per object: 1 unit = 1 tile, +Y up on export, origin at tile centre, remap mask (extra mask texture or `COLOR_1` vertex attribute, flagged with `extras.rct_remap`), optional `_LOD1` mesh, named animation clips. Name each file after the object identifier.
+1. **Author:** Blender exports one `.glb` per object: 1 unit = 1 tile = 32 sim units on every axis, +Y up on export, origin at tile centre, remap mask (extra mask texture or `COLOR_1` vertex attribute, flagged with `extras.rct_remap`), optional `_LOD1` mesh, named animation clips. Name each file after the object identifier.
 2. **Convert (runtime, cached):** load with cgltf, run `cgltf_validate` with size, vertex, texture and bone caps. meshoptimizer for vertex cache order and an auto-simplified LOD when `_LOD1` is missing. bimg encodes BC7/BC1 (desktop) or ETC/ASTC (mobile) textures with mips. Write a cached `.o3d` blob: interleaved vertices and indices per material, bounds, remap mask, node hierarchy, animation clips and bones. Key by hash of GLB contents plus a converter version. Built-in objects pre-baked at build time with the same converter.
 3. **Extract:** after `gameStateTick()`, on the main thread, the SceneExtractor fills per-chunk (16×16 tiles) instance lists grouped by object type: transform or tile, rotation and height, three remap colours, animation phase. Rebuild a chunk only when its tile elements change; entities (guests, vehicles) in a separate per-frame list.
 4. **Cull and LOD:** each frame, test chunk AABBs against the frustum and view-distance cutoff (with fade); pick LOD per chunk by distance: full mesh, LOD1, then baked impostor or culled.
@@ -65,4 +65,4 @@ Mask textures plus per-instance colour.
 - Add shaderc builds for DX11, Vulkan, Metal before relying on those backends (only OpenGL is enabled now).
 - Document the axis and scale conversion and pivot convention in `docs/3d-viewer.md`; that's where Blender authors will get it wrong.
 
-Status: recommendation only. Nothing here is a decided implementation yet except the existing standing decision of 1 Blender unit per game tile.
+Status: recommendation only. Nothing here is a decided implementation yet except the existing standing decision of 1 Blender unit = 1 tile = 32 sim units on every axis (Z = world Z / 32, matching ParkView `worldZ`).

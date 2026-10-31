@@ -48,7 +48,20 @@ if(MINGW AND CMAKE_SIZEOF_VOID_P EQUAL 4 AND TARGET bimg_encode)
             "-D_bswap64(x)=__builtin_bswap64(x)")
 endif()
 
-add_library(openrct2-3d STATIC src/BgfxRenderer.cpp src/View3D.cpp src/ParkView.cpp)
+add_library(
+    openrct2-3d STATIC
+    src/BgfxRenderer.cpp
+    src/View3D.cpp
+    src/ParkView.cpp
+    src/GlbMesh.cpp
+    src/MeshDraw.cpp
+    src/SceneryDraw.cpp
+    third_party/cgltf/cgltf.cpp
+    third_party/stb_image_impl.cpp)
+# cgltf and stb_image are third-party. Keep their warnings from failing this build.
+if(NOT MSVC)
+    set_source_files_properties(third_party/cgltf/cgltf.cpp third_party/stb_image_impl.cpp PROPERTIES COMPILE_OPTIONS "-w")
+endif()
 add_library(OpenRCT2::openrct2-3d ALIAS openrct2-3d)
 
 # bx is private to bgfx, and ParkView calls bx math directly. Keep that link
@@ -57,7 +70,19 @@ add_library(OpenRCT2::openrct2-3d ALIAS openrct2-3d)
 # static library.
 target_link_libraries(openrct2-3d PUBLIC bgfx libopenrct2)
 target_link_libraries(openrct2-3d PRIVATE bx)
-target_include_directories(openrct2-3d PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src" PRIVATE "${ROOT_DIR}/src")
+target_include_directories(
+    openrct2-3d
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    PRIVATE "${ROOT_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/bimg/3rdparty/stb")
+
+# Offscreen preview of a GLB and the crossed-sprite fallback. Not installed.
+add_executable(openrct2-3d-preview preview/ModelPreview.cpp src/GlbMesh.cpp src/MeshDraw.cpp third_party/cgltf/cgltf.cpp third_party/stb_image_impl.cpp)
+target_include_directories(
+    openrct2-3d-preview PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf"
+                                       "${CMAKE_CURRENT_SOURCE_DIR}/third_party/bimg/3rdparty/stb")
+target_link_libraries(openrct2-3d-preview PRIVATE bgfx bx)
+target_compile_features(openrct2-3d-preview PRIVATE cxx_std_20)
 target_compile_features(openrct2-3d PUBLIC cxx_std_20)
 
 if(TARGET PkgConfig::SDL2)

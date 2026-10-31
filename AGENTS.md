@@ -27,3 +27,7 @@ Keep changes to the original codebase as small and as few as possible. All 3D re
 Linux dependencies and the Ninja build are documented in the upstream wiki linked from `readme.md`. From a configured `bin/` directory the GUI binary is `./openrct2`. Point it at an original RCT2 install with `--rct2-data-path` (the directory that contains `Data/g1.dat`) and at this tree's data with `--openrct2-data-path`.
 
 `scripts/run-tests` runs the unit tests. They do not need the commercial RCT2 files.
+
+## Agent notes
+
+Project notes, memories, decisions, surveys, and other working documents live in `docs/agents/` and must be committed there. Write new notes in that folder going forward, not only in the Agent Store or on a VM.

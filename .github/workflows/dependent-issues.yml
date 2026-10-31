@@ -19,6 +19,8 @@ on:
 jobs:
   check:
     runs-on: ubuntu-slim
+    # Upstream label cleanup is not permitted on forks (HttpError: Resource not accessible by integration).
+    if: github.repository == 'OpenRCT2/OpenRCT2'
     steps:
       - uses: z0al/dependent-issues@v1
         env:

@@ -9,3 +9,4 @@ Project notes, memories, decisions, surveys, and other working documents live in
 - `scenery-3d-milestone.md` — first scenery milestone: GLB loader, Corsican Pine, sprite-cross fallback
 - `glb-model-pipeline-recommendation.md` — GLB model pipeline recommendation
 - `sprite-to-3d-style-guide.md` — how to build scenery GLBs in the Corsican Pine style
+- [`qa/`](qa/README.md) — QA Officer: review process, model style checklist, and PR reviews

@@ -81,8 +81,15 @@ namespace OpenRCT2::View3D
         uint32_t maxImageBytes = 16u * 1024u * 1024u;
     };
 
+    // Bump this when loadGlbMesh's output changes: the axis conversion, kGlbVerticalScale,
+    // vertex fields, or which material properties are kept. The .o3d cache stores this
+    // value and rebuilds when it differs. kModelCacheVersion is separate; bump that when
+    // the cache file layout itself changes.
+    constexpr uint32_t kGlbConverterVersion = 1;
+
     // Positions and normals are converted into viewer space. Image bytes stay PNG.
     // `error` is a short reason when this returns nullopt.
+    // If the mesh this function returns changes, bump kGlbConverterVersion above.
     std::optional<CpuMesh> loadGlbMesh(const uint8_t* data, size_t size, const MeshLoadLimits& limits, std::string& error);
 
     std::optional<CpuMesh> loadGlbFile(const std::string& path, const MeshLoadLimits& limits, std::string& error);

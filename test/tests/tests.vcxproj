@@ -58,7 +58,8 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
-      <PreprocessorDefinitions>GTEST_LANG_CXX11;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <!-- Raw string: $(SolutionDir) ends in a backslash, which would escape a normal string quote. GlbMeshTests also tries relative paths if this file is missing. -->
+      <PreprocessorDefinitions>GTEST_LANG_CXX11;OPENRCT2_TCRP_GLB=R&quot;($(SolutionDir)data/object-models/rct2.scenery_small.tcrp.glb)&quot;;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeader Condition="'$(UsePCH)'=='true'">Use</PrecompiledHeader>
       <PrecompiledHeaderFile Condition="'$(UsePCH)'=='true'">tests_pch.h</PrecompiledHeaderFile>
       <ForcedIncludeFiles Condition="'$(UsePCH)'=='true'">tests_pch.h</ForcedIncludeFiles>

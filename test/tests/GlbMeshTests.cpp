@@ -14,13 +14,39 @@
 #include <cmath>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <openrct2/core/File.h>
+#include <string>
 #include <vector>
 
 using namespace OpenRCT2::View3D;
 
 namespace
 {
-    std::vector<uint8_t> readFile(const char* path)
+    std::string tcrpGlbPath()
+    {
+        const char* candidates[] = {
+#ifdef OPENRCT2_TCRP_GLB
+            OPENRCT2_TCRP_GLB,
+#endif
+            "data/object-models/rct2.scenery_small.tcrp.glb",
+            "../data/object-models/rct2.scenery_small.tcrp.glb",
+            "../../data/object-models/rct2.scenery_small.tcrp.glb",
+        };
+        for (const char* path : candidates)
+        {
+            if (path != nullptr && OpenRCT2::File::Exists(path))
+            {
+                return path;
+            }
+        }
+#ifdef OPENRCT2_TCRP_GLB
+        return OPENRCT2_TCRP_GLB;
+#else
+        return "../data/object-models/rct2.scenery_small.tcrp.glb";
+#endif
+    }
+
+    std::vector<uint8_t> readFile(const std::string& path)
     {
         std::ifstream in(path, std::ios::binary);
         EXPECT_TRUE(static_cast<bool>(in)) << path;
@@ -89,7 +115,7 @@ TEST(SpriteQuad, FacesTheFourIsometricCameras)
 
 TEST(GlbMesh, CorsicanPineSitsOnTheTile)
 {
-    const std::vector<uint8_t> bytes = readFile(OPENRCT2_TCRP_GLB);
+    const std::vector<uint8_t> bytes = readFile(tcrpGlbPath());
     ASSERT_FALSE(bytes.empty());
 
     std::string error;

@@ -10,7 +10,9 @@
 #include "ModelCache.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
+#include <chrono>
 #include <cstring>
 #include <exception>
 #include <openrct2/Diagnostic.h>
@@ -19,13 +21,25 @@
 #include <openrct2/core/Path.hpp>
 #include <unordered_set>
 
+#ifdef _WIN32
+    #include <process.h>
+#else
+    #include <unistd.h>
+#endif
+
 namespace OpenRCT2::View3D
 {
     namespace
     {
         constexpr char kMagic[4] = { 'O', '3', 'D', 'M' };
-        constexpr size_t kHeaderBytes = 40;
+        static_assert(kModelCacheHeaderBytes == 68, "header layout changed; bump kModelCacheVersion");
         static_assert(std::endian::native == std::endian::little, "the scenery cache is little-endian");
+
+        // Header, little-endian:
+        //  0 magic, 4 format version, 8 source size, 16 source mtime, 24 source hash,
+        // 32 body checksum, 40 converter version, 44 maxVertices, 48 maxIndices,
+        // 52 maxPrimitives, 56 maxImageBytes, 60 primitive count, 64 image count.
+        // The body checksum is FNV-1a of every byte after the header.
 
         struct SourceStamp
         {
@@ -41,6 +55,8 @@ namespace OpenRCT2::View3D
             failed,
         };
 
+        bool limitsMatch(uint32_t maxVertices, uint32_t maxIndices, uint32_t maxPrimitives, uint32_t maxImageBytes);
+
         uint64_t hashBytes(const uint8_t* data, size_t size)
         {
             uint64_t hash = 14695981039346656037ull;
@@ -52,10 +68,61 @@ namespace OpenRCT2::View3D
             return hash;
         }
 
+        std::string lowerCopy(std::string_view text)
+        {
+            std::string out(text);
+            for (char& ch : out)
+            {
+                if (ch >= 'A' && ch <= 'Z')
+                {
+                    ch = static_cast<char>(ch - 'A' + 'a');
+                }
+            }
+            return out;
+        }
+
+        bool isReservedWindowsName(std::string_view name)
+        {
+            std::string base = lowerCopy(name);
+            while (!base.empty() && (base.back() == ' ' || base.back() == '.'))
+            {
+                base.pop_back();
+            }
+            const size_t dot = base.find('.');
+            if (dot != std::string::npos)
+            {
+                base.resize(dot);
+            }
+            if (base == "con" || base == "prn" || base == "aux" || base == "nul")
+            {
+                return true;
+            }
+            if (base.size() == 4 && (base.compare(0, 3, "com") == 0 || base.compare(0, 3, "lpt") == 0) && base[3] >= '1'
+                && base[3] <= '9')
+            {
+                return true;
+            }
+            return false;
+        }
+
         bool identifierIsSafe(std::string_view identifier)
         {
             return !identifier.empty() && identifier.find('/') == std::string_view::npos
-                && identifier.find('\\') == std::string_view::npos && identifier.find("..") == std::string_view::npos;
+                && identifier.find('\\') == std::string_view::npos && identifier.find(':') == std::string_view::npos
+                && identifier.find("..") == std::string_view::npos && !isReservedWindowsName(identifier);
+        }
+
+        std::string temporaryCachePath(const std::string& cachePath)
+        {
+            static std::atomic<uint32_t> sequence{ 0 };
+            const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
+#ifdef _WIN32
+            const int pid = _getpid();
+#else
+            const int pid = getpid();
+#endif
+            return cachePath + "." + std::to_string(pid) + "." + std::to_string(ticks) + "."
+                + std::to_string(sequence.fetch_add(1)) + ".tmp";
         }
 
         void appendU32(std::vector<uint8_t>& out, uint32_t value)
@@ -170,7 +237,7 @@ namespace OpenRCT2::View3D
             try
             {
                 const std::vector<uint8_t> bytes = File::ReadAllBytes(cachePath);
-                if (bytes.size() < kHeaderBytes)
+                if (bytes.size() < kModelCacheHeaderBytes)
                 {
                     return false;
                 }
@@ -185,8 +252,20 @@ namespace OpenRCT2::View3D
                 const uint64_t size = reader.u64();
                 const uint64_t mtime = reader.u64();
                 const uint64_t hash = reader.u64();
-                return reader.ok() && version == kModelCacheVersion && size == stamp.size && mtime == stamp.mtime
-                    && hash == stamp.hash;
+                const uint64_t bodyChecksum = reader.u64();
+                const uint32_t converter = reader.u32();
+                const uint32_t maxVertices = reader.u32();
+                const uint32_t maxIndices = reader.u32();
+                const uint32_t maxPrimitives = reader.u32();
+                const uint32_t maxImageBytes = reader.u32();
+                if (!reader.ok() || version != kModelCacheVersion || converter != kGlbConverterVersion
+                    || !limitsMatch(maxVertices, maxIndices, maxPrimitives, maxImageBytes) || size != stamp.size
+                    || mtime != stamp.mtime || hash != stamp.hash || bytes.size() < kModelCacheHeaderBytes)
+                {
+                    return false;
+                }
+                const uint64_t actual = hashBytes(bytes.data() + kModelCacheHeaderBytes, bytes.size() - kModelCacheHeaderBytes);
+                return actual == bodyChecksum;
             }
             catch (const std::exception&)
             {
@@ -194,60 +273,77 @@ namespace OpenRCT2::View3D
             }
         }
 
+        bool limitsMatch(uint32_t maxVertices, uint32_t maxIndices, uint32_t maxPrimitives, uint32_t maxImageBytes)
+        {
+            const MeshLoadLimits limits;
+            return maxVertices == limits.maxVertices && maxIndices == limits.maxIndices && maxPrimitives == limits.maxPrimitives
+                && maxImageBytes == limits.maxImageBytes;
+        }
+
         bool writeCache(const std::string& cachePath, const SourceStamp& stamp, const CpuMesh& mesh, std::string& error)
         {
-            std::vector<uint8_t> out;
-            out.reserve(kHeaderBytes + 1024);
-            out.insert(out.end(), kMagic, kMagic + 4);
-            appendU32(out, kModelCacheVersion);
-            appendU64(out, stamp.size);
-            appendU64(out, stamp.mtime);
-            appendU64(out, stamp.hash);
-            appendU32(out, static_cast<uint32_t>(mesh.primitives.size()));
-            appendU32(out, static_cast<uint32_t>(mesh.images.size()));
-
+            std::vector<uint8_t> body;
+            body.reserve(1024);
             for (const MeshPrimitive& primitive : mesh.primitives)
             {
-                appendU32(out, static_cast<uint32_t>(primitive.vertices.size()));
-                appendU32(out, static_cast<uint32_t>(primitive.indices.size()));
-                out.push_back(static_cast<uint8_t>(primitive.alpha));
-                out.push_back(primitive.doubleSided ? 1 : 0);
-                out.push_back(0);
-                out.push_back(0);
-                appendF32(out, primitive.alphaCutoff);
-                appendU32(out, static_cast<uint32_t>(primitive.image));
+                appendU32(body, static_cast<uint32_t>(primitive.vertices.size()));
+                appendU32(body, static_cast<uint32_t>(primitive.indices.size()));
+                body.push_back(static_cast<uint8_t>(primitive.alpha));
+                body.push_back(primitive.doubleSided ? 1 : 0);
+                body.push_back(0);
+                body.push_back(0);
+                appendF32(body, primitive.alphaCutoff);
+                appendU32(body, static_cast<uint32_t>(primitive.image));
                 for (const MeshVertex& vertex : primitive.vertices)
                 {
-                    appendF32(out, vertex.x);
-                    appendF32(out, vertex.y);
-                    appendF32(out, vertex.z);
-                    appendF32(out, vertex.nx);
-                    appendF32(out, vertex.ny);
-                    appendF32(out, vertex.nz);
-                    appendF32(out, vertex.u);
-                    appendF32(out, vertex.v);
+                    appendF32(body, vertex.x);
+                    appendF32(body, vertex.y);
+                    appendF32(body, vertex.z);
+                    appendF32(body, vertex.nx);
+                    appendF32(body, vertex.ny);
+                    appendF32(body, vertex.nz);
+                    appendF32(body, vertex.u);
+                    appendF32(body, vertex.v);
                 }
                 for (uint32_t index : primitive.indices)
                 {
-                    appendU32(out, index);
+                    appendU32(body, index);
                 }
             }
 
             for (const MeshImage& image : mesh.images)
             {
-                out.push_back(image.nearest ? 1 : 0);
-                out.push_back(image.clamp ? 1 : 0);
-                out.push_back(0);
-                out.push_back(0);
-                appendU32(out, image.width);
-                appendU32(out, image.height);
-                appendU32(out, static_cast<uint32_t>(image.png.size()));
-                out.insert(out.end(), image.png.begin(), image.png.end());
-                appendU32(out, static_cast<uint32_t>(image.rgba.size()));
-                out.insert(out.end(), image.rgba.begin(), image.rgba.end());
+                body.push_back(image.nearest ? 1 : 0);
+                body.push_back(image.clamp ? 1 : 0);
+                body.push_back(0);
+                body.push_back(0);
+                appendU32(body, image.width);
+                appendU32(body, image.height);
+                appendU32(body, static_cast<uint32_t>(image.png.size()));
+                body.insert(body.end(), image.png.begin(), image.png.end());
+                appendU32(body, static_cast<uint32_t>(image.rgba.size()));
+                body.insert(body.end(), image.rgba.begin(), image.rgba.end());
             }
 
-            const std::string temporary = cachePath + ".tmp";
+            const MeshLoadLimits limits;
+            std::vector<uint8_t> out;
+            out.reserve(kModelCacheHeaderBytes + body.size());
+            out.insert(out.end(), kMagic, kMagic + 4);
+            appendU32(out, kModelCacheVersion);
+            appendU64(out, stamp.size);
+            appendU64(out, stamp.mtime);
+            appendU64(out, stamp.hash);
+            appendU64(out, hashBytes(body.data(), body.size()));
+            appendU32(out, kGlbConverterVersion);
+            appendU32(out, limits.maxVertices);
+            appendU32(out, limits.maxIndices);
+            appendU32(out, limits.maxPrimitives);
+            appendU32(out, limits.maxImageBytes);
+            appendU32(out, static_cast<uint32_t>(mesh.primitives.size()));
+            appendU32(out, static_cast<uint32_t>(mesh.images.size()));
+            out.insert(out.end(), body.begin(), body.end());
+
+            const std::string temporary = temporaryCachePath(cachePath);
             try
             {
                 File::WriteAllBytes(temporary, out.data(), out.size());
@@ -274,7 +370,13 @@ namespace OpenRCT2::View3D
             return reader.ok();
         }
 
-        std::optional<CpuMesh> readCache(const std::string& cachePath, std::string& error)
+        struct CachedMesh
+        {
+            SourceStamp stamp;
+            CpuMesh mesh;
+        };
+
+        std::optional<CachedMesh> readCache(const std::string& cachePath, std::string& error)
         {
             std::vector<uint8_t> bytes;
             try
@@ -299,11 +401,29 @@ namespace OpenRCT2::View3D
                 error = "cache version is old";
                 return std::nullopt;
             }
-            reader.u64();
-            reader.u64();
-            reader.u64();
+            SourceStamp stamp;
+            stamp.size = reader.u64();
+            stamp.mtime = reader.u64();
+            stamp.hash = reader.u64();
+            const uint64_t bodyChecksum = reader.u64();
+            const uint32_t converter = reader.u32();
+            const uint32_t maxVertices = reader.u32();
+            const uint32_t maxIndices = reader.u32();
+            const uint32_t maxPrimitives = reader.u32();
+            const uint32_t maxImageBytes = reader.u32();
             const uint32_t primitiveCount = reader.u32();
             const uint32_t imageCount = reader.u32();
+            if (bytes.size() < kModelCacheHeaderBytes
+                || hashBytes(bytes.data() + kModelCacheHeaderBytes, bytes.size() - kModelCacheHeaderBytes) != bodyChecksum)
+            {
+                error = "cache checksum does not match";
+                return std::nullopt;
+            }
+            if (converter != kGlbConverterVersion || !limitsMatch(maxVertices, maxIndices, maxPrimitives, maxImageBytes))
+            {
+                error = "cache was built by a different converter";
+                return std::nullopt;
+            }
             const MeshLoadLimits limits;
             if (!reader.ok() || primitiveCount == 0 || primitiveCount > limits.maxPrimitives || imageCount > 32)
             {
@@ -327,8 +447,8 @@ namespace OpenRCT2::View3D
                 readByte(reader, pad1);
                 const float cutoff = reader.f32();
                 const int32_t image = static_cast<int32_t>(reader.u32());
-                if (!reader.ok() || vertexCount > limits.maxVertices || indexCount > limits.maxIndices
-                    || (image < -1 || image >= static_cast<int32_t>(imageCount)))
+                if (!reader.ok() || alphaByte > static_cast<uint8_t>(MeshAlpha::blend) || vertexCount > limits.maxVertices
+                    || indexCount > limits.maxIndices || image < -1 || image >= static_cast<int32_t>(imageCount))
                 {
                     error = "cache primitive is unusable";
                     return std::nullopt;
@@ -430,7 +550,7 @@ namespace OpenRCT2::View3D
                 }
                 mesh.images.push_back(std::move(image));
             }
-            return mesh;
+            return CachedMesh{ stamp, std::move(mesh) };
         }
 
         std::string findGlb(const std::string& identifier, const std::vector<std::string>& sourceDirs)
@@ -591,21 +711,32 @@ namespace OpenRCT2::View3D
         {
             return std::nullopt;
         }
+        const uint64_t glbSize = File::GetSize(glbPath);
+        const uint64_t glbMtime = File::GetLastModified(glbPath);
+        const std::string cachePath = cacheDir.empty() ? std::string() : cachePathFor(cacheDir, identifier);
+        std::string cacheError;
+        // One read of the .o3d. Size and mtime are enough when they still match; the
+        // body checksum is checked inside readCache. The GLB is hashed only if those differ.
+        const std::optional<CachedMesh> cached = cachePath.empty() ? std::nullopt : readCache(cachePath, cacheError);
+        if (cached.has_value() && cached->stamp.size == glbSize && cached->stamp.mtime == glbMtime)
+        {
+            return cached->mesh;
+        }
         std::vector<uint8_t> bytes;
         if (!readFile(glbPath, bytes, error))
         {
             return std::nullopt;
         }
         const SourceStamp stamp = stampOf(glbPath, bytes);
-        const std::string cachePath = cacheDir.empty() ? std::string() : cachePathFor(cacheDir, identifier);
-        if (!cachePath.empty() && cacheIsCurrent(cachePath, stamp))
+        if (cached.has_value() && cached->stamp.size == stamp.size && cached->stamp.hash == stamp.hash)
         {
-            std::string cacheError;
-            std::optional<CpuMesh> cached = readCache(cachePath, cacheError);
-            if (cached.has_value())
-            {
-                return cached;
-            }
+            std::string writeError;
+            Path::CreateDirectory(cacheDir);
+            writeCache(cachePath, stamp, cached->mesh, writeError);
+            return cached->mesh;
+        }
+        if (!cacheError.empty() && File::Exists(cachePath))
+        {
             LOG_WARNING("View3D: cache for %s is unusable (%s)", identifier.c_str(), cacheError.c_str());
         }
         const std::optional<CpuMesh> mesh = loadGlbMesh(bytes.data(), bytes.size(), {}, error);

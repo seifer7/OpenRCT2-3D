@@ -16,8 +16,15 @@
 #include <gtest/gtest.h>
 #include <openrct2/core/File.h>
 #include <openrct2/core/Path.hpp>
+#include <random>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+    #include <process.h>
+#else
+    #include <unistd.h>
+#endif
 
 using namespace OpenRCT2::View3D;
 
@@ -76,19 +83,35 @@ namespace
     class CacheDir
     {
     public:
+        std::filesystem::path root;
         std::string source;
         std::string cache;
 
         CacheDir()
         {
-            static int32_t next = 0;
-            const auto root = std::filesystem::temp_directory_path() / ("orct2-model-cache-test-" + std::to_string(next++));
-            std::filesystem::remove_all(root);
+            std::random_device device;
+            const uint64_t nonce = (static_cast<uint64_t>(device()) << 32) ^ device();
+#ifdef _WIN32
+            const int pid = _getpid();
+#else
+            const int pid = getpid();
+#endif
+            root = std::filesystem::temp_directory_path()
+                / ("orct2-model-cache-" + std::to_string(pid) + "-" + std::to_string(nonce));
             source = (root / "object-models").string();
             cache = (root / "cache").string();
             std::filesystem::create_directories(source);
             std::filesystem::create_directories(cache);
         }
+
+        ~CacheDir()
+        {
+            std::error_code error;
+            std::filesystem::remove_all(root, error);
+        }
+
+        CacheDir(const CacheDir&) = delete;
+        CacheDir& operator=(const CacheDir&) = delete;
 
         void writeGlb(const std::string& name, const std::vector<uint8_t>& bytes) const
         {
@@ -191,4 +214,118 @@ TEST(ModelCache, BadCacheFallsBackToGlb)
     ASSERT_TRUE(mesh.has_value()) << error;
     EXPECT_NEAR(mesh->primitives[0].vertices[0].z, 1.0f * kGlbVerticalScale, 1.0e-4f);
     EXPECT_TRUE(error.empty());
+}
+
+static uint32_t readU32(const std::vector<uint8_t>& bytes, size_t offset)
+{
+    return static_cast<uint32_t>(bytes[offset]) | (static_cast<uint32_t>(bytes[offset + 1]) << 8)
+        | (static_cast<uint32_t>(bytes[offset + 2]) << 16) | (static_cast<uint32_t>(bytes[offset + 3]) << 24);
+}
+
+static void writeU32(std::vector<uint8_t>& bytes, size_t offset, uint32_t value)
+{
+    bytes[offset] = static_cast<uint8_t>(value);
+    bytes[offset + 1] = static_cast<uint8_t>(value >> 8);
+    bytes[offset + 2] = static_cast<uint8_t>(value >> 16);
+    bytes[offset + 3] = static_cast<uint8_t>(value >> 24);
+}
+
+// First vertex Z sits 28 bytes into the body: two counts, the flag word, cutoff, image index, then x and y.
+constexpr size_t kFirstVertexZ = kModelCacheHeaderBytes + 28;
+
+TEST(ModelCache, TruncatedBodyFallsBackToGlb)
+{
+    CacheDir dir;
+    dir.writeGlb("pine.glb", triangleGlb(1.0f));
+    const std::vector<std::string> sources = { dir.source };
+    ASSERT_EQ(prepareModelCache(sources, dir.cache, nullptr).converted, 1);
+
+    std::vector<uint8_t> bytes = cacheBytes(dir, "pine");
+    ASSERT_GT(bytes.size(), kModelCacheHeaderBytes + 40);
+    bytes.resize(kModelCacheHeaderBytes + 40);
+    const std::string cacheFile = OpenRCT2::Path::Combine(dir.cache, "pine.o3d");
+    OpenRCT2::File::WriteAllBytes(cacheFile, bytes.data(), bytes.size());
+
+    std::string error;
+    const std::optional<CpuMesh> mesh = loadModelForDraw("pine", sources, dir.cache, error);
+    ASSERT_TRUE(mesh.has_value()) << error;
+    EXPECT_NEAR(mesh->primitives[0].vertices[0].z, 1.0f * kGlbVerticalScale, 1.0e-4f);
+}
+
+TEST(ModelCache, CorruptBodyFallsBackToGlb)
+{
+    CacheDir dir;
+    dir.writeGlb("pine.glb", triangleGlb(1.0f));
+    const std::vector<std::string> sources = { dir.source };
+    ASSERT_EQ(prepareModelCache(sources, dir.cache, nullptr).converted, 1);
+
+    std::vector<uint8_t> bytes = cacheBytes(dir, "pine");
+    ASSERT_GT(bytes.size(), kFirstVertexZ + 4);
+    bytes[kFirstVertexZ] ^= 0xff;
+    float corruptedZ = 0.0f;
+    std::memcpy(&corruptedZ, bytes.data() + kFirstVertexZ, sizeof(corruptedZ));
+    EXPECT_NE(corruptedZ, 1.0f * kGlbVerticalScale);
+    const std::string cacheFile = OpenRCT2::Path::Combine(dir.cache, "pine.o3d");
+    OpenRCT2::File::WriteAllBytes(cacheFile, bytes.data(), bytes.size());
+
+    std::string error;
+    const std::optional<CpuMesh> mesh = loadModelForDraw("pine", sources, dir.cache, error);
+    ASSERT_TRUE(mesh.has_value()) << error;
+    EXPECT_NEAR(mesh->primitives[0].vertices[0].z, 1.0f * kGlbVerticalScale, 1.0e-4f);
+}
+
+TEST(ModelCache, ConverterVersionAndLimitsRebuild)
+{
+    CacheDir dir;
+    dir.writeGlb("pine.glb", triangleGlb(1.0f));
+    const std::vector<std::string> sources = { dir.source };
+    ASSERT_EQ(prepareModelCache(sources, dir.cache, nullptr).converted, 1);
+    const std::string cacheFile = OpenRCT2::Path::Combine(dir.cache, "pine.o3d");
+
+    std::vector<uint8_t> bytes = cacheBytes(dir, "pine");
+    ASSERT_GE(bytes.size(), kModelCacheHeaderBytes);
+    writeU32(bytes, kModelCacheConverterOffset, 99);
+    OpenRCT2::File::WriteAllBytes(cacheFile, bytes.data(), bytes.size());
+
+    std::string error;
+    const std::optional<CpuMesh> mesh = loadModelForDraw("pine", sources, dir.cache, error);
+    ASSERT_TRUE(mesh.has_value()) << error;
+    EXPECT_NEAR(mesh->primitives[0].vertices[0].z, 1.0f * kGlbVerticalScale, 1.0e-4f);
+    const std::vector<uint8_t> rebuilt = cacheBytes(dir, "pine");
+    EXPECT_EQ(readU32(rebuilt, kModelCacheConverterOffset), kGlbConverterVersion);
+
+    bytes = rebuilt;
+    writeU32(bytes, kModelCacheMaxVerticesOffset, 1);
+    OpenRCT2::File::WriteAllBytes(cacheFile, bytes.data(), bytes.size());
+    const std::optional<CpuMesh> again = loadModelForDraw("pine", sources, dir.cache, error);
+    ASSERT_TRUE(again.has_value()) << error;
+    EXPECT_EQ(readU32(cacheBytes(dir, "pine"), kModelCacheMaxVerticesOffset), 65535u);
+}
+
+TEST(ModelCache, RejectsUnsafeIdentifiers)
+{
+    CacheDir dir;
+    dir.writeGlb("CON.glb", triangleGlb(1.0f));
+    dir.writeGlb("com1.glb", triangleGlb(1.0f));
+    dir.writeGlb("a:b.glb", triangleGlb(1.0f));
+    const std::vector<std::string> sources = { dir.source };
+    const ModelCacheStats stats = prepareModelCache(sources, dir.cache, nullptr);
+    EXPECT_EQ(stats.converted, 0);
+    EXPECT_EQ(stats.failed, 0);
+    EXPECT_FALSE(OpenRCT2::File::Exists(OpenRCT2::Path::Combine(dir.cache, "CON.o3d")));
+
+    const char* names[] = { "CON", "con", "PRN", "AUX", "NUL", "COM1", "com9", "LPT1", "lpt9", "NUL.extra", "bad:id" };
+    for (const char* name : names)
+    {
+        std::string error;
+        EXPECT_FALSE(loadModelForDraw(name, sources, dir.cache, error)) << name;
+        EXPECT_FALSE(error.empty()) << name;
+    }
+}
+
+TEST(ModelCache, DirectoriesAreUnique)
+{
+    CacheDir first;
+    CacheDir second;
+    EXPECT_NE(first.root, second.root);
 }

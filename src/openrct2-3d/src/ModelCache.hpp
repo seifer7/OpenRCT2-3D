@@ -20,8 +20,13 @@
 
 namespace OpenRCT2::View3D
 {
-    // Bump this when the cache bytes change. Older files are rebuilt.
-    constexpr uint32_t kModelCacheVersion = 1;
+    // Bump this when the .o3d bytes change. Older files are rebuilt.
+    // Version 2 adds a body checksum, the GLB converter version, and MeshLoadLimits.
+    constexpr uint32_t kModelCacheVersion = 2;
+    constexpr size_t kModelCacheHeaderBytes = 68;
+    // Offsets of the converter version and the first MeshLoadLimits field (maxVertices).
+    constexpr size_t kModelCacheConverterOffset = 40;
+    constexpr size_t kModelCacheMaxVerticesOffset = 44;
 
     struct ModelCacheStats
     {
@@ -38,9 +43,10 @@ namespace OpenRCT2::View3D
     ModelCacheStats prepareModelCache(
         const std::vector<std::string>& sourceDirs, const std::string& cacheDir, ModelCacheProgressFn progress);
 
-    // Loads a converted mesh. Uses the cache when the GLB's size, modification time,
-    // and content hash still match. Parses the GLB when the cache is missing or unreadable.
-    // Returns nullopt for a missing or unusable GLB. `error` is empty when the file is simply absent.
+    // Loads a converted mesh. When the cache header's source size and modification
+    // time still match the GLB, the file is read once and its body checksum is checked.
+    // The GLB is hashed only when that size or time differs. A missing or bad cache
+    // parses the GLB. `error` is empty when the file is simply absent.
     std::optional<CpuMesh> loadModelForDraw(
         const std::string& identifier, const std::vector<std::string>& sourceDirs, const std::string& cacheDir,
         std::string& error);

@@ -19,6 +19,7 @@
     "tertiary": false
   },
   "expected_triangles": 864,
+  "texture_justification": "Reference 1-tile tree. The approved Corsican Pine atlas is 256\u00b2. New models default to 128\u00b2; a larger atlas needs a justification like this one.",
   "approved_iou": {
     "views": [0.733, 0.712, 0.766, 0.687],
     "mean": 0.725,

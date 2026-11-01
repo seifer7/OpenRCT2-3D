@@ -6,7 +6,7 @@
   python3 tools/sprite-to-3d/rebuild.py \\
       --object rct2.scenery_small.tcrp \\
       --rct2-data-path /path/to/rct2 \\
-      --out data/object-models/rct2.scenery_small.tcrp
+      --out data/object-models
 
 The atlas is coloured from Data/g1.dat. Sprites are extracted into
 tools/sprite-to-3d/cache (gitignored) and used only for the IoU check.
@@ -45,6 +45,8 @@ def _read(path):
 
 
 def resolve_palette(args, cache_dir):
+    if getattr(args, "palette_header", False):
+        return rct2dat.load_standard_palette(), "ImageImporter.h StandardPalette, the same colours as Data/g1.dat"
     if args.rct2_data_path:
         g1, _obj = extract_mod.find_install(args.rct2_data_path)
         return rct2dat.load_palette(g1), "Data/g1.dat"
@@ -88,7 +90,7 @@ def export_with_blender(object_id, params_path, atlas_png, atlas_json, out_dir):
     subprocess.check_call(cmd)
 
 
-def write_meta(path, spec, params, tiles, mesh, palette_source, sprite_meta, glb_name):
+def write_meta(path, spec, params, tiles, mesh, palette_source, sprite_meta, glb_name, exporter):
     pts = np.array(mesh.V, np.float64) / C.SIM_PER_UNIT
     bmin = [float(v) for v in pts.min(axis=0)]
     bmax = [float(v) for v in pts.max(axis=0)]
@@ -138,16 +140,37 @@ def write_meta(path, spec, params, tiles, mesh, palette_source, sprite_meta, glb
         "base_sink_sim": spec["base_sink_sim"],
         "triangles": triangle_count(mesh),
         "texture": {
-            "file": spec["object_id"] + ".atlas.png",
-            "width": 256,
-            "height": 256,
+            "embedded": True,
+            "width": int((params.get("atlas") or {}).get("size", [256, 256])[0]),
+            "height": int((params.get("atlas") or {}).get("size", [256, 256])[1]),
             "alpha_mode": "MASK",
             "alpha_cutoff": 0.5,
             "filter": "NEAREST",
             "mipmaps": False,
             "double_sided": True,
             "tiles": tiles,
+            "justification": spec.get("texture_justification") or "",
             "palette_source": palette_source,
+        },
+        "units_and_scale": {
+            "convention": "1 Blender unit = 1 tile = 32 sim units on x, y and z",
+            "origin": "tile centre, z=0 at the element base",
+            "bbox_BU": {"min": bmin, "max": bmax, "size": size},
+            "bbox_sim": {
+                "min": [v * C.SIM_PER_UNIT for v in bmin],
+                "max": [v * C.SIM_PER_UNIT for v in bmax],
+            },
+        },
+        "geometry": {"triangles": triangle_count(mesh)},
+        "export": {
+            "exporter": exporter,
+            "reference": (
+                "The approved rct2.scenery_small.tcrp.glb next to the loader is the "
+                "Blender 4.2 LTS export (Khronos glTF Blender I/O v4.2.83), patched "
+                "to nearest filtering and alpha MASK. --no-blender uses the Python "
+                "writer, which welds vertices and writes u16 indices so the structure "
+                "matches that file. The game does not read this meta."
+            ),
         },
         "iou": {
             "views": stored_iou["views"] if stored_iou else None,
@@ -181,7 +204,8 @@ def main(argv):
     parser.add_argument("--sprites", help="already-extracted sprite folder; skips the DAT extract")
     parser.add_argument("--palette", help="palette file, used only when Data/g1.dat is not available")
     parser.add_argument("--palette-base", type=int, default=0, help="palette index of the first colour in --palette")
-    parser.add_argument("--out", help="output directory for the GLB, atlas, and meta")
+    parser.add_argument("--palette-header", action="store_true", help="colour the atlas from ImageImporter.h StandardPalette")
+    parser.add_argument("--out", help="directory for <id>.glb and <id>.meta.json (flat, default data/object-models)")
     parser.add_argument("--no-blender", action="store_true", help="export the GLB with the Python writer")
     parser.add_argument("--skip-validate", action="store_true")
     args = parser.parse_args(argv)
@@ -191,8 +215,12 @@ def main(argv):
     params = _read(os.path.join(example, "params.json"))
     if spec["archetype"] != "conifer":
         raise SystemExit(f"rebuild.py currently builds the conifer archetype, not {spec['archetype']}")
-    out_dir = args.out or os.path.join(REPO_ROOT, "data", "object-models", spec["object_id"])
+    # Flat layout: data/object-models/<id>.glb and <id>.meta.json. The loader
+    # does not search subfolders. The atlas is only a build intermediate.
+    out_dir = args.out or os.path.join(REPO_ROOT, "data", "object-models")
     os.makedirs(out_dir, exist_ok=True)
+    build_dir = os.path.join(TOOL_DIR, "out", "build")
+    os.makedirs(build_dir, exist_ok=True)
     cache_dir = os.path.join(TOOL_DIR, "cache", spec["object_id"])
 
     sprite_meta = None
@@ -205,8 +233,8 @@ def main(argv):
         args.sprites = cache_dir
 
     palette, palette_source = resolve_palette(args, args.sprites)
-    atlas_png = os.path.join(out_dir, spec["object_id"] + ".atlas.png")
-    atlas_json = os.path.join(out_dir, spec["object_id"] + ".atlas.json")
+    atlas_png = os.path.join(build_dir, spec["object_id"] + ".atlas.png")
+    atlas_json = os.path.join(build_dir, spec["object_id"] + ".atlas.json")
     atlas = write_atlas(params, palette, atlas_png, atlas_json)
     mesh = build_mesh(spec["archetype"], params, atlas["tiles"])
     count = triangle_count(mesh)
@@ -217,19 +245,25 @@ def main(argv):
 
     glb_path = os.path.join(out_dir, spec["object_id"] + ".glb")
     params_path = os.path.join(example, "params.json")
-    if args.no_blender or not blender_bin():
+    used_blender = not args.no_blender and blender_bin()
+    if not used_blender:
         if not args.no_blender:
             print("blender is not on PATH; exporting with the Python glTF writer")
         png = open(atlas_png, "rb").read()
         stats = write_glb(glb_path, mesh, png, spec["object_id"], tuple(atlas["size"]))
-        print(f"wrote {glb_path} ({stats['triangles']} triangles)")
+        print(f"wrote {glb_path} ({stats['triangles']} triangles, {stats['vertices']} vertices)")
+        exporter = "python (--no-blender)"
     else:
         export_with_blender(spec["object_id"], params_path, atlas_png, atlas_json, out_dir)
+        exporter = "blender-4.2"
     patch(glb_path)
     print(f"patched samplers on {glb_path}")
 
     meta_path = os.path.join(out_dir, spec["object_id"] + ".meta.json")
-    write_meta(meta_path, spec, params, atlas["tiles"], mesh, palette_source, sprite_meta, os.path.basename(glb_path))
+    write_meta(
+        meta_path, spec, params, atlas["tiles"], mesh, palette_source, sprite_meta,
+        os.path.basename(glb_path), exporter,
+    )
     print(f"wrote {meta_path}")
 
     if args.skip_validate:

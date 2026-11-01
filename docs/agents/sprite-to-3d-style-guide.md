@@ -17,7 +17,9 @@ Read this file on its own. The pine is the reference object:
 | Bounds | about 1.49 × 1.42 × 4.28 units |
 | Approved silhouette IoU | 0.733, 0.712, 0.766, 0.687 (mean 0.725) |
 
-The reference files are `data/object-models/rct2.scenery_small.tcrp/`. The scripts that rebuild them are `tools/sprite-to-3d/`.
+The loader looks for a flat file, `data/object-models/<object id>.glb`, and then the same name under the user directory. It does not search subfolders. Dropping a correctly named `.glb` into `object-models` is the whole install step. `<object id>.meta.json` may sit beside it. The game never reads the meta; it is for people and for `validate.py`. The scripts live in `tools/sprite-to-3d/`.
+
+The approved pine GLB is the Blender 4.2 LTS export (`Khronos glTF Blender I/O v4.2.83`), patched so the sampler is nearest and the alpha mode is MASK. That file belongs to the loader change (PR #6) at `data/object-models/rct2.scenery_small.tcrp.glb`. This pipeline does not commit a second copy. `--no-blender` writes the same mesh with welded vertices and u16 indices (1908 vertices, 864 triangles on the pine). Its file is a few hundred bytes different because the JSON chunk is not Blender's.
 
 ## What the pipeline recommendation already decided
 
@@ -162,7 +164,7 @@ Foliage is overlapping needle lumps: a scalloped disc, light at the top and cent
 
 Histogram targets for the pine (palette-index counts) live as the defaults in `conifer_atlas.py`. They were counted on the TCRP sprite: foliage greens 142–150, bark browns 34–38, grey-blue highlights 11–15. A new conifer overrides `atlas.top_hist`, `side_hist`, `sprite_hist`, and `bark_hist` in its params after counting its own sprite. The paint seed is 2611.
 
-Colour the indices from the user's `Data/g1.dat` (sprite 1532, `SPR_GAME_PALETTE_DEFAULT`, bytes stored BGR). The reference atlas in the repo was coloured from the public Lospec palette "rollercoaster-tycoon-2-color-map", with its 246 entries placed at indices 10–255, because the export machine had no RCT2 install. Rebuild with `--rct2-data-path` to sample `g1.dat`. The palette file is not in the repository. Expect at most a one-level shift against a true g1 sample; the index choices and the needle shapes are the style.
+Colour the indices from the user's `Data/g1.dat` (sprite 1532, `SPR_GAME_PALETTE_DEFAULT`, bytes stored BGR). Those RGB values are the same table as `StandardPalette` in `src/openrct2/drawing/ImageImporter.h` (stored there as B, G, R). The pine atlas matches that palette: every opaque texel is one of those colours, and a byte comparison against an atlas painted from `g1.dat` shows no differing pixels. `rebuild.py --palette-header` reads the header so a machine without an install can still colour the example. Do not commit a palette file.
 
 UVs in the mesh are texel coordinates with the origin at the top-left of the atlas. The glTF file stores them with the glTF top-left origin `(u / width, v / height)`. Blender's exporter flips V on the way out; `build.py` sets Blender UVs as `(u / width, 1 − v / height)` so both exporters agree.
 
@@ -218,20 +220,20 @@ Match the silhouette before adding more cards. A clump that does not move the Io
 
 ## Poly and texture budgets
 
-The validator fails a file over the hard triangle cap or over the texture cap. The soft cap is the target. The pine (864 triangles, 256²) sits under the soft cap for a 1-tile tree and is the reference those numbers were chosen from.
+Every numeric cap is in `tools/sprite-to-3d/conventions.py` (`SIZE_CLASSES` and the `MAX_*` constants). `validate.py` reads that file. Change a number there and nowhere else. The classes, and why each one exists:
 
-| Size class | What it is | Soft tris | Hard tris | Max atlas |
-| --- | --- | --- | --- | --- |
-| `prop_quarter` | quarter-tile prop (bone, logs, cauldron) | 250 | 500 | 128² |
-| `prop_tile` | full-tile prop, short | 500 | 1000 | 256² |
-| `tree_small` | 1-tile tree, height under 96 sim Z | 800 | 1200 | 256² |
-| `tree_1tile` | 1-tile tree around the pine (height ~134) | 1200 | 1500 | 256² |
-| `tree_large` | taller or wider tree | 2500 | 4000 | 512² |
-| `large_scenery` | multi-tile scenery | 4000 | 8000 | 512² |
+| Size class | What it is | Why this class |
+| --- | --- | --- |
+| `prop_quarter` | Quarter-tile prop (bone, logs, cauldron) | The mesh stays inside half a tile. No canopy allowance. Atlas stays at the 128² default. |
+| `prop_tile` | Full-tile prop that is not a tree | Same file limits as a small object. A short prop may use fewer than 600 triangles; that lower bound is a warning for trees only. |
+| `tree_small` | One-tile tree shorter than the pine | Canopy may reach ±0.85 units. Atlas stays 128². |
+| `tree_1tile` | One-tile tree the size of the pine | Canopy class. The target band is 600–1200 triangles and the hard cap is the file maximum. 256² is allowed for this class only with a written `texture.justification`, or for the pine object id, which is the reference exception. |
+| `tree_large` | Taller or wider tree, still one mesh | Same file cap as `tree_1tile`. A bigger tree does not get more triangles or a 512² atlas; it spends the same budget on a larger silhouette. Canopy allowance applies. 256² needs a justification. |
+| `large_scenery` | Multi-tile scenery, one mesh for the whole footprint | The file cap does not multiply by the tile count. A four-tile object still has to fit the same triangle cap and the same 256² ceiling, so the practical share is that cap divided by the number of tiles. One mesh is one draw. 256² needs a justification. |
 
-Prefer a power-of-two atlas. 256² is the default for anything with foliage. A quarter-tile prop should not carry a 256² texture. Share one atlas across the materials of a single object. Do not ship a second texture for the sake of a unique texel on one twig.
+New models use a 128² atlas. 256² is the pine's atlas and the ceiling, not the default. A 256² RGBA texture is about 256 KB before the GPU rounds it up (about 328 KB), which dominates VRAM once thousands of distinct models are loaded. The validator warns when a new model is above 128² unless `texture.justification` is a non-empty string. The pine object id is the exception and does not warn.
 
-These caps are the authoring budget. The pipeline recommendation's concern about VRAM (a thousand unique 512² textures) is why the caps exist. That document's converter may later compress textures; the source GLB stays nearest and uncompressed so the pixel art is the input, not a blurred intermediate.
+A tree under the target floor warns. It does not fail. A prop under that floor does not warn. Anything over the hard cap fails. The GLB must be at most 128 KB; over the 100 KB target warns. Vertices must be at most 2500, with u16 indices. Exactly one node, one mesh, one primitive and one material.
 
 ## Export
 
@@ -242,7 +244,7 @@ These caps are the authoring budget. The pipeline recommendation's concern about
 5. Write `<object id>.meta.json` beside it.
 6. Run `validate.py`. With sprites available, pass them and `--require-iou`.
 
-`rebuild.py` does those steps. Blender 4.2 LTS is the authoring export (`build.py`) and is required for beauty renders and for `fit.py`. The same mesh module can be written by `glb_io.py` when Blender is not installed (`--no-blender`). Both go through `patch_glb.py`. The committed pine was exported by the Python writer; its positions match the Blender path because both call `conifer.build`.
+`rebuild.py` does those steps. Blender 4.2 LTS is the authoring export (`build.py`) and is required for beauty renders and for `fit.py`. The same mesh module can be written by `glb_io.py` when Blender is not installed (`--no-blender`). Both go through `patch_glb.py`. The pine GLB in `data/object-models/` is the Blender export. `--no-blender` welds the same corners and writes u16 indices; it is the fallback, not the file that ships.
 
 OBJ export is optional and stays in the gitignored output directory. The repository gitignores `*.obj` already. Do not add an OBJ next to the reference GLB.
 
@@ -251,15 +253,17 @@ Beauty renders, when you ask `build.py` for `--beauty`, are perspective previews
 ## File names and the meta schema
 
 ```text
-data/object-models/<object id>/<object id>.glb
-data/object-models/<object id>/<object id>.meta.json
-data/object-models/<object id>/<object id>.atlas.png
-data/object-models/<object id>/<object id>.atlas.json
+data/object-models/<object id>.glb
+data/object-models/<object id>.meta.json
 ```
 
-The object id is the OpenRCT2 identifier (`rct2.scenery_small.tcrp`), not the DAT name. The same id is the mesh name inside the GLB. CMake installs the whole `data/` tree, so this folder is copied into the install. The viewer does not load it yet; it is the reference art and the future built-in source. Do not put these files under `data/object`, which is the downloaded objects zip and is gitignored.
+The atlas PNG and its tile JSON are build intermediates under `tools/sprite-to-3d/out/` (gitignored). They are already inside the GLB. The Visual Studio copy and `install(DIRECTORY "data/")` copy everything in `object-models` into the data directory, so a sidecar atlas would be shipped twice and would not be read. The meta is small and the loader ignores it.
 
-`<object id>.meta.json` uses schema `openrct2-3d.object-model.v1`. Required fields:
+The object id is the OpenRCT2 identifier (`rct2.scenery_small.tcrp`), not the DAT name. The file name is that id plus `.glb`. Do not put models under `data/object`, which is the downloaded objects zip and is gitignored. Do not put them in a subdirectory: the loader's scan is `object-models/*.glb` and it is not recursive.
+
+The pine's meta, already next to the flat GLB, is the record from the Blender build: units, bounds, geometry, texture tiles, and the silhouette fit. The loader ignores it. `rebuild.py` writes a superset of that record (the same bounds and triangle count, plus `object_id`, `size_class`, `export`, and `texture.justification`). The validator accepts either shape.
+
+The tooling meta uses schema `openrct2-3d.object-model.v1`. Its fields:
 
 | Field | Meaning |
 | --- | --- |

@@ -27,25 +27,82 @@ NEAREST = 9728
 CLAMP_TO_EDGE = 33071
 MIPMAP_MIN_FILTERS = {9984, 9985, 9986, 9987}  # NEAREST_MIPMAP_*, LINEAR_MIPMAP_*
 
-# IoU against the placed sprite mask. The approved pine clears these
-# (worst view 0.687, mean 0.725) with a little room.
+# Checklist numbers. validate.py reads these and does not restate them.
+# The Corsican Pine (864 tris, 1908 vertices, 256²) is the reference.
+# A 256² atlas is about 256 KB of RGBA8 VRAM before the driver pads it
+# (roughly 328 KB with the usual GPU alignment), which matters at ~10k models.
+PINE_OBJECT_ID = "rct2.scenery_small.tcrp"
+MAX_TRIANGLES = 1500
+TREE_TRIANGLE_TARGET = (600, 1200)
+MAX_VERTICES = 2500
+MAX_TEXTURE = 256
+PREFERRED_TEXTURE = 128
+MAX_GLB_BYTES = 128 * 1024
+TARGET_GLB_BYTES = 100 * 1024
+PROP_FOOTPRINT = 0.5
+TREE_FOOTPRINT = 0.85
+HEIGHT_TOLERANCE_SIM = 2.0
+BASE_SINK_MAX = 0.1
 IOU_MIN_PER_VIEW = 0.65
 IOU_MIN_MEAN = 0.70
+AREA_RATIO = (0.9, 1.3)
+TEXEL_DENSITY = 32.0
+TEXEL_DENSITY_TOLERANCE = 0.25
 
-# Poly and texture budgets. The Corsican Pine (864 tris, 256^2) is the
-# reference point for tree_1tile. Hard caps are what the validator enforces.
-# Soft caps are the art-direction target documented in the style guide.
+# hard_tris is an error. max_texture is an error. preferred_texture is the
+# size new models should use; a larger atlas warns unless the meta carries
+# a written justification. The pine object id is the 256² reference and
+# does not warn. canopy marks the classes allowed out to TREE_FOOTPRINT.
+# tree_warn_below is the triangle count under which a tree class warns.
+# Reasons for anything above a small prop live in the style guide.
 SIZE_CLASSES = {
-    "prop_quarter": {"soft_tris": 250, "hard_tris": 500, "max_texture": 128},
-    "prop_tile": {"soft_tris": 500, "hard_tris": 1000, "max_texture": 256},
-    "tree_small": {"soft_tris": 800, "hard_tris": 1200, "max_texture": 256},
-    "tree_1tile": {"soft_tris": 1200, "hard_tris": 1500, "max_texture": 256},
-    "tree_large": {"soft_tris": 2500, "hard_tris": 4000, "max_texture": 512},
-    "large_scenery": {"soft_tris": 4000, "hard_tris": 8000, "max_texture": 512},
+    "prop_quarter": {
+        "soft_tris": 250,
+        "hard_tris": 500,
+        "max_texture": 128,
+        "canopy": False,
+        "tree_warn_below": None,
+    },
+    "prop_tile": {
+        "soft_tris": 500,
+        "hard_tris": 1000,
+        "max_texture": 128,
+        "canopy": False,
+        "tree_warn_below": None,
+    },
+    "tree_small": {
+        "soft_tris": 600,
+        "hard_tris": 1200,
+        "max_texture": 128,
+        "canopy": True,
+        "tree_warn_below": TREE_TRIANGLE_TARGET[0],
+    },
+    "tree_1tile": {
+        "soft_tris": TREE_TRIANGLE_TARGET[0],
+        "hard_tris": MAX_TRIANGLES,
+        "max_texture": MAX_TEXTURE,
+        "canopy": True,
+        "tree_warn_below": TREE_TRIANGLE_TARGET[0],
+    },
+    "tree_large": {
+        "soft_tris": TREE_TRIANGLE_TARGET[0],
+        "hard_tris": MAX_TRIANGLES,
+        "max_texture": MAX_TEXTURE,
+        "canopy": True,
+        "tree_warn_below": TREE_TRIANGLE_TARGET[0],
+    },
+    "large_scenery": {
+        "soft_tris": TREE_TRIANGLE_TARGET[0],
+        "hard_tris": MAX_TRIANGLES,
+        "max_texture": MAX_TEXTURE,
+        "canopy": False,
+        "tree_warn_below": None,
+    },
 }
 
-# How far below z = 0 a trunk may sink so it meets uneven land, in sim units.
-DEFAULT_SINK_SIM = 8.0
+# How far below z = 0 a trunk may sink, in sim units. The checklist cap
+# in Blender units is BASE_SINK_MAX (0.1), about 3 sim units.
+DEFAULT_SINK_SIM = 3.0
 
 # Recolour palette index ranges (PaletteIndex.h).
 RECOLOUR_RANGES = {

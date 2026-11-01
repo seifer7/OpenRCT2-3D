@@ -282,8 +282,6 @@ static void writeU64(std::vector<uint8_t>& bytes, size_t offset, uint64_t value)
 
 static bool setModifiedNs(const std::string& path, uint64_t ns)
 {
-    const uint64_t sec = ns / 1000000000uLL;
-    const uint64_t nsec = ns % 1000000000uLL;
 #ifdef _WIN32
     const std::wstring wide = OpenRCT2::String::toWideChar(path);
     const HANDLE file = CreateFileW(
@@ -301,6 +299,8 @@ static bool setModifiedNs(const std::string& path, uint64_t ns)
     CloseHandle(file);
     return ok != 0;
 #else
+    const uint64_t sec = ns / 1000000000uLL;
+    const uint64_t nsec = ns % 1000000000uLL;
     timespec times[2]{};
     times[0].tv_sec = times[1].tv_sec = static_cast<time_t>(sec);
     times[0].tv_nsec = times[1].tv_nsec = static_cast<long>(nsec);

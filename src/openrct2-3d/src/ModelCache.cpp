@@ -714,13 +714,9 @@ namespace OpenRCT2::View3D
             bool trustHeader = header.present && header.error.empty();
             if (trustHeader && header.stamp.size == glbSize && header.stamp.mtime == glbMtime)
             {
-                // Full body checksum on every launch, including this size/mtime fast path.
-                if (streamingChecksumOk(cachePath))
-                {
-                    rememberValidated(identifier, cachePath);
-                    return CacheAction::skipped;
-                }
-                trustHeader = false;
+                // Size and mtime still match. Trust the cache. Do not hash the GLB or the body.
+                rememberValidated(identifier, cachePath);
+                return CacheAction::skipped;
             }
 
             std::string error;
@@ -733,8 +729,9 @@ namespace OpenRCT2::View3D
             const SourceStamp stamp = stampOf(glbPath, bytes);
             if (trustHeader && header.stamp.size == stamp.size && header.stamp.hash == stamp.hash)
             {
+                // Content hash matches. Rewrite the stored size and mtime. Do not reconvert.
                 std::string writeError;
-                if (refreshCacheTime(cachePath, stamp, writeError) && streamingChecksumOk(cachePath))
+                if (refreshCacheTime(cachePath, stamp, writeError))
                 {
                     rememberValidated(identifier, cachePath);
                     return CacheAction::skipped;

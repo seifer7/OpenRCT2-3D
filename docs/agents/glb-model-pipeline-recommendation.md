@@ -63,6 +63,6 @@ Mask textures plus per-instance colour.
 
 - **First milestone:** instanced boxes per object type with chunk culling, before any real art, to prove the draw and culling path at 10k+ objects. Then the GLB loader and converter, then remap colours, then animation.
 - Add shaderc builds for DX11, Vulkan, Metal before relying on those backends (only OpenGL is enabled now).
-- Document the axis and scale conversion and pivot convention in `docs/3d-viewer.md`; that's where Blender authors will get it wrong.
+- Document the axis and scale conversion and pivot convention in `docs/3d-viewer.md`; that's where Blender authors will get it wrong. The authoring rules that close this (tile-centre origin, Z = 0 at the element base, the render-only sqrt(2/3) squash, MASK materials, budgets, and the Corsican Pine reference) are in `docs/agents/sprite-to-3d-style-guide.md`.
 
-Status: recommendation only. Nothing here is a decided implementation yet except the existing standing decision of 1 Blender unit = 1 tile = 32 sim units on every axis (Z = world Z / 32, matching ParkView `worldZ`).
+Status: the runtime plan above is still a recommendation, not an implementation. The standing scale decision is 1 Blender unit = 1 tile = 32 sim units on every axis (Z = world Z / 32, matching ParkView `worldZ`). Authoring conventions that go with it are in `docs/agents/sprite-to-3d-style-guide.md`.

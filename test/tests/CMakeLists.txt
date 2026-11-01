@@ -52,7 +52,6 @@ target_link_libraries(OpenRCT2Tests GTest::gtest GTest::gtest_main libopenrct2)
 target_include_directories(
     OpenRCT2Tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../src" "${ROOT_DIR}/src/openrct2-3d/src"
                           "${ROOT_DIR}/src/openrct2-3d/third_party/cgltf")
-target_compile_definitions(OpenRCT2Tests PRIVATE "OPENRCT2_TCRP_GLB=\"${ROOT_DIR}/data/object-models/rct2.scenery_small.tcrp.glb\"")
 set_target_properties(OpenRCT2Tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 gtest_discover_tests(OpenRCT2Tests
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}

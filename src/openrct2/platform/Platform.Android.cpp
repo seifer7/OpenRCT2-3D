@@ -188,6 +188,20 @@ namespace OpenRCT2::Platform
         return lastModified;
     }
 
+    uint64_t GetLastModifiedNs(std::string_view path)
+    {
+        if (String::startsWith(path, Platform::kAndroidAssetPathPrefix))
+        {
+            return 0;
+        }
+        struct stat info{};
+        if (stat(std::string(path).c_str(), &info) != 0 || info.st_mtim.tv_sec < 0)
+        {
+            return 0;
+        }
+        return static_cast<uint64_t>(info.st_mtim.tv_sec) * 1000000000uLL + static_cast<uint64_t>(info.st_mtim.tv_nsec);
+    }
+
     uint64_t GetFileSize(std::string_view path)
     {
         if (String::startsWith(path, Platform::kAndroidAssetPathPrefix))

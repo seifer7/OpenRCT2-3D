@@ -502,6 +502,24 @@ namespace OpenRCT2::Platform
         return -1;
     }
 
+    uint64_t GetLastModifiedNs(std::string_view path)
+    {
+        const auto pathW = String::toWideChar(path);
+        WIN32_FILE_ATTRIBUTE_DATA info{};
+        if (GetFileAttributesExW(pathW.c_str(), GetFileExInfoStandard, &info) == 0)
+        {
+            return 0;
+        }
+        const uint64_t ticks = (static_cast<uint64_t>(info.ftLastWriteTime.dwHighDateTime) << 32uLL)
+            | static_cast<uint64_t>(info.ftLastWriteTime.dwLowDateTime);
+        constexpr uint64_t kUnixEpoch = 116444736000000000uLL;
+        if (ticks < kUnixEpoch)
+        {
+            return 0;
+        }
+        return (ticks - kUnixEpoch) * 100uLL;
+    }
+
     uint64_t GetLastModified(std::string_view path)
     {
         uint64_t lastModified = 0;

@@ -1,6 +1,10 @@
 name: clang-tidy-check
 on:
   pull_request:
+    # labeled is included so adding CI Request starts a run. The job if below
+    # ignores every other label. opened, synchronize, and reopened still run
+    # when the PR already carries CI Request.
+    types: [opened, synchronize, reopened, labeled]
     paths-ignore:
       - '.editorconfig'
       - '.gitattributes'
@@ -9,8 +13,21 @@ on:
       - '.gitignore'
       - '.vscode/**'
 
+# Same grouping idea as ci.yml, with its own prefix so the two workflows do not
+# cancel each other. An unrelated label must not cancel an in-progress run.
+concurrency:
+  group: ${{ github.event.action == 'labeled' && github.event.label.name != 'CI Request' && format('clang-tidy-{0}-label-{1}', github.head_ref, github.run_id) || format('clang-tidy-{0}', github.head_ref || github.run_id) }}
+  cancel-in-progress: true
+
 jobs:
   clang-tidy-check:
+    # Same condition as ci.yml's gate. This file has no push trigger.
+    if: |
+      github.event_name != 'pull_request' ||
+      (
+        contains(github.event.pull_request.labels.*.name, 'CI Request') &&
+        (github.event.action != 'labeled' || github.event.label.name == 'CI Request')
+      )
     runs-on: ubuntu-latest
     container: openrct2/openrct2-build:20-noble
     steps:

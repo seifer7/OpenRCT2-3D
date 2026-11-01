@@ -37,7 +37,7 @@ The default output directory is `tools/sprite-to-3d/out/` (gitignored): `<id>.gl
 3. Builds the conifer mesh from `examples/rct2.scenery_small.tcrp/params.json`.
 4. Exports the GLB with Blender 4.2 when `blender` is on `PATH`, otherwise with the Python writer. Pass `--no-blender` to force the Python writer. The approved file in the tree is the Blender export; `--no-blender` matches its vertex structure (welded vertices, u16 indices) and is not a second committed copy.
 5. Runs `patch_glb.py` so the sampler is nearest, with no mipmaps, and the material is alpha MASK at 0.5.
-6. Writes the flat meta and runs the validator with the extracted sprites. IoU has to clear 0.65 on every view and 0.70 on average.
+6. Measures raw and closed-mask IoU against the extracted sprites, writes the flat meta (with both in its `iou` block), and runs the validator. The gate is closed-mask IoU (3×3 close on both masks): at least 0.70 on every view and 0.75 on average. Raw IoU is reported beside it and does not gate.
 
 Check the pipeline output, and the approved GLB when that file or the loader branch is available:
 
@@ -55,7 +55,30 @@ python3 tools/sprite-to-3d/validate.py \
   --out tools/sprite-to-3d/out/rct2.scenery_small.tcrp.review.png
 ```
 
-The review PNG pastes the original sprites beside the renders. It is gitignored (`*.review.png` and `tools/sprite-to-3d/out/`). Do not commit it. The meta must contain `alignment` (`sprite_shift` and `sprite_y_nudge`) or the validator refuses to score sprites. The pine's fitted alignment is `[-2, 0]` and `-1`. With that paste, IoU against the real TCRP sprites is 0.733, 0.712, 0.766, 0.687 (mean 0.725).
+The review PNG pastes the original sprites beside the renders. It is gitignored (`*.review.png` and `tools/sprite-to-3d/out/`). Do not commit it. The meta must contain `alignment` (`sprite_shift` and `sprite_y_nudge`) or the validator refuses to score sprites. The pine's fitted alignment is `[-2, 0]` and `-1`. With that paste, raw IoU against the real TCRP sprites is 0.733, 0.712, 0.766, 0.687 (mean 0.725) and closed-mask IoU is 0.780, 0.737, 0.787, 0.734 (mean 0.759).
+
+What the validator checks per size class, all read from `conventions.SIZE_CLASSES`:
+
+- **IoU.** Closed-mask IoU gates (`IOU_CLOSE_KERNEL` 3, `IOU_CLOSED_MIN_PER_VIEW` 0.70, `IOU_CLOSED_MIN_MEAN` 0.75). Raw IoU and the 0.9–1.3 area ratio are reported; the area ratio gates.
+- **Empty render.** Each view needs `min_render_px` opaque pixels: prop_quarter 100, prop_tile 250, tree_quarter 150, otherwise 500.
+- **Triangles.** Over `soft_max_tris` warns, over `hard_tris` fails, under `tree_warn_below` warns (trees only). A meta `triangle_justification` is shown on the soft-cap warning.
+- **Footprint.** The whole mesh within `footprint_bu`; for `tree_quarter` also the trunk base (bottom `TRUNK_BASE_BAND_SIM` = 4 sim) within `trunk_base_bu` 0.25.
+- **Tips.** The model tip against the tallest sprite tip (±2 sim fails), and each view's tip against its own sprite (beyond ±2 warns, beyond ±4 fails).
+- **Histograms.** None in the meta.
+
+The validator rasteriser is depth-tested (per-pixel interpolated depth and a z-buffer), so the review sheet shows the nearest surface. Coverage and IoU do not depend on it.
+
+### params.json
+
+The archetype inputs. `rebuild.py` copies them into the meta's `params`, minus histograms.
+
+| Key | Meaning |
+| --- | --- |
+| archetype keys (`trunk_rings`, `clumps`, `branches`, `quality`, `stems`, `parts`, ...) | geometry inputs; see the archetype module |
+| `atlas.size`, `atlas.tiles` | atlas size and tile layout |
+| `hist`, `*_hist` (`sprite_hist`, `top_hist`, `side_hist`, `bark_hist`, `rim_hist`, ...) | palette-index histograms that tint the atlas. Counts derived locally from the extracted sprite; no pixel data stored. At most 16 entries each (`MAX_HIST_ENTRIES`; `rebuild.py` refuses more). Not copied into the meta. |
+
+`object.json` may also carry `approved_iou` (the reviewed raw figures, kept in `iou.views`) and `triangle_justification` (copied to the meta's top level).
 
 ```bash
 python3 -m pytest tools/sprite-to-3d

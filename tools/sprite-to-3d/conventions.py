@@ -41,62 +41,141 @@ MAX_GLB_BYTES = 128 * 1024
 TARGET_GLB_BYTES = 100 * 1024
 PROP_FOOTPRINT = 0.5
 TREE_FOOTPRINT = 0.85
+# Quarter-tile objects are authored about their own quadrant centre. A
+# quadrant is 0.5 x 0.5 tiles, so "inside the quadrant" is +-0.25 units.
+QUARTER_FOOTPRINT = 0.25
+# tree_quarter canopies may overhang their quadrant; the trunk base may not.
+TREE_QUARTER_CANOPY = 0.40
+# The trunk base is the bottom slice of the mesh: everything from the lowest
+# vertex up to this many sim units above it (1/8 tile, a quarter land step).
+# Triangle edges that cross the top of the band are cut at the band.
+TRUNK_BASE_BAND_SIM = 4.0
 HEIGHT_TOLERANCE_SIM = 2.0
+# Per-view tip deltas (render tip minus that view's sprite tip, in sim units).
+# Over TIP_VIEW_WARN_SIM warns; over TIP_VIEW_FAIL_SIM fails. The tallest-tip
+# check above (HEIGHT_TOLERANCE_SIM) still applies on its own.
+TIP_VIEW_WARN_SIM = 2.0
+TIP_VIEW_FAIL_SIM = 4.0
 BASE_SINK_MAX = 0.1
+# Raw-mask IoU reference levels. Reported and recorded in the meta as
+# iou.threshold_per_view / iou.threshold_mean; they no longer gate.
 IOU_MIN_PER_VIEW = 0.65
 IOU_MIN_MEAN = 0.70
+# The IoU gate (batch 1 QA decision 1). Both the sprite mask and the model
+# mask get a morphological close with a square IOU_CLOSE_KERNEL x
+# IOU_CLOSE_KERNEL structuring element (3 = 3x3, "3px") before scoring, so a
+# stippled sprite is not scored pixel by pixel. The thresholds are tighter
+# than the raw ones because the close inflates every score.
+IOU_CLOSE_KERNEL = 3
+IOU_CLOSED_MIN_PER_VIEW = 0.70
+IOU_CLOSED_MIN_MEAN = 0.75
 AREA_RATIO = (0.9, 1.3)
 TEXEL_DENSITY = 32.0
 TEXEL_DENSITY_TOLERANCE = 0.25
+# Palette-index histograms in params.json (sprite_hist, top_hist, bark_hist,
+# hist, rim_hist, ...) are counts derived locally from the extracted sprite;
+# no pixel data is stored. Each one may hold at most this many entries, and
+# rebuild.py does not copy them into the meta.
+MAX_HIST_ENTRIES = 16
+# Opaque-pixel floor per view for classes not in SIZE_CLASSES.
+DEFAULT_MIN_RENDER_PX = 500
 
-# hard_tris is an error. max_texture is an error. preferred_texture is the
-# size new models should use; a larger atlas warns unless the meta carries
-# a written justification. The pine object id is the 256² reference and
-# does not warn. canopy marks the classes allowed out to TREE_FOOTPRINT.
-# tree_warn_below is the triangle count under which a tree class warns.
+# Per-class budgets. validate.py reads every number from here.
+#   hard_tris        over this fails.
+#   soft_max_tris    over this warns (exit code unaffected). A meta
+#                    triangle_justification annotates the warning; it
+#                    does not remove it.
+#   tree_warn_below  under this warns (tree classes only; props may be cheap).
+#   max_texture      atlas cap, an error. PREFERRED_TEXTURE (128) is the size
+#                    new models use; a larger atlas warns unless the meta
+#                    carries a written justification. The pine object id is
+#                    the 256² reference and does not warn.
+#   min_render_px    opaque-pixel floor per comparison view, a guard against
+#                    an empty or broken render (the area ratio is the real
+#                    guard when sprites are present).
+#   footprint_tiles  the tile area the class occupies.
+#   footprint_bu     max |x| and |y| of the whole mesh, in tile units.
+#   trunk_base_bu    max |x| and |y| of the trunk base (the bottom
+#                    TRUNK_BASE_BAND_SIM of the mesh), or None for no check.
+#   canopy           True for the classes allowed out to TREE_FOOTPRINT.
 # Reasons for anything above a small prop live in the style guide.
 SIZE_CLASSES = {
     "prop_quarter": {
-        "soft_tris": 250,
+        "soft_max_tris": 250,
         "hard_tris": 500,
-        "max_texture": 128,
-        "canopy": False,
         "tree_warn_below": None,
+        "max_texture": 128,
+        "min_render_px": 100,
+        "footprint_tiles": (0.5, 0.5),
+        "footprint_bu": QUARTER_FOOTPRINT,
+        "trunk_base_bu": None,
+        "canopy": False,
     },
     "prop_tile": {
-        "soft_tris": 500,
+        "soft_max_tris": 500,
         "hard_tris": 1000,
-        "max_texture": 128,
-        "canopy": False,
         "tree_warn_below": None,
+        "max_texture": 128,
+        "min_render_px": 250,
+        "footprint_tiles": (1, 1),
+        "footprint_bu": PROP_FOOTPRINT,
+        "trunk_base_bu": None,
+        "canopy": False,
+    },
+    "tree_quarter": {
+        "soft_max_tris": 400,
+        "hard_tris": 600,
+        "tree_warn_below": 200,
+        "max_texture": 128,
+        "min_render_px": 150,
+        "footprint_tiles": (0.5, 0.5),
+        "footprint_bu": TREE_QUARTER_CANOPY,
+        "trunk_base_bu": QUARTER_FOOTPRINT,
+        "canopy": False,
     },
     "tree_small": {
-        "soft_tris": 600,
+        "soft_max_tris": 1000,
         "hard_tris": 1200,
-        "max_texture": 128,
-        "canopy": True,
         "tree_warn_below": TREE_TRIANGLE_TARGET[0],
+        "max_texture": 128,
+        "min_render_px": DEFAULT_MIN_RENDER_PX,
+        "footprint_tiles": (1, 1),
+        "footprint_bu": TREE_FOOTPRINT,
+        "trunk_base_bu": None,
+        "canopy": True,
     },
     "tree_1tile": {
-        "soft_tris": TREE_TRIANGLE_TARGET[0],
+        "soft_max_tris": TREE_TRIANGLE_TARGET[1],
         "hard_tris": MAX_TRIANGLES,
-        "max_texture": MAX_TEXTURE,
-        "canopy": True,
         "tree_warn_below": TREE_TRIANGLE_TARGET[0],
+        "max_texture": MAX_TEXTURE,
+        "min_render_px": DEFAULT_MIN_RENDER_PX,
+        "footprint_tiles": (1, 1),
+        "footprint_bu": TREE_FOOTPRINT,
+        "trunk_base_bu": None,
+        "canopy": True,
     },
     "tree_large": {
-        "soft_tris": TREE_TRIANGLE_TARGET[0],
+        "soft_max_tris": TREE_TRIANGLE_TARGET[1],
         "hard_tris": MAX_TRIANGLES,
-        "max_texture": MAX_TEXTURE,
-        "canopy": True,
         "tree_warn_below": TREE_TRIANGLE_TARGET[0],
+        "max_texture": MAX_TEXTURE,
+        "min_render_px": DEFAULT_MIN_RENDER_PX,
+        "footprint_tiles": (1, 1),
+        "footprint_bu": TREE_FOOTPRINT,
+        "trunk_base_bu": None,
+        "canopy": True,
     },
     "large_scenery": {
-        "soft_tris": TREE_TRIANGLE_TARGET[0],
+        "soft_max_tris": 1200,
         "hard_tris": MAX_TRIANGLES,
-        "max_texture": MAX_TEXTURE,
-        "canopy": False,
         "tree_warn_below": None,
+        "max_texture": MAX_TEXTURE,
+        "min_render_px": DEFAULT_MIN_RENDER_PX,
+        "footprint_tiles": (1, 1),
+        "footprint_bu": PROP_FOOTPRINT,
+        "trunk_base_bu": None,
+        "canopy": False,
     },
 }
 

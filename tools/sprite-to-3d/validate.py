@@ -24,7 +24,14 @@ import numpy as np
 import conventions as C
 from glb_io import gltf_to_blender, load_mesh
 from projection import pixels_match_rct
-from render_views import load_sprite_folder, place_sprite, rasterize, silhouette_iou, write_review
+from render_views import (
+    closed_silhouette_iou,
+    load_sprite_folder,
+    place_sprite,
+    rasterize,
+    silhouette_iou,
+    write_review,
+)
 
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(TOOL_DIR))
@@ -109,6 +116,65 @@ def _object_id(meta, glb_path):
         return meta["object_id"]
     name = os.path.basename(glb_path)
     return name[:-4] if name.endswith(".glb") else name
+
+
+def triangle_justification(meta):
+    """The meta's written reason for standing over the soft triangle cap, or ""."""
+    value = meta.get("triangle_justification")
+    if value is None:
+        value = (meta.get("geometry") or {}).get("triangle_justification")
+    return str(value).strip() if value and str(value).strip() else ""
+
+
+def _fallback_budget():
+    """Budget for a meta whose size_class is missing or unknown (that row already fails)."""
+    return {
+        "hard_tris": C.MAX_TRIANGLES,
+        "soft_max_tris": None,
+        "tree_warn_below": None,
+        "max_texture": C.MAX_TEXTURE,
+        "min_render_px": C.DEFAULT_MIN_RENDER_PX,
+        "footprint_bu": C.PROP_FOOTPRINT,
+        "trunk_base_bu": None,
+        "canopy": False,
+    }
+
+
+def min_render_px(meta):
+    """Opaque-pixel floor per view for the meta's size class (conventions.SIZE_CLASSES)."""
+    budget = C.SIZE_CLASSES.get(meta.get("size_class")) or _fallback_budget()
+    return int(budget.get("min_render_px") or C.DEFAULT_MIN_RENDER_PX)
+
+
+def trunk_base_extent(positions, indices=None, band_sim=None):
+    """Max |x| and |y| (tile units) of the trunk base, the bottom slice of the mesh.
+
+    The slice runs from the lowest vertex up to band_sim (default
+    conventions.TRUNK_BASE_BAND_SIM) above it. Vertices inside the slice count.
+    With indices, so does every point where a mesh edge crosses the top of the
+    slice, so a long trunk triangle that starts in the slice is measured where
+    it leaves it. positions are glTF Y-up.
+    """
+    band = (C.TRUNK_BASE_BAND_SIM if band_sim is None else float(band_sim)) / C.SIM_PER_UNIT
+    _bmin, _bmax, blender = _blender_bounds(positions)
+    top = float(blender[:, 2].min()) + band
+    inside = blender[blender[:, 2] <= top + 1e-9]
+    extent = float(np.abs(inside[:, :2]).max()) if len(inside) else 0.0
+    if indices is None:
+        return extent
+    idx = np.asarray(indices, np.int64).reshape(-1, 3)
+    for a, b in ((0, 1), (1, 2), (2, 0)):
+        za = blender[idx[:, a], 2] - top
+        zb = blender[idx[:, b], 2] - top
+        cross = ((za < 0) & (zb > 0)) | ((za > 0) & (zb < 0))
+        if not np.any(cross):
+            continue
+        pa = blender[idx[cross, a]]
+        pb = blender[idx[cross, b]]
+        t = (za[cross] / (za[cross] - zb[cross]))[:, None]
+        hit = pa + t * (pb - pa)
+        extent = max(extent, float(np.abs(hit[:, :2]).max()))
+    return extent
 
 
 def _size_class_budget(meta):
@@ -375,15 +441,71 @@ def check_texture(image, meta, report):
         report.error("meta texture alpha_mode/alpha_cutoff must be MASK / 0.5")
 
 
-def check_triangles(count, meta, report):
-    budget = C.size_class(meta["size_class"])
-    report.note(f"triangles {count} (soft {budget['soft_tris']}, hard {budget['hard_tris']})")
-    if count != int(meta.get("triangles") or -1):
-        report.error(f"GLB has {count} triangles but meta says {meta.get('triangles')}")
-    if count > budget["hard_tris"]:
-        report.error(f"{count} triangles exceeds the {meta['size_class']} hard cap of {budget['hard_tris']}")
-    elif count > budget["soft_tris"]:
-        report.note(f"over the soft target of {budget['soft_tris']} (still under the hard cap)")
+def per_view_tip_status(deltas):
+    """Gate per-view tip deltas (render minus sprite, sim units).
+
+    Any view over TIP_VIEW_FAIL_SIM fails; any over TIP_VIEW_WARN_SIM warns.
+    Returns (status, detail).
+    """
+    worst = max(deltas, key=abs)
+    text = ", ".join(f"{d:+.1f}" for d in deltas)
+    if any(abs(d) > C.TIP_VIEW_FAIL_SIM for d in deltas):
+        return "FAIL", f"views {text} sim; worst {worst:+.1f} is beyond ±{C.TIP_VIEW_FAIL_SIM:.0f}"
+    if any(abs(d) > C.TIP_VIEW_WARN_SIM for d in deltas):
+        return "WARN", f"views {text} sim; worst {worst:+.1f} is beyond ±{C.TIP_VIEW_WARN_SIM:.0f}"
+    return "PASS", f"views {text} sim (±{C.TIP_VIEW_WARN_SIM:.0f})"
+
+
+def score_silhouettes(renders, placed, kernel=None):
+    """Raw and closed-mask IoU per view, plus the pixel counts.
+
+    renders and placed are the four model renders and the four pasted sprites.
+    The closed score closes BOTH masks with the same kernel (conventions.IOU_CLOSE_KERNEL).
+    """
+    kernel = C.IOU_CLOSE_KERNEL if kernel is None else int(kernel)
+    raw, closed, sprite_px, render_px = [], [], [], []
+    for view in range(4):
+        score, s_px, r_px = silhouette_iou(placed[view], renders[view])
+        raw.append(float(score))
+        closed.append(float(closed_silhouette_iou(placed[view], renders[view], kernel)))
+        sprite_px.append(s_px)
+        render_px.append(r_px)
+    return {
+        "raw": {"views": raw, "mean": float(np.mean(raw))},
+        "closed": {"views": closed, "mean": float(np.mean(closed)), "kernel_px": kernel},
+        "sprite_px": sprite_px,
+        "render_px": render_px,
+    }
+
+
+def measure_iou(mesh, meta, sprites_dir):
+    """Render the mesh, paste the local sprites with the meta alignment, and score.
+
+    Returns score_silhouettes(...) or None when the meta has no alignment.
+    Used by rebuild.py to record raw and closed IoU in the meta.
+    """
+    alignment = alignment_of(meta)
+    if alignment is None:
+        return None
+    shift, nudge = alignment
+    renders = [rasterize(mesh["positions"], mesh["uvs"], mesh["indices"], mesh["image"], v) for v in range(4)]
+    placed = [place_sprite(s, shift, nudge) for s in load_sprite_folder(sprites_dir)]
+    return score_silhouettes(renders, placed)
+
+
+def _hist_paths(value, path=""):
+    """Paths of palette-histogram keys (hist, *_hist) anywhere in a JSON value."""
+    found = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            here = f"{path}.{key}" if path else str(key)
+            if key == "hist" or str(key).endswith("_hist"):
+                found.append((here, item))
+            found.extend(_hist_paths(item, here))
+    elif isinstance(value, list):
+        for i, item in enumerate(value):
+            found.extend(_hist_paths(item, f"{path}[{i}]"))
+    return found
 
 
 def render_and_score(mesh, meta, sprites_dir, out_path, report, require_iou):
@@ -392,9 +514,15 @@ def render_and_score(mesh, meta, sprites_dir, out_path, report, require_iou):
         renders.append(rasterize(mesh["positions"], mesh["uvs"], mesh["indices"], mesh["image"], view))
     coverage = [int(np.count_nonzero(im[..., 3] > 0)) for im in renders]
     report.note("render coverage " + ", ".join(str(c) for c in coverage))
+    # Empty-render guard. The floor is per size class (min_render_px in
+    # conventions.SIZE_CLASSES): quarter-tile objects draw about 200 px a view.
+    floor = min_render_px(meta)
     for view, count in enumerate(coverage):
-        if count < 500:
-            report.error(f"view {view} rendered {count} opaque pixels; the projection or the alpha cut is empty")
+        if count < floor:
+            report.error(
+                f"view {view} rendered {count} opaque pixels (floor {floor} for "
+                f"{meta.get('size_class')}); the projection or the alpha cut is empty"
+            )
     placed = None
     ious = None
     if sprites_dir:
@@ -413,18 +541,31 @@ def render_and_score(mesh, meta, sprites_dir, out_path, report, require_iou):
         shift, nudge = alignment
         loaded = load_sprite_folder(sprites_dir)
         placed = [place_sprite(s, shift, nudge) for s in loaded]
-        ious = []
+        scores = score_silhouettes(renders, placed)
+        ious = scores["raw"]["views"]
+        closed = scores["closed"]["views"]
         for view in range(4):
-            score, sprite_px, render_px = silhouette_iou(placed[view], renders[view])
-            ious.append(score)
-            report.note(f"view {view} IoU {score:.3f} (sprite {sprite_px}px, render {render_px}px)")
-        mean = float(np.mean(ious))
-        report.note(f"mean IoU {mean:.3f}")
-        iou_ok = all(s >= C.IOU_MIN_PER_VIEW for s in ious) and mean >= C.IOU_MIN_MEAN
+            report.note(
+                f"view {view} IoU raw {ious[view]:.3f}, closed {closed[view]:.3f} "
+                f"(sprite {scores['sprite_px'][view]}px, render {scores['render_px'][view]}px)"
+            )
+        mean = scores["raw"]["mean"]
+        closed_mean = scores["closed"]["mean"]
+        report.note(f"mean IoU raw {mean:.3f}, closed {closed_mean:.3f}")
+        iou_ok = all(s >= C.IOU_CLOSED_MIN_PER_VIEW for s in closed) and closed_mean >= C.IOU_CLOSED_MIN_MEAN
         report.row(
-            "silhouette IoU",
+            f"silhouette IoU (closed {C.IOU_CLOSE_KERNEL}px)",
             "PASS" if iou_ok else "FAIL",
-            f"views {[round(s, 3) for s in ious]} mean {mean:.3f}",
+            f"views {[round(s, 3) for s in closed]} mean {closed_mean:.3f} "
+            f"(gate: each >= {C.IOU_CLOSED_MIN_PER_VIEW:.2f}, mean >= {C.IOU_CLOSED_MIN_MEAN:.2f})",
+        )
+        # Raw IoU is reported, not gated, so a stippled sprite stays visible.
+        raw_low = any(s < C.IOU_MIN_PER_VIEW for s in ious) or mean < C.IOU_MIN_MEAN
+        report.row(
+            "silhouette IoU (raw, reported)",
+            "INFO",
+            f"views {[round(s, 3) for s in ious]} mean {mean:.3f}"
+            + (f" (under the old raw bar {C.IOU_MIN_PER_VIEW:.2f}/{C.IOU_MIN_MEAN:.2f})" if raw_low else ""),
         )
         ratios = []
         for view in range(4):
@@ -452,12 +593,14 @@ def render_and_score(mesh, meta, sprites_dir, out_path, report, require_iou):
                 f"model tip {model_tip:.1f} sim vs tallest sprite tip {tallest:.1f} sim "
                 f"(±{C.HEIGHT_TOLERANCE_SIM:.0f}; squash already in the render)",
             )
-        declared = (meta.get("iou") or {}).get("views")
+            status, detail = per_view_tip_status([row[2] for row in rows])
+            report.row("per-view tip delta", status, detail)
+        declared = ((meta.get("iou") or {}).get("closed") or {}).get("views")
         if declared and len(declared) == 4:
-            # Stored figures are the approved measurement. A fresh rasteriser will not
+            # Stored figures are a recorded measurement. A fresh rasteriser will not
             # hit them exactly; this only catches a meta that claims a pass it didn't earn.
-            if any(float(v) < C.IOU_MIN_PER_VIEW for v in declared):
-                report.error("meta iou.views records a view under the threshold")
+            if any(float(v) < C.IOU_CLOSED_MIN_PER_VIEW for v in declared):
+                report.error("meta iou.closed.views records a view under the closed-mask threshold")
     elif require_iou:
         report.error("IoU was required but no --sprites directory was given")
     else:
@@ -484,7 +627,7 @@ def apply_checklist(report, glb_path, meta, mesh):
     if budget is None:
         known = ", ".join(sorted(C.SIZE_CLASSES))
         report.row("size_class", "FAIL", f"{meta.get('size_class')!r} is missing or not one of: {known}")
-        budget = {"hard_tris": C.MAX_TRIANGLES, "max_texture": C.MAX_TEXTURE, "tree_warn_below": None}
+        budget = _fallback_budget()
         canopy = False
     else:
         report.row("size_class", "PASS", size_name)
@@ -539,13 +682,23 @@ def apply_checklist(report, glb_path, meta, mesh):
     mark("vertices <= 2500", vertices <= C.MAX_VERTICES, str(vertices))
     triangles = mesh["triangles"]
     mark("triangles <= hard cap", triangles <= budget["hard_tris"] and triangles <= C.MAX_TRIANGLES, f"{triangles} / {budget['hard_tris']}")
+    soft = budget.get("soft_max_tris")
+    if soft is not None:
+        # Over the soft cap warns (exit code unaffected); over the hard cap fails above.
+        # A triangle_justification in the meta annotates the warning; it stays a WARN.
+        over = triangles > soft
+        detail = f"{triangles} is over the {size_name} soft cap of {soft}" if over else f"{triangles} / {soft}"
+        reason = triangle_justification(meta)
+        if over and reason:
+            detail += f"; justified: {reason}"
+        mark("triangles <= soft cap", not over, detail, warn=True)
     floor = budget.get("tree_warn_below")
     if floor and triangles < floor:
         mark("triangle target", False, f"{triangles} is under {floor} for {size_name}", warn=True)
     else:
         detail = f"{triangles}"
         if floor:
-            detail += f" (tree target {C.TREE_TRIANGLE_TARGET[0]}-{C.TREE_TRIANGLE_TARGET[1]})"
+            detail += f" (tree floor {floor}, soft cap {budget.get('soft_max_tris')})"
         mark("triangle target", True, detail)
 
     image = mesh["image"]
@@ -593,9 +746,20 @@ def apply_checklist(report, glb_path, meta, mesh):
         mark("material MASK 0.5 / nearest / clamp / double-sided", not added, "ok" if not added else "; ".join(added))
 
     bmin, bmax, _blender = _blender_bounds(mesh["positions"])
-    limit = C.TREE_FOOTPRINT if canopy else C.PROP_FOOTPRINT
+    limit = budget.get("footprint_bu")
+    if limit is None:
+        limit = C.TREE_FOOTPRINT if canopy else C.PROP_FOOTPRINT
     horizontal = max(abs(float(bmin[0])), abs(float(bmax[0])), abs(float(bmin[1])), abs(float(bmax[1])))
-    mark("footprint", horizontal <= limit + 1e-3, f"{horizontal:.3f} within ±{limit} ({'canopy' if canopy else 'prop'})")
+    kind = "canopy" if canopy or budget.get("trunk_base_bu") else "whole mesh"
+    mark("footprint", horizontal <= limit + 1e-3, f"{horizontal:.3f} within ±{limit} ({kind}, {size_name})")
+    base_limit = budget.get("trunk_base_bu")
+    if base_limit is not None:
+        base = trunk_base_extent(mesh["positions"], mesh.get("indices"))
+        mark(
+            "trunk base footprint",
+            base <= base_limit + 1e-3,
+            f"{base:.3f} within ±{base_limit} (bottom {C.TRUNK_BASE_BAND_SIM:.0f} sim of the mesh)",
+        )
     mark("origin inside footprint", bool(bmin[0] < 0 < bmax[0] and bmin[1] < 0 < bmax[1]), "tile centre")
     sink = -float(bmin[2])
     mark("base sink <= 0.1", sink <= C.BASE_SINK_MAX + 1e-4 and float(bmin[2]) <= 0.02, f"z min {bmin[2]:.4f}")
@@ -605,6 +769,14 @@ def apply_checklist(report, glb_path, meta, mesh):
         mark("height vs meta", False, "meta has no height")
     else:
         mark("height vs meta", abs(tip - declared) <= C.HEIGHT_TOLERANCE_SIM, f"tip {tip:.2f} sim, meta {declared:.2f}")
+
+    params = meta.get("params")
+    stored = _hist_paths(params) if params is not None else []
+    mark(
+        "no palette histograms in meta",
+        not stored,
+        "params carry none" if not stored else "copied from params.json: " + ", ".join(p for p, _v in stored[:4]),
+    )
 
     size_bytes = os.path.getsize(glb_path)
     mark("GLB <= 128 KB", size_bytes <= C.MAX_GLB_BYTES, f"{size_bytes} bytes")

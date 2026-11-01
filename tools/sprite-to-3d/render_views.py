@@ -18,7 +18,7 @@ from PIL import Image, ImageDraw
 
 from conventions import ORIGIN_PIXEL, RENDER_SIZE
 from glb_io import gltf_to_blender
-from projection import camera_pixel
+from projection import camera_depth, camera_pixel
 
 
 def project_vertices(positions, view):
@@ -28,13 +28,30 @@ def project_vertices(positions, view):
     return out
 
 
+def vertex_depths(positions, view):
+    """Camera depth per vertex (smaller is nearer), see projection.camera_depth."""
+    out = np.empty(len(positions), np.float64)
+    for i, point in enumerate(positions):
+        out[i] = camera_depth(gltf_to_blender(point), view)
+    return out
+
+
 def rasterize(positions, uvs, indices, image, view):
-    """Return an RGBA image. Texels with alpha <= 127 are holes (MASK 0.5)."""
+    """Return an RGBA image. Texels with alpha <= 127 are holes (MASK 0.5).
+
+    Depth-tested: each pixel keeps the nearest opaque texel. Camera depth is
+    interpolated per pixel with the same barycentrics as the UVs (exact for
+    this orthographic camera) and kept in a z-buffer, so the colours in the
+    review sheet do not depend on triangle order. Which pixels are opaque does
+    not depend on the depth test, so silhouettes and IoU are unchanged by it.
+    """
     width, height = RENDER_SIZE
     colour = np.zeros((height, width, 4), np.uint8)
+    zbuffer = np.full((height, width), np.inf, np.float64)
     pixels = project_vertices(positions, view)
+    depths = vertex_depths(positions, view)
     atlas = image
-    ah, aw = atlas.shape[:2]
+    ah, aw = atlas.shape[:2] if atlas is not None else (1, 1)
     for t in range(0, len(indices), 3):
         i0, i1, i2 = (int(i) for i in indices[t : t + 3])
         p0, p1, p2 = pixels[i0], pixels[i1], pixels[i2]
@@ -60,16 +77,23 @@ def rasterize(positions, uvs, indices, image, view):
         inside = (b0 >= -1e-5) & (b1 >= -1e-5) & (b2 >= -1e-5)
         if not np.any(inside):
             continue
+        depth = b0 * depths[i0] + b1 * depths[i1] + b2 * depths[i2]
+        zsub = zbuffer[miny : maxy + 1, minx : maxx + 1]
+        sub = colour[miny : maxy + 1, minx : maxx + 1]
         if uvs is None:
-            colour[miny : maxy + 1, minx : maxx + 1][inside] = (180, 180, 180, 255)
+            draw = inside & (depth < zsub)
+            sub[draw] = (180, 180, 180, 255)
+            zsub[draw] = depth[draw]
             continue
         uv = b0[..., None] * uvs[i0] + b1[..., None] * uvs[i1] + b2[..., None] * uvs[i2]
         ix = np.clip((uv[..., 0] * aw).astype(np.int32), 0, aw - 1)
         iy = np.clip((uv[..., 1] * atlas.shape[0]).astype(np.int32), 0, ah - 1)
         sample = atlas[iy, ix]
-        opaque = inside & (sample[..., 3] > 127)
-        sub = colour[miny : maxy + 1, minx : maxx + 1]
-        sub[opaque] = sample[opaque]
+        # MASK holes neither draw nor write depth, so a card's cut-out
+        # shows whatever is behind it.
+        draw = inside & (sample[..., 3] > 127) & (depth < zsub)
+        sub[draw] = sample[draw]
+        zsub[draw] = depth[draw]
     return colour
 
 
@@ -132,6 +156,46 @@ def silhouette_iou(sprite_rgba, render_rgba):
     inter = int(np.count_nonzero(a & b))
     union = int(np.count_nonzero(a | b))
     return (inter / union if union else 0.0), int(np.count_nonzero(a)), int(np.count_nonzero(b))
+
+
+def _shift_mask(mask, dy, dx):
+    out = np.zeros_like(mask)
+    h, w = mask.shape
+    out[max(dy, 0) : h + min(dy, 0), max(dx, 0) : w + min(dx, 0)] = mask[
+        max(-dy, 0) : h + min(-dy, 0), max(-dx, 0) : w + min(-dx, 0)
+    ]
+    return out
+
+
+def close_mask(mask, kernel):
+    """Morphological close (dilate, then erode) with a square kernel x kernel element.
+
+    The mask is padded with background first, so the close behaves as if the
+    canvas were unbounded. kernel 3 is the 3x3 ("3px") close; 1 is a no-op.
+    """
+    mask = np.asarray(mask, bool)
+    r = (int(kernel) - 1) // 2
+    if r <= 0:
+        return mask.copy()
+    pad = r + 2
+    padded = np.pad(mask, pad)
+    dilated = padded.copy()
+    for dy in range(-r, r + 1):
+        for dx in range(-r, r + 1):
+            dilated |= _shift_mask(padded, dy, dx)
+    eroded = dilated.copy()
+    for dy in range(-r, r + 1):
+        for dx in range(-r, r + 1):
+            eroded &= _shift_mask(dilated, dy, dx)
+    return eroded[pad:-pad, pad:-pad]
+
+
+def closed_silhouette_iou(sprite_rgba, render_rgba, kernel):
+    """IoU after closing both masks with the same kernel (QA decision 1)."""
+    a = close_mask(sprite_rgba[..., 3] > 0, kernel)
+    b = close_mask(render_rgba[..., 3] > 0, kernel)
+    union = int(np.count_nonzero(a | b))
+    return int(np.count_nonzero(a & b)) / union if union else 0.0
 
 
 def overlap_image(sprite_rgba, render_rgba):

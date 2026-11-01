@@ -9,6 +9,37 @@
 
 #pragma once
 
+#include <cstdint>
+#include <openrct2/drawing/ImageId.hpp>
+
+namespace OpenRCT2::View3D
+{
+    // Colours from the small-scenery element, applied to the sprite the 3D view draws.
+    // A ghost remap is left alone.
+    inline ImageId sceneryRemapImage(
+        ImageId image, bool hasPrimary, uint8_t primary, bool hasSecondary, uint8_t secondary, bool hasTertiary,
+        uint8_t tertiary)
+    {
+        if (image.IsRemap())
+        {
+            return image;
+        }
+        if (hasPrimary)
+        {
+            image = image.WithPrimary(static_cast<OpenRCT2::Drawing::Colour>(primary));
+            if (hasSecondary)
+            {
+                image = image.WithSecondary(static_cast<OpenRCT2::Drawing::Colour>(secondary));
+            }
+        }
+        if (hasTertiary)
+        {
+            image = image.WithTertiary(static_cast<OpenRCT2::Drawing::Colour>(tertiary));
+        }
+        return image;
+    }
+} // namespace OpenRCT2::View3D
+
 namespace OpenRCT2::View3D::Park
 {
     // Drops scenery meshes and sprite textures. Safe before bgfx::shutdown.

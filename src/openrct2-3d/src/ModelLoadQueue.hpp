@@ -14,6 +14,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace OpenRCT2::View3D
 {
@@ -41,6 +42,8 @@ namespace OpenRCT2::View3D
         ModelLoadQueue& operator=(const ModelLoadQueue&) = delete;
 
         void request(const std::string& identifier);
+        // One lock for a frame's worth of ids. An id that is already queued is left alone.
+        void requestAbsent(const std::vector<std::string>& identifiers);
         ModelLoadPhase phase(const std::string& identifier) const;
         std::optional<CpuMesh> takeReady(std::string& identifier);
         void forget(const std::string& identifier);

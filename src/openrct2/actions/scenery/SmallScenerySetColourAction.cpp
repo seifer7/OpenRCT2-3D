@@ -10,6 +10,7 @@
 #include "SmallScenerySetColourAction.h"
 
 #include "../../Cheats.h"
+#include "../../Context.h"
 #include "../../Diagnostic.h"
 #include "../../GameState.h"
 #include "../../OpenRCT2.h"
@@ -107,6 +108,7 @@ namespace OpenRCT2::GameActions
             sceneryElement->setTertiaryColour(_tertiaryColour);
 
             MapInvalidateTileFull(_loc);
+            NotifyMapChanged(_loc.x / kCoordsXYStep, _loc.y / kCoordsXYStep);
         }
 
         return res;

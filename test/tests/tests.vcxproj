@@ -91,7 +91,9 @@
     <ClCompile Include="FormattingTests.cpp" />
     <ClCompile Include="GlbMeshTests.cpp" />
     <ClCompile Include="ModelCacheTests.cpp" />
-    <ClCompile Include="SceneryScaleTests.cpp" />
+    <ClCompile Include="SceneryScaleTests.cpp">
+      <AdditionalIncludeDirectories>$(SolutionDir)src;$(SolutionDir)src\openrct2-3d\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
     <ClCompile Include="LanguagePackTest.cpp" />
     <ClCompile Include="ImageImporterTests.cpp" />
     <ClCompile Include="IniReaderTest.cpp" />
@@ -132,6 +134,10 @@
     </ClCompile>
     <ClCompile Include="..\..\src\openrct2-3d\src\ModelLoadQueue.cpp">
       <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\..\src\openrct2-3d\third_party\stb_image_impl.cpp">
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\third_party\bimg\3rdparty\stb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <ClCompile Include="..\..\src\openrct2-3d\third_party\cgltf\cgltf.cpp">
       <WarningLevel>TurnOffAllWarnings</WarningLevel>

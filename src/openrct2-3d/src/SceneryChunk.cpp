@@ -13,8 +13,23 @@
 #include <chrono>
 #include <cmath>
 
+namespace
+{
+    float _viewDistanceTiles = OpenRCT2::View3D::kDefaultViewDistanceTiles;
+}
+
 namespace OpenRCT2::View3D
 {
+    float sceneryViewDistanceTiles()
+    {
+        return _viewDistanceTiles;
+    }
+
+    void setSceneryViewDistanceTiles(float tiles)
+    {
+        _viewDistanceTiles = tiles > 0.0f ? tiles : kDefaultViewDistanceTiles;
+    }
+
     void SceneryChunkGrid::reset(int32_t tilesX, int32_t tilesY)
     {
         _tilesX = std::max(tilesX, 0);
@@ -129,6 +144,23 @@ namespace OpenRCT2::View3D
         const float dy = cy - eyeY;
         const float dz = cz - eyeZ;
         return dx * dx + dy * dy + dz * dz > maxDistanceTiles * maxDistanceTiles;
+    }
+
+    bool boxOutsideGroundDistance(const ChunkBox& box, float focusX, float focusY, float maxDistanceTiles)
+    {
+        const float cx = (box.minX + box.maxX) * 0.5f;
+        const float cy = (box.minY + box.maxY) * 0.5f;
+        const float dx = cx - focusX;
+        const float dy = cy - focusY;
+        return dx * dx + dy * dy > maxDistanceTiles * maxDistanceTiles;
+    }
+
+    float sceneryCullRadius(float eyeX, float eyeY, float focusX, float focusY)
+    {
+        const float dx = eyeX - focusX;
+        const float dy = eyeY - focusY;
+        const float zoomDistance = std::sqrt(dx * dx + dy * dy);
+        return std::max(sceneryViewDistanceTiles(), zoomDistance);
     }
 
     int32_t cullSyntheticPlacements(int32_t count, float eyeX, float eyeY, float eyeZ, float maxDistance, int64_t& microseconds)

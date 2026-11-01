@@ -21,9 +21,9 @@
 namespace OpenRCT2::View3D
 {
     // Bump this when the .o3d bytes change. Older files are rebuilt.
-    // Version 3 checksums every byte except the checksum field, including the
-    // primitive and image counts, and rejects trailing bytes.
-    constexpr uint32_t kModelCacheVersion = 3;
+    // Version 4 stores one decoded RGBA image per texture (no PNG copy).
+    // The checksum still covers every byte except the checksum field.
+    constexpr uint32_t kModelCacheVersion = 4;
     constexpr size_t kModelCacheHeaderBytes = 68;
     constexpr size_t kModelCacheSizeOffset = 8;
     constexpr size_t kModelCacheMtimeOffset = 16;

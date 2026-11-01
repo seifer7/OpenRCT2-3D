@@ -15,6 +15,7 @@
 #include <cgltf.h>
 #include <cmath>
 #include <fstream>
+#include <stb_image.h>
 
 namespace OpenRCT2::View3D
 {
@@ -452,5 +453,51 @@ namespace OpenRCT2::View3D
             return std::nullopt;
         }
         return loadGlbMesh(bytes.data(), bytes.size(), limits, error);
+    }
+
+    bool decodeMeshImages(CpuMesh& mesh, std::string& error)
+    {
+        const MeshLoadLimits limits;
+        for (MeshImage& image : mesh.images)
+        {
+            if (image.png.empty())
+            {
+                continue;
+            }
+            int width = 0;
+            int height = 0;
+            int components = 0;
+            if (stbi_info_from_memory(image.png.data(), static_cast<int>(image.png.size()), &width, &height, &components) == 0)
+            {
+                error = "png header is unreadable";
+                return false;
+            }
+            if (width <= 0 || height <= 0 || static_cast<uint32_t>(width) > limits.maxImageEdge
+                || static_cast<uint32_t>(height) > limits.maxImageEdge)
+            {
+                error = "png dimensions are over the limit";
+                return false;
+            }
+            const uint64_t bytes = static_cast<uint64_t>(width) * static_cast<uint64_t>(height) * 4u;
+            if (bytes > limits.maxImageBytes)
+            {
+                error = "png bitmap is over the limit";
+                return false;
+            }
+            stbi_uc* pixels = stbi_load_from_memory(
+                image.png.data(), static_cast<int>(image.png.size()), &width, &height, &components, 4);
+            if (pixels == nullptr)
+            {
+                error = "png could not be decoded";
+                return false;
+            }
+            image.width = static_cast<uint32_t>(width);
+            image.height = static_cast<uint32_t>(height);
+            image.rgba.assign(pixels, pixels + bytes);
+            stbi_image_free(pixels);
+            image.png.clear();
+            image.png.shrink_to_fit();
+        }
+        return true;
     }
 } // namespace OpenRCT2::View3D

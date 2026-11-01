@@ -12,6 +12,7 @@
 #include "GpuBudget.hpp"
 #include "SceneryScale.hpp"
 
+#include <algorithm>
 #include <bgfx/bgfx.h>
 #include <cstdint>
 #include <cstring>
@@ -31,6 +32,7 @@ namespace OpenRCT2::View3D
 
         constexpr const char kVertexShader[] = "uniform mat4 u_modelViewProj;\n"
                                                "uniform vec4 u_uvRect;\n"
+                                               "uniform vec4 u_params;\n"
                                                "in vec3 a_position;\n"
                                                "in vec3 a_normal;\n"
                                                "in vec2 a_texcoord0;\n"
@@ -45,7 +47,9 @@ namespace OpenRCT2::View3D
                                                "    vec3 rotated = vec3(c * p.x - s * p.y, s * p.x + c * p.y, p.z);\n"
                                                "    vec3 n = a_normal;\n"
                                                "    v_normal = vec3(c * n.x - s * n.y, s * n.x + c * n.y, n.z);\n"
-                                               "    v_uv = a_texcoord0 * u_uvRect.xy + u_uvRect.zw;\n"
+                                               "    vec2 uv = u_params.w > 0.5 ? clamp(a_texcoord0, vec2(0.0), vec2(1.0)) : "
+                                               "fract(a_texcoord0);\n"
+                                               "    v_uv = uv * u_uvRect.xy + u_uvRect.zw;\n"
                                                "    vec3 world = rotated + i_data0.xyz;\n"
                                                "    gl_Position = u_modelViewProj * vec4(world, 1.0);\n"
                                                "}\n";
@@ -81,6 +85,8 @@ namespace OpenRCT2::View3D
             BufferRange vertexRange;
             BufferRange indexRange;
             bool inArena = false;
+            bool inAtlas = false;
+            AtlasSlot atlasSlot;
             bgfx::TextureHandle texture = BGFX_INVALID_HANDLE;
             bool ownsTexture = false;
             float uvScaleX = 1.0f;
@@ -91,6 +97,7 @@ namespace OpenRCT2::View3D
             float light = 1.0f;
             bool blend = false;
             bool doubleSided = false;
+            bool clampUv = true;
         };
 
         struct DrawModel
@@ -104,7 +111,7 @@ namespace OpenRCT2::View3D
         bgfx::UniformHandle _uvRect = BGFX_INVALID_HANDLE;
         bgfx::VertexLayout _layout;
         GeometryArena _arena(kSlabVertices, kSlabIndices, kMaxGeometrySlabs);
-        AtlasPacker _atlas(kAtlasSize, kMaxAtlasPages);
+        AtlasPacker _atlas(kAtlasSize, kMaxAtlasPages, kAtlasGutter);
         struct SlabGpu
         {
             bgfx::DynamicVertexBufferHandle vertices = BGFX_INVALID_HANDLE;
@@ -127,7 +134,7 @@ namespace OpenRCT2::View3D
                 count++;
             }
             // Program, three uniforms, and a little slack for the terrain pass.
-            count += 8u;
+            count += kHandleHeadroom;
             return count;
         }
 
@@ -199,8 +206,9 @@ namespace OpenRCT2::View3D
             }
             else
             {
-                appendU16(out, 1);
+                appendU16(out, 2);
                 appendVec4(out, kUvRectName);
+                appendVec4(out, kParamsName);
             }
             const auto sourceSize = static_cast<uint32_t>(std::strlen(source) + 1);
             appendU32(out, sourceSize);
@@ -213,6 +221,10 @@ namespace OpenRCT2::View3D
             if (primitive.inArena)
             {
                 _arena.free(primitive.vertexRange, primitive.indexRange);
+            }
+            if (primitive.inAtlas)
+            {
+                _atlas.free(primitive.atlasSlot);
             }
             if (primitive.ownsTexture && bgfx::isValid(primitive.texture) && primitive.texture.idx != _white.idx)
             {
@@ -234,6 +246,31 @@ namespace OpenRCT2::View3D
                 gpu.indices = bgfx::createDynamicIndexBuffer(kSlabIndices);
                 _slabs.push_back(gpu);
             }
+        }
+
+        void blitAtlas(bgfx::TextureHandle texture, const AtlasSlot& slot, const uint8_t* rgba, int32_t width, int32_t height)
+        {
+            const int32_t gutter = static_cast<int32_t>(kAtlasGutter);
+            const int32_t paddedW = width + gutter * 2;
+            const int32_t paddedH = height + gutter * 2;
+            std::vector<uint8_t> padded(static_cast<size_t>(paddedW) * static_cast<size_t>(paddedH) * 4u);
+            for (int32_t y = 0; y < paddedH; y++)
+            {
+                const int32_t srcY = std::clamp(y - gutter, 0, height - 1);
+                for (int32_t x = 0; x < paddedW; x++)
+                {
+                    const int32_t srcX = std::clamp(x - gutter, 0, width - 1);
+                    const uint8_t* src = rgba
+                        + (static_cast<size_t>(srcY) * static_cast<size_t>(width) + static_cast<size_t>(srcX)) * 4u;
+                    uint8_t* dst = padded.data()
+                        + (static_cast<size_t>(y) * static_cast<size_t>(paddedW) + static_cast<size_t>(x)) * 4u;
+                    std::memcpy(dst, src, 4);
+                }
+            }
+            bgfx::updateTexture2D(
+                texture, 0, 0, static_cast<uint16_t>(slot.x - static_cast<uint32_t>(gutter)),
+                static_cast<uint16_t>(slot.y - static_cast<uint32_t>(gutter)), static_cast<uint16_t>(paddedW),
+                static_cast<uint16_t>(paddedH), bgfx::copy(padded.data(), static_cast<uint32_t>(padded.size())));
         }
 
         bgfx::TextureHandle atlasTexture(uint32_t page)
@@ -273,38 +310,6 @@ namespace OpenRCT2::View3D
             return bgfx::createTexture2D(width, height, false, 1, bgfx::TextureFormat::RGBA8, flags, bgfx::copy(rgba, bytes));
         }
 
-        bgfx::TextureHandle uploadImage(const MeshImage& image)
-        {
-            if (!image.rgba.empty() && image.width > 0 && image.height > 0
-                && image.rgba.size() >= static_cast<size_t>(image.width) * image.height * 4u)
-            {
-                return uploadRgba(
-                    image.rgba.data(), static_cast<uint16_t>(image.width), static_cast<uint16_t>(image.height), image.nearest,
-                    image.clamp);
-            }
-            if (image.png.empty())
-            {
-                return BGFX_INVALID_HANDLE;
-            }
-            int width = 0;
-            int height = 0;
-            int components = 0;
-            stbi_uc* pixels = stbi_load_from_memory(
-                image.png.data(), static_cast<int>(image.png.size()), &width, &height, &components, 4);
-            if (pixels == nullptr || width <= 0 || height <= 0 || width > 65535 || height > 65535)
-            {
-                if (pixels != nullptr)
-                {
-                    stbi_image_free(pixels);
-                }
-                return BGFX_INVALID_HANDLE;
-            }
-            const bgfx::TextureHandle texture = uploadRgba(
-                pixels, static_cast<uint16_t>(width), static_cast<uint16_t>(height), image.nearest, image.clamp);
-            stbi_image_free(pixels);
-            return texture;
-        }
-
         bool uploadPrimitive(
             const std::vector<MeshVertex>& vertices, const std::vector<uint32_t>& indices, bgfx::TextureHandle texture,
             float alphaCutoff, float light, bool blend, bool doubleSided, DrawPrimitive& out)
@@ -324,7 +329,8 @@ namespace OpenRCT2::View3D
             std::vector<uint16_t> index16(indices.size());
             for (size_t i = 0; i < indices.size(); i++)
             {
-                index16[i] = static_cast<uint16_t>(indices[i] + vertexRange.offset);
+                // Mesh-local. bgfx::setVertexBuffer's start vertex is the base (renderer_gl bindAttributes).
+                index16[i] = static_cast<uint16_t>(indices[i]);
             }
             const SlabGpu& slab = _slabs[vertexRange.slab];
             if (!bgfx::isValid(slab.vertices) || !bgfx::isValid(slab.indices))
@@ -389,7 +395,8 @@ namespace OpenRCT2::View3D
                 {
                     state |= BGFX_STATE_CULL_CW;
                 }
-                const float params[4] = { primitive.alphaCutoff, primitive.light, primitive.blend ? 1.0f : 0.0f, 0.0f };
+                const float params[4] = { primitive.alphaCutoff, primitive.light, primitive.blend ? 1.0f : 0.0f,
+                                          primitive.clampUv ? 1.0f : 0.0f };
                 const float uvRect[4] = { primitive.uvScaleX, primitive.uvScaleY, primitive.uvOffX, primitive.uvOffY };
                 bgfx::setState(state);
                 bgfx::setTexture(0, _sampler, primitive.texture);
@@ -488,7 +495,7 @@ namespace OpenRCT2::View3D
         }
         _atlasPages.clear();
         _arena = GeometryArena(kSlabVertices, kSlabIndices, kMaxGeometrySlabs);
-        _atlas = AtlasPacker(kAtlasSize, kMaxAtlasPages);
+        _atlas = AtlasPacker(kAtlasSize, kMaxAtlasPages, kAtlasGutter);
         _ownedTextures = 0;
         _ready = false;
     }
@@ -506,6 +513,15 @@ namespace OpenRCT2::View3D
         _models[static_cast<size_t>(id)].primitives.clear();
     }
 
+    void meshDrawClearSprites()
+    {
+        for (DrawPrimitive& sprite : _sprites)
+        {
+            destroyPrimitive(sprite);
+        }
+        _sprites.clear();
+    }
+
     int32_t meshDrawUploadModel(const CpuMesh& mesh)
     {
         if (!meshDrawInit() || !bgfx::isValid(_program))
@@ -513,55 +529,81 @@ namespace OpenRCT2::View3D
             return -1;
         }
         DrawModel model;
+        auto abandon = [&]() {
+            for (DrawPrimitive& primitive : model.primitives)
+            {
+                destroyPrimitive(primitive);
+            }
+            model.primitives.clear();
+            return -1;
+        };
         for (const MeshPrimitive& primitive : mesh.primitives)
         {
             bgfx::TextureHandle texture = BGFX_INVALID_HANDLE;
             bool sharedTexture = false;
+            bool packed = false;
+            bool clampUv = true;
             float uvScaleX = 1.0f;
             float uvScaleY = 1.0f;
             float uvOffX = 0.0f;
             float uvOffY = 0.0f;
-            if (primitive.image >= 0 && static_cast<size_t>(primitive.image) < mesh.images.size())
+            AtlasSlot slot;
+            const bool wantsImage = primitive.image >= 0;
+            if (wantsImage)
             {
+                if (static_cast<size_t>(primitive.image) >= mesh.images.size())
+                {
+                    return abandon();
+                }
                 const MeshImage& image = mesh.images[static_cast<size_t>(primitive.image)];
                 const bool rgbaReady = !image.rgba.empty() && image.width > 0 && image.height > 0
-                    && image.rgba.size() >= static_cast<size_t>(image.width) * image.height * 4u
-                    && image.width <= static_cast<int32_t>(kAtlasSize) && image.height <= static_cast<int32_t>(kAtlasSize);
-                AtlasSlot slot;
-                if (rgbaReady && _atlas.pack(static_cast<uint32_t>(image.width), static_cast<uint32_t>(image.height), slot))
+                    && image.rgba.size() >= static_cast<size_t>(image.width) * static_cast<size_t>(image.height) * 4u;
+                if (!rgbaReady)
                 {
+                    return abandon();
+                }
+                clampUv = image.clamp;
+                const uint32_t padded = kAtlasGutter * 2u;
+                const bool atlasFit = image.nearest
+                    && image.width + static_cast<int32_t>(padded) <= static_cast<int32_t>(kAtlasSize)
+                    && image.height + static_cast<int32_t>(padded) <= static_cast<int32_t>(kAtlasSize);
+                if (atlasFit && _atlas.pack(static_cast<uint32_t>(image.width), static_cast<uint32_t>(image.height), slot))
+                {
+                    packed = true;
                     texture = atlasTexture(slot.page);
                     sharedTexture = bgfx::isValid(texture);
                     if (sharedTexture)
                     {
-                        bgfx::updateTexture2D(
-                            texture, 0, 0, static_cast<uint16_t>(slot.x), static_cast<uint16_t>(slot.y),
-                            static_cast<uint16_t>(image.width), static_cast<uint16_t>(image.height),
-                            bgfx::copy(
-                                image.rgba.data(),
-                                static_cast<uint32_t>(image.width) * static_cast<uint32_t>(image.height) * 4u));
+                        blitAtlas(texture, slot, image.rgba.data(), image.width, image.height);
                         uvScaleX = static_cast<float>(image.width) / static_cast<float>(kAtlasSize);
                         uvScaleY = static_cast<float>(image.height) / static_cast<float>(kAtlasSize);
                         uvOffX = static_cast<float>(slot.x) / static_cast<float>(kAtlasSize);
                         uvOffY = static_cast<float>(slot.y) / static_cast<float>(kAtlasSize);
+                    }
+                    else
+                    {
+                        _atlas.free(slot);
+                        packed = false;
                     }
                 }
                 if (!sharedTexture)
                 {
                     if (estimatedHandles() + 1u >= kHandleCap)
                     {
-                        texture = _white;
+                        return abandon();
                     }
-                    else
+                    texture = uploadRgba(
+                        image.rgba.data(), static_cast<uint16_t>(image.width), static_cast<uint16_t>(image.height),
+                        image.nearest, true);
+                    if (!bgfx::isValid(texture))
                     {
-                        texture = uploadImage(image);
+                        return abandon();
                     }
                 }
             }
-            if (!bgfx::isValid(texture))
+            else
             {
                 texture = _white;
-                sharedTexture = false;
             }
             const float cutoff = primitive.alpha == MeshAlpha::mask ? primitive.alphaCutoff : 0.0f;
             DrawPrimitive gpu;
@@ -569,13 +611,20 @@ namespace OpenRCT2::View3D
                     primitive.vertices, primitive.indices, texture, cutoff, 1.0f, primitive.alpha == MeshAlpha::blend,
                     primitive.doubleSided, gpu))
             {
-                if (!sharedTexture && bgfx::isValid(texture) && texture.idx != _white.idx)
+                if (packed)
+                {
+                    _atlas.free(slot);
+                }
+                else if (bgfx::isValid(texture) && texture.idx != _white.idx)
                 {
                     bgfx::destroy(texture);
                 }
-                continue;
+                return abandon();
             }
+            gpu.inAtlas = sharedTexture;
+            gpu.atlasSlot = slot;
             gpu.ownsTexture = !sharedTexture && texture.idx != _white.idx;
+            gpu.clampUv = clampUv;
             if (gpu.ownsTexture)
             {
                 _ownedTextures++;
@@ -615,14 +664,15 @@ namespace OpenRCT2::View3D
             sharedTexture = bgfx::isValid(texture);
             if (sharedTexture)
             {
-                bgfx::updateTexture2D(
-                    texture, 0, 0, static_cast<uint16_t>(slot.x), static_cast<uint16_t>(slot.y), static_cast<uint16_t>(width),
-                    static_cast<uint16_t>(height),
-                    bgfx::copy(rgba, static_cast<uint32_t>(width) * static_cast<uint32_t>(height) * 4u));
+                blitAtlas(texture, slot, rgba, width, height);
                 uvScaleX = static_cast<float>(width) / static_cast<float>(kAtlasSize);
                 uvScaleY = static_cast<float>(height) / static_cast<float>(kAtlasSize);
                 uvOffX = static_cast<float>(slot.x) / static_cast<float>(kAtlasSize);
                 uvOffY = static_cast<float>(slot.y) / static_cast<float>(kAtlasSize);
+            }
+            else
+            {
+                _atlas.free(slot);
             }
         }
         if (!sharedTexture)
@@ -659,12 +709,19 @@ namespace OpenRCT2::View3D
         DrawPrimitive gpu;
         if (!uploadPrimitive(vertices, indices, texture, 0.5f, 0.0f, false, false, gpu))
         {
-            if (!sharedTexture && bgfx::isValid(texture))
+            if (sharedTexture)
+            {
+                _atlas.free(slot);
+            }
+            else if (bgfx::isValid(texture))
             {
                 bgfx::destroy(texture);
             }
             return -1;
         }
+        gpu.inAtlas = sharedTexture;
+        gpu.atlasSlot = slot;
+        gpu.clampUv = true;
         gpu.ownsTexture = !sharedTexture;
         if (gpu.ownsTexture)
         {

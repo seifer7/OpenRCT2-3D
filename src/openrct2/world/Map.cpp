@@ -1700,13 +1700,6 @@ namespace OpenRCT2
 
     static void MapInvalidateTileUnderZoom(int32_t x, int32_t y, int32_t z0, int32_t z1, ZoomLevel maxZoom)
     {
-        // World coordinates. The 3D view rebuilds the 16x16 chunk that owns this tile.
-        // Headless still notifies: the 2D viewport update below is the part that needs a window.
-        if (x >= 0 && y >= 0)
-        {
-            NotifyMapChanged(x / kCoordsXYStep, y / kCoordsXYStep);
-        }
-
         if (gOpenRCT2Headless)
             return;
 

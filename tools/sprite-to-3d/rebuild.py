@@ -31,9 +31,8 @@ import numpy as np
 import conventions as C
 import extract as extract_mod
 import rct2dat
-from archetypes import build_mesh
+from archetypes import build_mesh, write_atlas
 from archetypes.conifer import triangle_count
-from archetypes.conifer_atlas import write_atlas
 from glb_io import write_glb
 from patch_glb import patch
 
@@ -67,7 +66,7 @@ def blender_bin():
     return shutil.which("blender")
 
 
-def export_with_blender(object_id, params_path, atlas_png, atlas_json, out_dir):
+def export_with_blender(object_id, params_path, atlas_png, atlas_json, out_dir, archetype="conifer"):
     blender = blender_bin()
     if not blender:
         raise SystemExit("blender is not on PATH. Install Blender 4.2 LTS, or pass --no-blender.")
@@ -87,12 +86,99 @@ def export_with_blender(object_id, params_path, atlas_png, atlas_json, out_dir):
         atlas_json,
         "--out",
         out_dir,
+        "--archetype",
+        archetype,
     ]
     print("running", " ".join(cmd))
     subprocess.check_call(cmd)
 
 
-def write_meta(path, spec, params, tiles, mesh, palette_source, sprite_meta, glb_name, exporter):
+def _is_hist_key(key):
+    return key == "hist" or str(key).endswith("_hist")
+
+
+def check_histograms(params, limit=None):
+    """Refuse a params.json histogram with more than conventions.MAX_HIST_ENTRIES entries.
+
+    Histograms (hist, sprite_hist, top_hist, ...) are palette-index counts
+    derived locally from the extracted sprite; no pixel data is stored. A long
+    one starts to describe the sprite rather than tint the atlas, so it is
+    refused before anything is built.
+    """
+    limit = C.MAX_HIST_ENTRIES if limit is None else int(limit)
+
+    def walk(value, path):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                here = f"{path}.{key}" if path else str(key)
+                if _is_hist_key(key) and isinstance(item, (dict, list)) and len(item) > limit:
+                    raise SystemExit(
+                        f"params.json {here} has {len(item)} entries; a histogram may hold at most {limit}"
+                    )
+                walk(item, here)
+        elif isinstance(value, list):
+            for i, item in enumerate(value):
+                walk(item, f"{path}[{i}]")
+
+    walk(params, "")
+
+
+def strip_histograms(value):
+    """Copy of a JSON value with every histogram key removed (they stay in params.json)."""
+    if isinstance(value, dict):
+        return {k: strip_histograms(v) for k, v in value.items() if not _is_hist_key(k)}
+    if isinstance(value, list):
+        return [strip_histograms(v) for v in value]
+    return value
+
+
+def iou_block(stored_iou, measured):
+    """The meta "iou" block.
+
+    views / mean / source: the approved raw-mask figures when object.json
+    carries approved_iou, otherwise this rebuild's raw measurement.
+    threshold_per_view / threshold_mean: the raw reference levels (reported,
+    not gated). closed: the closed-mask scores and the gate they are held to.
+    raw_measured: this rebuild's raw scores. Both measured blocks are omitted
+    when the rebuild had no local sprites.
+    """
+    block = {
+        "views": stored_iou["views"] if stored_iou else None,
+        "mean": stored_iou["mean"] if stored_iou else None,
+        "threshold_per_view": C.IOU_MIN_PER_VIEW,
+        "threshold_mean": C.IOU_MIN_MEAN,
+        "source": stored_iou.get("source") if stored_iou else None,
+    }
+    if measured is None:
+        return block
+    raw_views = [round(v, 3) for v in measured["raw"]["views"]]
+    raw_mean = round(measured["raw"]["mean"], 3)
+    if not stored_iou:
+        block["views"] = raw_views
+        block["mean"] = raw_mean
+        block["source"] = "rebuild.py measurement (validator rasteriser, local sprites)"
+    block["closed"] = {
+        "views": [round(v, 3) for v in measured["closed"]["views"]],
+        "mean": round(measured["closed"]["mean"], 3),
+        "kernel_px": measured["closed"]["kernel_px"],
+        "threshold_per_view": C.IOU_CLOSED_MIN_PER_VIEW,
+        "threshold_mean": C.IOU_CLOSED_MIN_MEAN,
+    }
+    block["raw_measured"] = {"views": raw_views, "mean": raw_mean}
+    return block
+
+
+def measure_glb_iou(glb_path, spec, sprites_dir):
+    """Raw and closed IoU of an exported GLB against the local sprites, or None."""
+    if not sprites_dir:
+        return None
+    import validate  # local import: validate imports rebuild in its self-test
+
+    mesh = validate.load_mesh(glb_path)
+    return validate.measure_iou(mesh, {"alignment": spec["alignment"]}, sprites_dir)
+
+
+def write_meta(path, spec, params, tiles, mesh, palette_source, sprite_meta, glb_name, exporter, measured=None):
     pts = np.array(mesh.V, np.float64) / C.SIM_PER_UNIT
     bmin = [float(v) for v in pts.min(axis=0)]
     bmax = [float(v) for v in pts.max(axis=0)]
@@ -110,9 +196,9 @@ def write_meta(path, spec, params, tiles, mesh, palette_source, sprite_meta, glb
             for s in sprite_meta["sprites"]
             if s["index"] in spec["direction_images"]
         ]
-    # Keep the approved IoU on the reference object. A rebuild with sprites
-    # overwrites iou.views only when the validator is asked to; the stored
-    # figures stay the approved measurement until a reviewer replaces them.
+    # Keep the approved IoU on the reference object: iou.views and iou.mean
+    # stay the approved raw figures until a reviewer replaces them. A rebuild
+    # with local sprites adds its own raw and closed-mask measurement.
     stored_iou = spec.get("approved_iou")
     meta = {
         "schema": C.SCHEMA,
@@ -174,29 +260,39 @@ def write_meta(path, spec, params, tiles, mesh, palette_source, sprite_meta, glb
                 "matches that file. The game does not read this meta."
             ),
         },
-        "iou": {
-            "views": stored_iou["views"] if stored_iou else None,
-            "mean": stored_iou["mean"] if stored_iou else None,
-            "threshold_per_view": C.IOU_MIN_PER_VIEW,
-            "threshold_mean": C.IOU_MIN_MEAN,
-            "source": stored_iou.get("source") if stored_iou else None,
-        },
-        "params": {
-            "trunk_rings": params.get("trunk_rings"),
-            "trunk_v_denom": params.get("trunk_v_denom", 138),
-            "foliage_seed": params.get("foliage_seed", 500),
-            "quality": params.get("quality"),
-            "clumps": params["clumps"],
-            "branches": params.get("branches", []),
-            "atlas": params.get("atlas"),
-        },
+        "iou": iou_block(stored_iou, measured),
+        "params": strip_histograms(_meta_params(spec, params)),
         "review": spec.get("review") or {"status": "pending", "note": ""},
         "files": {"glb": glb_name},
     }
+    reason = spec.get("triangle_justification")
+    if reason:
+        # Written only when present, so metas without one are unchanged.
+        meta["triangle_justification"] = reason
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(meta, fh, indent=1)
         fh.write("\n")
     return meta
+
+
+def _meta_params(spec, params):
+    if spec["archetype"] != "conifer":
+        # Non-conifer archetypes record their params.json as written.
+        return params
+    out = {
+        "trunk_rings": params.get("trunk_rings"),
+        "trunk_v_denom": params.get("trunk_v_denom", 138),
+        "foliage_seed": params.get("foliage_seed", 500),
+        "quality": params.get("quality"),
+        "clumps": params["clumps"],
+        "branches": params.get("branches", []),
+        "atlas": params.get("atlas"),
+    }
+    if params.get("stems"):
+        # Optional multi-stem geometry (conifer.add_stem). Absent for the pine,
+        # so its meta is unchanged.
+        out["stems"] = params["stems"]
+    return out
 
 
 def _refuse_protected_overwrite(path, force):
@@ -238,8 +334,9 @@ def main(argv):
     example = os.path.join(TOOL_DIR, "examples", args.object)
     spec = _read(os.path.join(example, "object.json"))
     params = _read(os.path.join(example, "params.json"))
-    if spec["archetype"] != "conifer":
-        raise SystemExit(f"rebuild.py currently builds the conifer archetype, not {spec['archetype']}")
+    check_histograms(params)
+    if spec["archetype"] not in ("conifer", "prop"):
+        raise SystemExit(f"rebuild.py builds the conifer and prop archetypes, not {spec['archetype']}")
     alignment = spec.get("alignment") or {}
     if "sprite_shift" not in alignment or "sprite_y_nudge" not in alignment:
         raise SystemExit("object.json alignment needs sprite_shift and sprite_y_nudge; there is no default paste")
@@ -263,7 +360,7 @@ def main(argv):
     palette, palette_source = resolve_palette(args, args.sprites)
     atlas_png = os.path.join(build_dir, spec["object_id"] + ".atlas.png")
     atlas_json = os.path.join(build_dir, spec["object_id"] + ".atlas.json")
-    atlas = write_atlas(params, palette, atlas_png, atlas_json)
+    atlas = write_atlas(spec["archetype"], params, palette, atlas_png, atlas_json)
     mesh = build_mesh(spec["archetype"], params, atlas["tiles"])
     count = triangle_count(mesh)
     expected = spec.get("expected_triangles")
@@ -285,14 +382,20 @@ def main(argv):
         print(f"wrote {glb_path} ({stats['triangles']} triangles, {stats['vertices']} vertices)")
         exporter = "python (--no-blender)"
     else:
-        export_with_blender(spec["object_id"], params_path, atlas_png, atlas_json, out_dir)
+        export_with_blender(spec["object_id"], params_path, atlas_png, atlas_json, out_dir, spec["archetype"])
         exporter = "blender-4.2"
     patch(glb_path)
     print(f"patched samplers on {glb_path}")
 
+    measured = measure_glb_iou(glb_path, spec, args.sprites)
+    if measured is not None:
+        print(
+            f"IoU raw mean {measured['raw']['mean']:.3f}, "
+            f"closed ({measured['closed']['kernel_px']}px) mean {measured['closed']['mean']:.3f}"
+        )
     write_meta(
         meta_path, spec, params, atlas["tiles"], mesh, palette_source, sprite_meta,
-        os.path.basename(glb_path), exporter,
+        os.path.basename(glb_path), exporter, measured,
     )
     print(f"wrote {meta_path}")
 

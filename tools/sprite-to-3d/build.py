@@ -31,7 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import patch_glb
-from archetypes.conifer import build
+from archetypes import build_mesh
 from conventions import SIM_PER_UNIT, Z_SQUASH
 from projection import PIXELS_PER_UNIT
 
@@ -67,7 +67,7 @@ def main():
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
-    mesh_data = build(params, tiles)
+    mesh_data = build_mesh(opt.get("archetype") or "conifer", params, tiles)
     me = bpy.data.meshes.new(object_id)
     ob = bpy.data.objects.new(object_id, me)
     scene.collection.objects.link(ob)

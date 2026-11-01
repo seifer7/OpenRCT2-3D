@@ -94,6 +94,22 @@ def camera_pixel(blender_xyz, view=0):
     return (u, v)
 
 
+def camera_depth(blender_xyz, view=0):
+    """Distance from the camera along its view axis, for the same squashed camera.
+
+    Smaller is nearer. The camera is orthographic, so this is affine in the
+    point and can be interpolated linearly across a projected triangle.
+    """
+    eye, _x_axis, _y_axis = _camera_basis(view)
+    d0, d1 = VIEW_DIRS[view]
+    forward = -np.array([d0, d1, Z_SQUASH], dtype=np.float64)
+    forward /= np.linalg.norm(forward)
+    point = np.array(
+        [blender_xyz[0], blender_xyz[1], blender_xyz[2] * Z_SQUASH], dtype=np.float64
+    )
+    return float(np.dot(point - eye, forward))
+
+
 def pixels_match_rct(samples=None):
     """Return the max pixel error between the squashed camera and the RCT formula."""
     if samples is None:

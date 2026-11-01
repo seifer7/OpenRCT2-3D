@@ -15,7 +15,8 @@ Read this file on its own. The pine is the reference object:
 | Atlas | 256×256, alpha cut-out |
 | Height | 134 sim Z, 4.1875 Blender units at the tip |
 | Bounds | about 1.49 × 1.42 × 4.28 units |
-| Approved silhouette IoU | 0.733, 0.712, 0.766, 0.687 (mean 0.725) |
+| Approved silhouette IoU (raw) | 0.733, 0.712, 0.766, 0.687 (mean 0.725) |
+| Closed-mask IoU (3px, the gate) | 0.780, 0.737, 0.787, 0.734 (mean 0.759) |
 
 The loader looks for a flat file, `data/object-models/<object id>.glb`, and then the same name under the user directory. It does not search subfolders. Dropping a correctly named `.glb` into `object-models` is the whole install step. `<object id>.meta.json` may sit beside it. The game never reads the meta; it is for people and for `validate.py`. The scripts live in `tools/sprite-to-3d/`.
 
@@ -106,7 +107,7 @@ Small-scenery anchors at view rotation 0 (world units from the tile corner):
 | --- | --- |
 | Full tile | (15, 15) |
 | Full tile, half footprint | (3, 3) |
-| Full tile with `vOffsetCentre` | (3, 3), or (1, 1) when walls are prohibited |
+| Full tile with `vOffsetCentre` | (3, 3), or (1, 1) when walls are prohibited (full-tile objects only) |
 | Quarter tile | (7, 7), (7, 23), (23, 23), (23, 7) by quadrant |
 
 The tile centre is (16, 16). The model origin is the tile centre, so a full-tile object (the pine) has its sprite anchor 1 sim unit toward the corner from the origin. That shift is 0 pixels in screen X and 1 pixel up in screen Y. The comparison paste uses that as `sprite_y_nudge = -1`.
@@ -120,14 +121,21 @@ paste_x = x_offset + 64 − sprite_shift_x
 paste_y = y_offset + 160 + sprite_y_nudge − sprite_shift_y
 ```
 
-The pine's fitted `sprite_shift` is `[-2, 0]` and `sprite_y_nudge` is `-1`, so the paste is `(x_offset + 66, y_offset + 159)`. The −2 is the pine's trunk sitting 2 pixels left of the pure anchor; it is data on that object, not a global constant. Quarter-tile objects use their quadrant anchor instead of the full-tile nudge, and their own fitted shift if the silhouette needs one.
+The pine's fitted `sprite_shift` is `[-2, 0]` and `sprite_y_nudge` is `-1`, so the paste is `(x_offset + 66, y_offset + 159)`. The −2 is the pine's trunk sitting 2 pixels left of the pure anchor; it is data on that object, not a global constant.
+
+Quarter-tile objects: OpenRCT2 draws them at `SceneryQuadrantOffsets` − 1, that is anchors (7, 7), (7, 23), (23, 23), (23, 7) by quadrant. The model origin is the quadrant centre, (8, 8), (8, 24), (24, 24), (24, 8), so the anchor sits 1 sim unit toward the corner exactly as on a full tile, and the paste uses the same `sprite_y_nudge = -1`. `vOffsetCentre` applies only to full-tile objects; it never moves a quarter-tile anchor. A quarter-tile model is authored about its own quadrant centre, and the loader translates it to the tile centre ±8 sim in x and y according to the quadrant stored on the scenery element. A fitted `sprite_shift` is still per-object data, used only if the silhouette needs one.
 
 Silhouette IoU is the overlap of opaque pixels (`alpha > 0` on the sprite, `alpha > 127` on a MASK render) divided by the union. The approved figures were measured with Blender 4.2 Workbench, flat lighting, no anti-aliasing, the Z squash on, and this paste.
 
+**Closed-mask IoU is the gate.** RCT2 sprites are stippled: single transparent pixels inside foliage, one-pixel gaps between leaves. Scored pixel by pixel, that dither costs a solid model several points of IoU it can do nothing about. So before scoring, the validator applies a morphological close (dilate, then erode) with a square `IOU_CLOSE_KERNEL` × `IOU_CLOSE_KERNEL` element (3×3, "3px") to **both** masks, for every object. The gate is closed IoU **≥ 0.70 on every view and ≥ 0.75 mean** (`IOU_CLOSED_MIN_PER_VIEW`, `IOU_CLOSED_MIN_MEAN`). The close inflates every score, which is why these thresholds are higher than the raw ones. Raw IoU is still computed and reported on its own row (and against the old 0.65 / 0.70 raw reference), so a stippled sprite stays visible, but it does not gate. The area ratio (render pixels / sprite pixels, 0.9–1.3) is computed on the raw masks and gates exactly as before. The meta records both: the approved raw figures in `iou.views` / `iou.mean`, and the rebuild's measurement in `iou.closed` and `iou.raw_measured`.
+
+**Empty-render floor.** Each view must also render at least `min_render_px` opaque pixels for its size class (prop_quarter 100, prop_tile 250, tree_quarter 150, every other class 500). That is a guard against a broken projection or alpha cut, not a size check; with sprites present the area ratio is the real guard. Quarter-tile objects draw about 200 px a view, which is why their floor is lower.
+
 ### Matching footprint and height
 
-- **Height.** The declared `height_sim` is the object's logical height (the DAT height byte for small scenery; the pine is 134). The top of the mesh, in Blender Z, should land on `height_sim / 32`. The pine's tip is exactly 4.1875. When sprites are supplied, the validator measures tip height upward from the z=0 anchor row. It does not use the bottom of the mask, so the sunk trunk is not part of the height. The comparison render already includes the Z squash, so one pixel is one sim unit. The four sprites do not share one tip (their y offsets differ by a few pixels). The check is the rendered tip against the tallest sprite tip, within ±2 sim. Per-view deltas are notes.
-- **Footprint.** `footprint_tiles` is the tile rectangle the object occupies. The horizontal AABB must sit inside that rectangle expanded by `max_overhang_tiles`. Trees overhang. The pine is a 1×1 tile with overhang 0.4, and its foliage reaches about 0.31 tiles past the tile edge. The trunk and the origin stay inside the tile. The AABB must contain the origin in both horizontal axes.
+- **Height.** The declared `height_sim` is the object's logical height (the DAT height byte for small scenery; the pine is 134). The top of the mesh, in Blender Z, should land on `height_sim / 32`. The pine's tip is exactly 4.1875. When sprites are supplied, the validator measures tip height upward from the z=0 anchor row. It does not use the bottom of the mask, so the sunk trunk is not part of the height. The comparison render already includes the Z squash, so one pixel is one sim unit. The four sprites do not share one tip (their y offsets differ by a few pixels). The check is the rendered tip against the tallest sprite tip, within ±2 sim. Each view is also checked on its own (render tip minus that view's sprite tip): beyond ±2 sim (`TIP_VIEW_WARN_SIM`) warns, beyond ±4 sim (`TIP_VIEW_FAIL_SIM`) fails. The pine's per-view deltas are 0, +4, +4, +3, so it carries that warning; it passes the tallest-tip check.
+- **Footprint.** `footprint_tiles` is the tile rectangle the object occupies. The horizontal AABB must sit inside that rectangle expanded by `max_overhang_tiles`. Trees overhang. The pine is a 1×1 tile with overhang 0.4, and its foliage reaches about 0.31 tiles past the tile edge. The trunk and the origin stay inside the tile. The AABB must contain the origin in both horizontal axes. The validator checks the horizontal extent of the whole mesh against the class's `footprint_bu` (max |x| and |y| in tile units, about the model origin): ±0.5 for `prop_tile` and `large_scenery`, ±0.85 for the full-tile tree classes, ±0.25 for `prop_quarter` (inside its quadrant), and ±0.40 for the `tree_quarter` canopy.
+- **Trunk base (`tree_quarter`).** A quarter-tile tree's canopy may overhang its quadrant, but its trunk base may not: the trunk base must be within ±0.25 units (`trunk_base_bu`). The trunk base is the bottom slice of the mesh, from the lowest vertex up to `TRUNK_BASE_BAND_SIM` = 4 sim (1/8 tile, a quarter land step) above it. Vertices inside the slice count, and so does every point where a triangle edge crosses the top of the slice, so a leaning trunk is measured where it leaves the band. Four sim is tall enough to include the sunk base and a root flare, and short enough that the lowest canopy cards on the batch 1 trees sit above it.
 - **Base.** Some geometry must reach Z = 0 (or the declared sink just below it). A floating tree fails.
 
 ## How the pine mesh is built
@@ -163,6 +171,8 @@ The atlas is 256×256 RGBA, painted in palette indices and then coloured with th
 Foliage is overlapping needle lumps: a scalloped disc, light at the top and centre, dark along the lower rim, with a few bright pixels. Edges stay scalloped so the card reads as needles rather than a disc. Skirt cards have a lit bumpy top and a dark lower edge. Bark is vertical streaks, histogram-matched to the trunk. Branch wood is a short brown ramp.
 
 Histogram targets for the pine (palette-index counts) live as the defaults in `conifer_atlas.py`. They were counted on the TCRP sprite: foliage greens 142–150, bark browns 34–38, grey-blue highlights 11–15. A new conifer overrides `atlas.top_hist`, `side_hist`, `sprite_hist`, and `bark_hist` in its params after counting its own sprite. The paint seed is 2611.
+
+Histogram provenance: counts derived locally from the extracted sprite; no pixel data stored. Histograms live in `params.json` only, with at most `MAX_HIST_ENTRIES` = 16 entries each (`rebuild.py` refuses a longer one), and `rebuild.py` does not copy them into the meta. The validator fails a meta whose `params` still carry one.
 
 Colour the indices from the user's `Data/g1.dat` (sprite 1532, `SPR_GAME_PALETTE_DEFAULT`, bytes stored BGR). Those RGB values are the same table as `StandardPalette` in `src/openrct2/drawing/ImageImporter.h` (stored there as B, G, R). The pine atlas matches that palette: every opaque texel is one of those colours, and a byte comparison against an atlas painted from `g1.dat` shows no differing pixels. `rebuild.py --palette-header` reads the header so a machine without an install can still colour the example. Do not commit a palette file.
 
@@ -216,7 +226,7 @@ Enough detail to read naturally: a real trunk, real branches, and separate leaf 
 
 Stop short of a scanned tree. No individual pine needles as geometry, no normal maps, no subsurface scattering, no 4k textures. Also stop short of a low-poly blob: an 8-sided trunk is the floor for a tree this size, a 4-sided trunk reads as a post, and a stack of cubes reads as a voxel. Faceted "low poly art" and billboard crosses (two cards for the whole crown) are both the wrong style. The sprite is pixel art of a tree; the mesh is that tree, with the pixels kept on the texture.
 
-Match the silhouette before adding more cards. A clump that does not move the IoU is clutter. The pine's fit stopped at mean IoU 0.725, which is the bar a 1-tile tree is expected to clear.
+Match the silhouette before adding more cards. A clump that does not move the IoU is clutter. The pine's fit stopped at raw mean IoU 0.725 (closed 0.759), which is the bar a 1-tile tree is expected to clear.
 
 ## Poly and texture budgets
 
@@ -224,8 +234,9 @@ Every numeric cap is in `tools/sprite-to-3d/conventions.py` (`SIZE_CLASSES` and 
 
 | Size class | What it is | Why this class |
 | --- | --- | --- |
-| `prop_quarter` | Quarter-tile prop (bone, logs, cauldron) | The mesh stays inside half a tile. No canopy allowance. Atlas stays at the 128² default. |
+| `prop_quarter` | Quarter-tile prop (bone, logs, cauldron) | The mesh stays inside its quadrant (±0.25 units). No canopy allowance. Atlas stays at the 128² default. |
 | `prop_tile` | Full-tile prop that is not a tree | Same file limits as a small object. A short prop may use fewer than 600 triangles; that lower bound is a warning for trees only. |
+| `tree_quarter` | Quarter-tile tree or bush (one of four per tile) | 0.5×0.5 tile. Trunk base within ±0.25 units, canopy within ±0.40. Floor 200, soft cap 400, hard cap 600 triangles. Atlas 128². |
 | `tree_small` | One-tile tree shorter than the pine | Canopy may reach ±0.85 units. Atlas stays 128². |
 | `tree_1tile` | One-tile tree the size of the pine | Canopy class. The target band is 600–1200 triangles and the hard cap is the file maximum. 256² is allowed for this class only with a written `texture.justification`, or for the pine object id, which is the reference exception. |
 | `tree_large` | Taller or wider tree, still one mesh | Deliberately capped at the same 1500 triangles and 256² atlas as a 1-tile tree for now. A bigger tree does not get a larger file. Canopy allowance applies. 256² needs a justification. |
@@ -233,7 +244,19 @@ Every numeric cap is in `tools/sprite-to-3d/conventions.py` (`SIZE_CLASSES` and 
 
 New models use a 128² atlas. 256² is the pine's atlas and the ceiling, not the default. A 256² RGBA texture is about 256 KB before the GPU rounds it up (about 328 KB), which dominates VRAM once thousands of distinct models are loaded. The validator warns when a new model is above 128² unless `texture.justification` is a non-empty string. The pine object id is the exception and does not warn.
 
-A tree under the target floor warns. It does not fail. A prop under that floor does not warn. Anything over the hard cap fails. The GLB must be at most 128 KB; over the 100 KB target warns. Vertices must be at most 2500, with u16 indices. Exactly one node, one mesh, one primitive and one material.
+Each class has an explicit soft cap, `soft_max_tris`, and a hard cap, `hard_tris`. The numbers (all in `SIZE_CLASSES`):
+
+| Size class | Floor (`tree_warn_below`) | `soft_max_tris` | `hard_tris` | Max atlas | `min_render_px` |
+| --- | --- | --- | --- | --- | --- |
+| `prop_quarter` | none | 250 | 500 | 128² | 100 |
+| `prop_tile` | none | 500 | 1000 | 128² | 250 |
+| `tree_quarter` | 200 | 400 | 600 | 128² | 150 |
+| `tree_small` | 600 | 1000 | 1200 | 128² | 500 |
+| `tree_1tile` | 600 | 1200 | 1500 | 256² | 500 |
+| `tree_large` | 600 | 1200 | 1500 | 256² | 500 |
+| `large_scenery` | none | 1200 | 1500 | 256² | 500 |
+
+Over `soft_max_tris` warns (the exit code is unaffected). A top-level `triangle_justification` string in the meta (copied from `object.json` by `rebuild.py`) is shown on that warning; it annotates the warning and does not remove it. A tree under its floor warns. It does not fail. A prop has no floor. Anything over the hard cap fails. The GLB must be at most 128 KB; over the 100 KB target warns. Vertices must be at most 2500, with u16 indices. Exactly one node, one mesh, one primitive and one material.
 
 ## Export
 
@@ -285,8 +308,11 @@ The tooling meta uses schema `openrct2-3d.object-model.v1`. Its fields:
 | `texture` | width, height, `MASK`, cutoff 0.5, `NEAREST`, `mipmaps: false`, and the tile rects |
 | `iou.views` | four numbers, or the approved measurement |
 | `iou.mean` | average of the four |
-| `iou.threshold_per_view`, `iou.threshold_mean` | 0.65 and 0.70 |
-| `params` | the archetype inputs that rebuild the mesh (trunk, clumps, branches, quality, seeds) |
+| `iou.threshold_per_view`, `iou.threshold_mean` | 0.65 and 0.70, the raw-mask reference levels (reported, not a gate) |
+| `iou.closed` | `{views, mean, kernel_px, threshold_per_view, threshold_mean}`: the rebuild's closed-mask IoU, the 3px kernel, and the gate (0.70 per view, 0.75 mean). Written when the rebuild had local sprites. |
+| `iou.raw_measured` | `{views, mean}`: the rebuild's raw IoU. When `object.json` has no `approved_iou`, `iou.views` and `iou.mean` are this measurement too. |
+| `triangle_justification` | optional; why the model stands over its `soft_max_tris`. Shown on the warning. |
+| `params` | the archetype inputs that rebuild the mesh (trunk, clumps, branches, quality, seeds), without palette histograms |
 | `review.status` | `approved` or `pending` |
 | `review.note` | who signed off, and what they looked at |
 
@@ -297,22 +323,22 @@ The tooling meta uses schema `openrct2-3d.object-model.v1`. Its fields:
 A model is done when all of these are true:
 
 1. `python3 tools/sprite-to-3d/validate.py <model dir> --sprites <local sprite dir> --require-iou` exits 0.
-2. Structural checks pass: bounds and footprint inside the declared tiles plus overhang, base at z = 0 within the declared sink, height within 0.2 units of `height_sim / 32`, Y-up with identity node transform, no Z squash in the file, MASK 0.5, nearest, no mipmaps, double-sided, roughness 1, specular 0, triangle count and texture size inside the hard budget, alpha strictly 0 or 255, meta present and valid.
-3. Silhouette IoU is at least **0.65 on every view** and **0.70 on average**. The pine clears this (worst view 0.687, mean 0.725).
+2. Structural checks pass: bounds and footprint inside the class limits (and the trunk base for `tree_quarter`), base at z = 0 within the declared sink, height within 0.2 units of `height_sim / 32`, Y-up with identity node transform, no Z squash in the file, MASK 0.5, nearest, no mipmaps, double-sided, roughness 1, specular 0, triangle count and texture size inside the hard budget, alpha strictly 0 or 255, meta present and valid.
+3. Closed-mask silhouette IoU (3×3 close on both masks) is at least **0.70 on every view** and **0.75 on average**, the area ratio is inside 0.9–1.3, and no view's tip is more than ±4 sim off its sprite. The pine clears this (closed worst view 0.734, mean 0.759; raw 0.687 and 0.725).
 4. The review PNG (sprite, render, overlap) has been looked at. Green is the overlap, red is sprite-only, blue is model-only. A high IoU with the mass in the wrong place (a trunk through the crown, a pad floating off the branch) still fails review.
 5. `review.status` is `approved` and the note says who approved it.
 6. The commit contains no RCT1/RCT2 sprites, palettes, DAT/g1/csg files, or review images that paste the original sprites.
 
 `validate.py --self-test` checks the committed pine without sprites: the camera matches the RCT formula, rebuilding the params reproduces the triangle count and the bounds, and the structural checks pass. It does not recompute IoU. That needs the local sprites.
 
-The validator's own rasteriser, with the squash applied in the camera, covers 3402, 3113, 3172, and 3137 opaque pixels on the four views. The approved Blender renders were 3403, 3113, 3172, 3137. One pixel on view 0 is the whole difference, so an IoU measured here will match the approved figures for any practical purpose.
+The validator's own rasteriser, with the squash applied in the camera, covers 3402, 3113, 3172, and 3137 opaque pixels on the four views. The approved Blender renders were 3403, 3113, 3172, 3137. One pixel on view 0 is the whole difference, so an IoU measured here will match the approved figures for any practical purpose. The rasteriser is depth-tested: camera depth is interpolated per pixel and kept in a z-buffer, so each pixel of the review sheet shows the nearest opaque texel regardless of triangle order. MASK holes neither draw nor write depth. Which pixels are opaque does not depend on the depth test, so coverage and IoU are the same with or without it.
 
 ## Building another object in this style
 
 1. Extract it: `python3 tools/sprite-to-3d/extract.py --rct2-data-path "$RCT2" --dat TCRP --object-id rct2.scenery_small.tcrp --out tools/sprite-to-3d/cache/rct2.scenery_small.tcrp`. Change the DAT and the id. The cache is gitignored.
 2. Copy `tools/sprite-to-3d/examples/rct2.scenery_small.tcrp/` to a new folder named with the object id. Set `object.json` (id, DAT, size class, height, footprint, recolour flags, alignment).
 3. If it is a conifer, edit `params.json` clumps until the silhouette fits. Run `fit.py` under Blender to search. If it is not a conifer, add an archetype module next to `conifer.py` and register it in `archetypes/__init__.py`. Keep the same units, the same material rules, and the same meta schema.
-4. Count the sprite's palette indices and, if they differ from the pine, put histograms in `params.json` under `atlas`.
+4. Count the sprite's palette indices and, if they differ from the pine, put histograms in `params.json` under `atlas` (at most 16 entries each). Histogram provenance: counts derived locally from the extracted sprite; no pixel data stored.
 5. Rebuild and validate with `--sprites` pointing at the cache folder.
 6. Commit the GLB, the atlas, the atlas tile JSON, and the meta. Do not commit the cache or the review PNG.
 

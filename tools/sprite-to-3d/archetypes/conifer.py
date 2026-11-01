@@ -46,6 +46,9 @@ DEFAULT_QUALITY = dict(
     br_r1=0.45,
     sub=2,
     twig_r=0.5,
+    # Added for later objects; the defaults are the pine's construction.
+    limbs=1,  # 0 hides the per-clump drooping branch and its twigs (dense columnar crowns)
+    trunk_sides=8,
 )
 
 
@@ -259,6 +262,58 @@ def add_foliage(mesh, tiles, clump, index, rng, quality):
         )
 
 
+def add_stem(mesh, tiles, stem):
+    """Optional extra trunk or limb along a polyline (multi-stem trees, forks).
+
+    stem: {"points": [[x, y, z], ...], "radii": [...], "sides": 6, "tile": "bark",
+    "texels_per_sim": 1.0}. V runs along the stem at texels_per_sim and restarts at
+    the top of the tile when it would run off, so a long stem keeps about one texel
+    per sim unit. Each segment has its own rings, which costs no triangles.
+    Not used by the Corsican Pine.
+    """
+    tile = tiles[stem.get("tile", "bark")]
+    points = [tuple(float(c) for c in p) for p in stem["points"]]
+    radii = [float(r) for r in stem["radii"]]
+    sides = int(stem.get("sides", 6))
+    per_sim = float(stem.get("texels_per_sim", 1.0))
+    tile_h = float(tile[3])
+    kind = stem.get("kind", "bark")
+    v_cursor = 0.0
+    for k in range(len(points) - 1):
+        a, b = points[k], points[k + 1]
+        seg = math.dist(a, b)
+        span = seg * per_sim
+        if v_cursor + span > tile_h:
+            v_cursor = 0.0
+        span = min(span, tile_h)
+        v0, v1 = v_cursor / tile_h, (v_cursor + span) / tile_h
+        v_cursor += span
+        rows = []
+        for point, radius, vv, nb in ((a, radii[k], v0, k), (b, radii[k + 1], v1, k + 1)):
+            # Ring frame from the averaged neighbouring segments so joints do not pinch.
+            prev = points[max(nb - 1, 0)]
+            nxt = points[min(nb + 1, len(points) - 1)]
+            _d, side, up = frame(tuple(q - p for p, q in zip(prev, nxt)))
+            if radius <= 0:
+                rows.append([mesh.v(point, tile_uv(tile, 0.5, 1 - vv))])
+                continue
+            ring = []
+            for i in range(sides + 1):
+                angle = 2 * math.pi * i / sides + 0.2
+                q = tuple(
+                    point[j] + radius * (math.cos(angle) * side[j] + math.sin(angle) * up[j])
+                    for j in range(3)
+                )
+                ring.append(mesh.v(q, tile_uv(tile, i / sides, 1 - vv)))
+            rows.append(ring)
+        row0, row1 = rows
+        for i in range(sides):
+            if len(row1) == 1:
+                mesh.f((row0[i], row0[i + 1], row1[0]), kind)
+            else:
+                mesh.f((row0[i], row0[i + 1], row1[i + 1], row1[i]), kind)
+
+
 def build(params, tiles, quality=None):
     rings = trunk_rings(params)
     q = dict(DEFAULT_QUALITY)
@@ -267,20 +322,36 @@ def build(params, tiles, quality=None):
         q.update(quality)
     seed0 = int(params.get("foliage_seed", 500))
     mesh = Mesh()
-    add_trunk(mesh, tiles, rings, v_denom=float(params.get("trunk_v_denom", 138)))
+    add_trunk(mesh, tiles, rings, sides=int(q["trunk_sides"]), v_denom=float(params.get("trunk_v_denom", 138)))
     for i, clump in enumerate(params["clumps"]):
         rng = random.Random(seed0 + i)
-        distance = math.hypot(clump["x"], clump["y"])
-        angle = math.atan2(clump["y"], clump["x"]) if distance > 2 else clump["th"]
-        ux, uy = math.cos(angle), math.sin(angle)
-        length = min(max(distance + 0.6 * max(clump["a"], clump["b"]), 6.0), 24.0)
-        z0 = clump["z"] - 3.0
-        r0 = trunk_radius(z0, rings) * 0.8
-        p0 = (ux * r0, uy * r0, z0)
-        p1 = (ux * length * 0.5, uy * length * 0.5, z0 + 1.8)
-        p2 = (ux * length, uy * length, z0 + 0.6)
-        add_limb(mesh, tiles, [p0, p1, p2], [q["br_r0"], q["br_r1"], 0], 4)
-        for k in range(int(q["sub"])):
+        # Optional "root": [x, y, r] hangs the clump's branch off a side stem
+        # instead of the main trunk. The pine's clumps have no root.
+        root = clump.get("root")
+        if root:
+            rx, ry = float(root[0]), float(root[1])
+            distance = math.hypot(clump["x"] - rx, clump["y"] - ry)
+            angle = math.atan2(clump["y"] - ry, clump["x"] - rx) if distance > 2 else clump["th"]
+            ux, uy = math.cos(angle), math.sin(angle)
+            length = min(max(distance + 0.6 * max(clump["a"], clump["b"]), 6.0), 24.0)
+            z0 = clump["z"] - 3.0
+            r0 = float(root[2]) * 0.8
+            p0 = (rx + ux * r0, ry + uy * r0, z0)
+            p1 = (rx + ux * length * 0.5, ry + uy * length * 0.5, z0 + 1.8)
+            p2 = (rx + ux * length, ry + uy * length, z0 + 0.6)
+        else:
+            distance = math.hypot(clump["x"], clump["y"])
+            angle = math.atan2(clump["y"], clump["x"]) if distance > 2 else clump["th"]
+            ux, uy = math.cos(angle), math.sin(angle)
+            length = min(max(distance + 0.6 * max(clump["a"], clump["b"]), 6.0), 24.0)
+            z0 = clump["z"] - 3.0
+            r0 = trunk_radius(z0, rings) * 0.8
+            p0 = (ux * r0, uy * r0, z0)
+            p1 = (ux * length * 0.5, uy * length * 0.5, z0 + 1.8)
+            p2 = (ux * length, uy * length, z0 + 0.6)
+        if q["limbs"]:
+            add_limb(mesh, tiles, [p0, p1, p2], [q["br_r0"], q["br_r1"], 0], 4)
+        for k in range(int(q["sub"]) if q["limbs"] else 0):
             sign = 1 if k == 0 else -1
             a2 = angle + sign * rng.uniform(0.6, 1.0)
             l2 = length * rng.uniform(0.35, 0.5)
@@ -297,6 +368,8 @@ def build(params, tiles, quality=None):
             (ux * length, uy * length, twig["z"] + twig["rise"] - 0.5),
         ]
         add_limb(mesh, tiles, points, [q["twig_r"], q["twig_r"] * 0.6, 0], 4)
+    for stem in params.get("stems", []):
+        add_stem(mesh, tiles, stem)
     return mesh
 
 

@@ -3873,3 +3873,4 @@ STR_7079    :Ruby
 STR_7080    :Deep blue
 STR_7081    :Silver
 STR_7082    :3D view
+STR_7083    :Checking 3D scenery models...

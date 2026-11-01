@@ -143,6 +143,11 @@ namespace OpenRCT2
         std::unique_ptr<Ui::IUiContext>&& uiContext);
     [[nodiscard]] IContext* GetContext();
 
+    // The 3D view registers this. Startup calls it while the loading bar is up.
+    // The headless build does not link that view, so the pointer stays empty.
+    using PrepareSceneryModelsFn = void (*)();
+    void SetPrepareSceneryModels(PrepareSceneryModelsFn fn);
+
     void ContextInit();
     void ContextResetSubsystems();
     void ContextSetCurrentCursor(CursorID cursor);

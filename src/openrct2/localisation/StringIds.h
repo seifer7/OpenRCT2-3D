@@ -1796,6 +1796,7 @@ enum : StringId
     STR_GUESTS_WATCHING_NEW_RIDE_BEING_CONSTRUCTED = 7063,
 
     STR_VIEW_3D = 7082,
+    STR_CHECKING_SCENERY_MODELS = 7083,
 
     // Have to include resource strings (from scenarios and objects) for the time being now that language is partially working
     /* MAX_STR_COUNT = 32768 */ // MAX_STR_COUNT - upper limit for number of strings, not the current count strings

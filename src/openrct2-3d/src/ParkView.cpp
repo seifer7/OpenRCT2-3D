@@ -9,6 +9,9 @@
 
 #include "ParkView.hpp"
 
+#include "SceneryDraw.hpp"
+#include "ViewerScale.hpp"
+
 #include <algorithm>
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
@@ -56,10 +59,6 @@ namespace OpenRCT2::View3D::Park
         constexpr float kWaterLift = 0.03f;
         // Sits on the land height. A small lift keeps the path off the ground without reading as a step.
         constexpr float kPathLift = 0.03f;
-        // Height of one raised land step, in tiles. This is the only height control: land, cliffs, water,
-        // paths, and the camera's ground point all come from it. 1.0 is a full tile tall, which read as
-        // too steep. 0.5 is half of that.
-        constexpr float kLandStepHeight = 0.5f;
         constexpr int32_t kPathCanvasWidth = 64;
         constexpr int32_t kPathCanvasHeight = 32;
         constexpr uint16_t kPathLayers = 256;
@@ -86,7 +85,7 @@ namespace OpenRCT2::View3D::Park
         // 30 degrees down. sin(30) = 1/2, so a flat tile at the centre is twice as wide as it is tall, the 2D
         // isometric diamond. At zoom 0 that diamond is 64 screen pixels wide. The perspective frame shows
         // more of the park than that flat view, so the camera sits a little closer than the geometric match.
-        constexpr float kIsoDepression = 0.5235988f;
+        constexpr float kIsoDepression = kIsometricPitchRadians;
         constexpr float kTilePixels = 64.0f;
         constexpr float kIsoDistanceScale = 0.8f;
         // Real-time ticks are 25ms. A gap this long means the 3D view was not drawn, so the next frame
@@ -154,10 +153,11 @@ namespace OpenRCT2::View3D::Park
             clampFly();
         }
 
-        // Big Z is 16 units per land step. Every mesh height and the camera ground point go through here.
+        // Big Z is 16 units per land step. Every mesh height and the camera ground point go through
+        // viewerZ. kLandStepHeight in ViewerScale.hpp is the only vertical scale.
         constexpr float worldZ(int32_t bigZ)
         {
-            return static_cast<float>(bigZ) * (kLandStepHeight / 16.0f);
+            return viewerZ(bigZ);
         }
         static_assert(worldZ(16) == kLandStepHeight);
 
@@ -1593,6 +1593,7 @@ namespace OpenRCT2::View3D::Park
 
     void release()
     {
+        releaseScenery();
         _fly = {};
         _resyncView = true;
         _failed = false;
@@ -1698,6 +1699,8 @@ namespace OpenRCT2::View3D::Park
         // at the same height covers it. Discarded path texels leave the land depth alone.
         submitMesh(_land, _landCount, 0, opaque, params, extra);
         submitMesh(_pathMesh, _pathCount, 1, opaque, params, extra);
+        // Scenery before the water, so a translucent lake can cover a trunk standing in it.
+        drawScenery();
         submitMesh(_lake, _lakeCount, 2, blended, params, extra);
         return true;
     }

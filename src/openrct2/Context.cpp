@@ -99,6 +99,8 @@ namespace OpenRCT2
         using namespace std::chrono_literals;
 
         static constexpr auto kForcedUpdateInterval = 25ms;
+
+        PrepareSceneryModelsFn prepareSceneryModels = nullptr;
     } // namespace
 
     class Context final : public IContext
@@ -564,6 +566,12 @@ namespace OpenRCT2
 
             OpenProgress(STR_CHECKING_TITLE_SEQUENCES);
             TitleSequenceManager::Scan();
+
+            OpenProgress(STR_CHECKING_SCENERY_MODELS);
+            if (prepareSceneryModels != nullptr)
+            {
+                prepareSceneryModels();
+            }
 
             OpenProgress(STR_LOADING_GENERIC);
         }
@@ -1569,6 +1577,11 @@ namespace OpenRCT2
         std::unique_ptr<IUiContext>&& uiContext)
     {
         return std::make_unique<Context>(std::move(env), std::move(audioContext), std::move(uiContext));
+    }
+
+    void SetPrepareSceneryModels(PrepareSceneryModelsFn fn)
+    {
+        prepareSceneryModels = fn;
     }
 
     IContext* GetContext()

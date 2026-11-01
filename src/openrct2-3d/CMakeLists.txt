@@ -56,6 +56,7 @@ add_library(
     src/GlbMesh.cpp
     src/MeshDraw.cpp
     src/SceneryDraw.cpp
+    src/ModelCache.cpp
     third_party/cgltf/cgltf.cpp
     third_party/stb_image_impl.cpp)
 # cgltf and stb_image are third-party. Keep their warnings from failing this build.

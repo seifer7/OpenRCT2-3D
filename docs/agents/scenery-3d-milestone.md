@@ -10,8 +10,9 @@ First scenery pass in the 3D view. Small scenery only. The 2D renderer is unchan
 - **Draw.** After paths and before water, `SceneryDraw.cpp` walks small scenery. Ghosts are included (construction remap). Invisible elements are skipped. Hide Vegetation and Hide Scenery are honoured. The list is rebuilt when a hash of positions, entry, direction, quadrant, colours, wither band, and ghost changes.
 - **Models.** One instanced draw per GLB primitive per object id. The instance is position plus a yaw. Direction 0 is the authored facing. Each step is a clockwise quarter turn about +Z, the same as `CoordsXY::rotate`. Full-tile objects (including half and three-quarter footprints) are placed at the tile centre. Quarter-tile objects use `SceneryQuadrantOffsets`, in world space, not rotated by the camera. Alpha mode comes from the material: mask uses the file's cutoff and discards, blend blends, opaque does not discard. Double-sided comes from the material. A sampler of nearest/nearest and clamp-to-edge is uploaded that way, with no mipmaps.
 - **Sprite cross.** No GLB, or a GLB that fails the caps, falls back to four quads in two planes. From above they make an X. Each face looks at one isometric camera (the same corners `ParkView` uses for rotations 0..3) and shows `image + ((direction + face) & 3)`, plus the wither offset of +4 or +8. Colour remap goes through `GfxDrawSpriteSoftware`, so primary, secondary, tertiary, and the ghost palette match the 2D paint. One pixel of sprite height is one sim Z. One pixel of width is that times `cos(30°)`, so a face-on view at the isometric pitch keeps the image's pixel aspect. Transparent palette index 0 is discarded (cutoff 0.5). Sprites are not lit again.
-- **Asset.** `data/object-models/rct2.scenery_small.tcrp.glb` is the Corsican Pine (`rct2.scenery_small.tcrp`). The meta JSON sits beside it and is not read at runtime. `install(DIRECTORY "data/")` copies `object-models/` into the OpenRCT2 data directory. At runtime the search is `{openrct2}/object-models/<id>.glb`, then `{user}/object-models/<id>.glb`.
-- **Preview.** `openrct2-3d-preview` (CMake, not installed) renders a GLB and a stand-in X offscreen.
+- **Asset.** `data/object-models/rct2.scenery_small.tcrp.glb` is the Corsican Pine (`rct2.scenery_small.tcrp`). The meta JSON sits beside it and is not read at runtime. `install(DIRECTORY "data/")` in the root `CMakeLists.txt` copies `object-models/` into the OpenRCT2 data directory. A Visual Studio build copies the same folder into `bin\data\object-models` from `CopyObjectModels` in `openrct2.targets`. At runtime the search is `{openrct2}/object-models/<id>.glb`, then `{user}/object-models/<id>.glb`.
+- **Cache.** During startup, after the title-sequence scan, each of those GLBs is converted to `{cache}/object-models/<id>.o3d` (version 1). The header stores the source size, modification time, and an FNV-1a hash of the bytes. A match skips the file. A bad GLB is logged and does not stop startup. Drawing loads the cache and parses the GLB only when the cache is missing or unreadable.
+- **Preview.** `openrct2-3d-preview` (CMake, not installed) renders a GLB and a stand-in X offscreen. It does not use the cache.
 
 ## How to add a model
 
@@ -25,7 +26,7 @@ First scenery pass in the 3D view. Small scenery only. The 2D renderer is unchan
 
 From `docs/agents/glb-model-pipeline-recommendation.md`, not in this pass:
 
-- Offline or cached conversion (`.o3d`, geometryc, KTX/BC, pre-bake at build time). The GLB is parsed when the 3D view first needs that object.
+- Offline build-time baking, geometryc, and KTX/BC textures. The runtime `.o3d` cache stores the converted mesh and the embedded PNG. It is not a GPU-compressed texture.
 - LOD, impostors, and distance fade.
 - Chunked (16×16) culling and a frustum test. Every small scenery element in the park is submitted. Instancing is per object type, which is the part of the 10k path this milestone does.
 - Texture arrays and compressed textures. Each image is its own RGBA texture.

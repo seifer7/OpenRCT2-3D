@@ -89,6 +89,8 @@
     <ClCompile Include="Endianness.cpp" />
     <ClCompile Include="EnumMapTest.cpp" />
     <ClCompile Include="FormattingTests.cpp" />
+    <ClCompile Include="GlbMeshTests.cpp" />
+    <ClCompile Include="ModelCacheTests.cpp" />
     <ClCompile Include="LanguagePackTest.cpp" />
     <ClCompile Include="ImageImporterTests.cpp" />
     <ClCompile Include="IniReaderTest.cpp" />
@@ -114,6 +116,16 @@
     <ClCompile Include="TileElements.cpp" />
     <ClCompile Include="TileElementsView.cpp" />
     <ClCompile Include="WidgetStateTests.cpp" />
+    <ClCompile Include="..\..\src\openrct2-3d\src\GlbMesh.cpp">
+      <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\src;$(SolutionDir)src\openrct2-3d\third_party\cgltf;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\..\src\openrct2-3d\src\ModelCache.cpp">
+      <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\src;$(SolutionDir)src\openrct2-3d\third_party\cgltf;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\..\src\openrct2-3d\third_party\cgltf\cgltf.cpp">
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\third_party\cgltf;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="testdata\sprites\badManifest.json" />

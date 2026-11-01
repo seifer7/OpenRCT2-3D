@@ -11,6 +11,7 @@
 
 #include "GlbMesh.hpp"
 #include "MeshDraw.hpp"
+#include "ModelCache.hpp"
 #include "SpriteQuad.hpp"
 #include "ViewerScale.hpp"
 
@@ -31,6 +32,7 @@
 #include <openrct2/interface/Viewport.h>
 #include <openrct2/interface/Window.h>
 #include <openrct2/interface/WindowBase.h>
+#include <openrct2/localisation/StringIds.h>
 #include <openrct2/object/Object.h>
 #include <openrct2/world/Map.h>
 #include <openrct2/world/Scenery.h>
@@ -77,37 +79,53 @@ namespace OpenRCT2::View3D::Park
             return hash;
         }
 
-        bool identifierIsSafe(std::string_view identifier)
+        std::vector<std::string> modelSourceDirs()
         {
-            return !identifier.empty() && identifier.find('/') == std::string_view::npos
-                && identifier.find('\\') == std::string_view::npos && identifier.find("..") == std::string_view::npos;
+            std::vector<std::string> dirs;
+            IContext* context = GetContext();
+            if (context == nullptr)
+            {
+                return dirs;
+            }
+            const IPlatformEnvironment& env = context->GetPlatformEnvironment();
+            // Data dir wins over the user dir, matching prepareModelCache.
+            dirs.push_back(Path::Combine(env.GetDirectoryPath(DirBase::openrct2), u8"object-models"));
+            dirs.push_back(Path::Combine(env.GetDirectoryPath(DirBase::user), u8"object-models"));
+            return dirs;
         }
 
-        std::string findModelPath(std::string_view identifier)
+        std::string modelCacheDir()
         {
-            if (!identifierIsSafe(identifier))
-            {
-                return {};
-            }
             IContext* context = GetContext();
             if (context == nullptr)
             {
                 return {};
             }
-            const IPlatformEnvironment& env = context->GetPlatformEnvironment();
-            const std::string file = std::string(identifier) + ".glb";
-            const std::string installed = Path::Combine(env.GetDirectoryPath(DirBase::openrct2), u8"object-models", file);
-            if (File::Exists(installed))
-            {
-                return installed;
-            }
-            const std::string user = Path::Combine(env.GetDirectoryPath(DirBase::user), u8"object-models", file);
-            if (File::Exists(user))
-            {
-                return user;
-            }
-            return {};
+            return Path::Combine(context->GetPlatformEnvironment().GetDirectoryPath(DirBase::cache), u8"object-models");
         }
+
+        void prepareSceneryModels()
+        {
+            const std::vector<std::string> dirs = modelSourceDirs();
+            const std::string cache = modelCacheDir();
+            prepareModelCache(dirs, cache, [](int32_t done, int32_t total, std::string_view) {
+                IContext* context = GetContext();
+                if (context != nullptr)
+                {
+                    context->SetProgress(static_cast<uint32_t>(done), static_cast<uint32_t>(total));
+                }
+            });
+        }
+
+        struct RegisterSceneryModels
+        {
+            RegisterSceneryModels()
+            {
+                SetPrepareSceneryModels(&prepareSceneryModels);
+            }
+        };
+
+        const RegisterSceneryModels kRegisterSceneryModels;
 
         int32_t modelHandle(const std::string& identifier)
         {
@@ -117,18 +135,14 @@ namespace OpenRCT2::View3D::Park
                 return found->second;
             }
             int32_t handle = -1;
-            const std::string path = findModelPath(identifier);
-            if (!path.empty())
+            std::string error;
+            const std::optional<CpuMesh> mesh = loadModelForDraw(identifier, modelSourceDirs(), modelCacheDir(), error);
+            if (mesh.has_value())
             {
-                std::string error;
-                const std::optional<CpuMesh> mesh = loadGlbFile(path, {}, error);
-                if (mesh.has_value())
-                {
-                    handle = meshDrawUploadModel(*mesh);
-                }
+                handle = meshDrawUploadModel(*mesh);
                 if (handle < 0)
                 {
-                    std::fprintf(stderr, "View3D: model %s failed (%s)\n", identifier.c_str(), error.c_str());
+                    std::fprintf(stderr, "View3D: model %s failed to upload\n", identifier.c_str());
                 }
                 else
                 {
@@ -136,6 +150,10 @@ namespace OpenRCT2::View3D::Park
                         stderr, "View3D: loaded scenery model %s (%zu primitives)\n", identifier.c_str(),
                         mesh->primitives.size());
                 }
+            }
+            else if (!error.empty())
+            {
+                std::fprintf(stderr, "View3D: model %s failed (%s)\n", identifier.c_str(), error.c_str());
             }
             _models.emplace(identifier, handle);
             return handle;

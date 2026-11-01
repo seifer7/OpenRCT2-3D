@@ -73,10 +73,13 @@ jobs:
     name: Get version info
     runs-on: ubuntu-24.04 # This job is too heavy for ubuntu-slim. It takes almost a minute to checkout the code on slim vs 23s on ubuntu-24.04.
     needs: ci-requested
-    # We want to sign tagged releases with release certificates, but it is only allowed to be ran manually.
-    # Disable automatic runs for tags and force release signing for tags.
-    # An explicit if replaces the default "skip when needs was skipped", so the
-    # gate result has to be part of this condition.
+    # Tagged releases are signed only from a manual workflow_dispatch that asks for
+    # release-signing. Automatic tag pushes do not sign.
+    # This job sets its own `if`, and an explicit if replaces GitHub's default
+    # "skip when a needed job was skipped". The ci-requested result has to be
+    # repeated here or a pull request without CI Request would still run this job.
+    # The sign step reads steps.setenv.outputs.push. needs.build_variables is this
+    # job, not one of its dependencies, so it cannot see that output.
     if: |
       needs.ci-requested.result == 'success' &&
       (
@@ -131,7 +134,7 @@ jobs:
         env:
           SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
         run: |
-          sign=${{ env.SIGNPATH_API_TOKEN != '' && github.event.inputs.sign != 'no' && (needs.build_variables.outputs.push || startsWith(github.ref, 'refs/tags/v')) }}
+          sign=${{ env.SIGNPATH_API_TOKEN != '' && github.event.inputs.sign != 'no' && (steps.setenv.outputs.push || startsWith(github.ref, 'refs/tags/v')) }}
           # if using workflow_dispatch, use the provided certificate
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             certificate=${{ github.event.inputs.sign }}

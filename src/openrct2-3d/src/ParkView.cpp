@@ -118,6 +118,11 @@ namespace OpenRCT2::View3D::Park
         };
 
         FlyCamera _fly;
+        float _eyeX = 0.0f;
+        float _eyeY = 0.0f;
+        float _eyeZ = 0.0f;
+        float _viewProj[16] = {};
+        bool _haveCamera = false;
         uint16_t _frameHeight = 0;
         // Raised when the 3D view is toggled, and until the first frame, so the pose is taken from the 2D view.
         bool _resyncView = true;
@@ -1542,6 +1547,13 @@ namespace OpenRCT2::View3D::Park
             // bx::mtxProj converts this angle with toRad, so the value is degrees. Passing radians
             // collapses the field of view to under one degree and fills the window with one tile.
             bx::mtxProj(projection, kFovDegrees, aspect, 0.2f, 8000.0f, bgfx::getCaps()->homogeneousDepth);
+            // bx stores column-major matrices and mtxMul(result, a, b) is result = a * b.
+            // Clip is projection * view.
+            bx::mtxMul(_viewProj, projection, view);
+            _eyeX = _fly.eyeX;
+            _eyeY = _fly.eyeY;
+            _eyeZ = _fly.eyeZ;
+            _haveCamera = true;
             bgfx::setViewTransform(0, view, projection);
         }
     } // namespace
@@ -1591,10 +1603,24 @@ namespace OpenRCT2::View3D::Park
         _fly.haveTick = false;
     }
 
+    bool copyCamera(float& eyeX, float& eyeY, float& eyeZ, float viewProj[16])
+    {
+        if (!_haveCamera || viewProj == nullptr)
+        {
+            return false;
+        }
+        eyeX = _eyeX;
+        eyeY = _eyeY;
+        eyeZ = _eyeZ;
+        std::memcpy(viewProj, _viewProj, sizeof(_viewProj));
+        return true;
+    }
+
     void release()
     {
         releaseScenery();
         _fly = {};
+        _haveCamera = false;
         _resyncView = true;
         _failed = false;
         _logged = false;

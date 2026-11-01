@@ -31,6 +31,8 @@ namespace OpenRCT2::View3D
 
     // A non-negative id. -1 if the mesh or its textures could not be uploaded.
     int32_t meshDrawUploadModel(const CpuMesh& mesh);
+    // Frees one uploaded model's ranges and any texture it owns. The id is left empty.
+    void meshDrawReleaseModel(int32_t id);
 
     // One face. The quad is in local space and instances only translate it (yaw 0).
     int32_t meshDrawUploadSprite(const SpriteQuad& quad, const uint8_t* rgba, int32_t width, int32_t height);

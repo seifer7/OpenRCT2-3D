@@ -1,4 +1,4 @@
-#Object models
+# Object models
 
 GLB files for the 3D view. The game looks here, under the OpenRCT2 data directory (`--openrct2-data-path`, the same directory that contains `object/` and `g2.dat`), and then under the user directory.
 

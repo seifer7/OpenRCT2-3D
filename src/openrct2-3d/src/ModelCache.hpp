@@ -25,7 +25,9 @@ namespace OpenRCT2::View3D
     // primitive and image counts, and rejects trailing bytes.
     constexpr uint32_t kModelCacheVersion = 3;
     constexpr size_t kModelCacheHeaderBytes = 68;
+    constexpr size_t kModelCacheSizeOffset = 8;
     constexpr size_t kModelCacheMtimeOffset = 16;
+    constexpr size_t kModelCacheHashOffset = 24;
     constexpr size_t kModelCacheChecksumOffset = 32;
     // Offsets of the converter version, the first MeshLoadLimits field, and the primitive count.
     constexpr size_t kModelCacheConverterOffset = 40;
@@ -57,13 +59,22 @@ namespace OpenRCT2::View3D
     ModelCacheStats prepareModelCache(
         const std::vector<std::string>& sourceDirs, const std::string& cacheDir, ModelCacheProgressFn progress);
 
-    // Loads a converted mesh. When the cache header's source size and modification
-    // time still match the GLB, the file is read once and its checksum is checked.
-    // The GLB is hashed only when that size or time differs. A matching hash refreshes
-    // the stored time. Startup compares the header only, and does not build a mesh
-    // when the size and time still match. A missing or bad cache parses the GLB.
-    // `error` is empty when the file is simply absent.
+    // True after prepareModelCache has accepted this id. Lookup keeps the authored case.
+    bool modelIsValidated(std::string_view identifier);
+
+    // In-game load of a cache that startup already validated. Does not re-check the
+    // checksum, version, converter, size, or modification time, and does not read the GLB.
+    // An id startup did not accept returns nullopt with an empty error (draw the sprite).
+    // A missing, short, or absurdly large file returns nullopt and sets `error` (still the
+    // sprite; this is I/O handling). Counts are still checked against the bytes actually
+    // read and against MeshLoadLimits so a file replaced after startup cannot over-read
+    // or force a huge allocation. That is a memory-safety guard, not validation.
     std::optional<CpuMesh> loadModelForDraw(
         const std::string& identifier, const std::vector<std::string>& sourceDirs, const std::string& cacheDir,
         std::string& error);
+
+    // Streaming FNV-1a of a cache file, skipping the checksum field. One pass per call.
+    bool cacheChecksumMatchesFile(const std::string& path);
+    uint64_t cacheChecksumPassCount();
+    void resetCacheChecksumPassCount();
 } // namespace OpenRCT2::View3D

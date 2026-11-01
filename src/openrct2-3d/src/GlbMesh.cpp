@@ -15,7 +15,21 @@
 #include <cgltf.h>
 #include <cmath>
 #include <fstream>
+#if defined(_MSC_VER)
+    #pragma warning(push)
+    #pragma warning(disable : 4505)
+#endif
+#if defined(__clang__)
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wunused-function"
+#endif
 #include <stb_image.h>
+#if defined(__clang__)
+    #pragma clang diagnostic pop
+#endif
+#if defined(_MSC_VER)
+    #pragma warning(pop)
+#endif
 
 namespace OpenRCT2::View3D
 {

@@ -252,6 +252,29 @@ namespace OpenRCT2::Platform
         }
         return size;
     }
+
+    uint64_t GetLastModifiedNs(std::string_view path)
+    {
+        struct stat info{};
+        if (stat(std::string(path).c_str(), &info) != 0)
+        {
+            return 0;
+        }
+        #if defined(__APPLE__)
+        if (info.st_mtimespec.tv_sec < 0)
+        {
+            return 0;
+        }
+        return static_cast<uint64_t>(info.st_mtimespec.tv_sec) * 1000000000uLL
+            + static_cast<uint64_t>(info.st_mtimespec.tv_nsec);
+        #else
+        if (info.st_mtim.tv_sec < 0)
+        {
+            return 0;
+        }
+        return static_cast<uint64_t>(info.st_mtim.tv_sec) * 1000000000uLL + static_cast<uint64_t>(info.st_mtim.tv_nsec);
+        #endif
+    }
     #endif
 
     bool ShouldIgnoreCase()

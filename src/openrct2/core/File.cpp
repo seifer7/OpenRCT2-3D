@@ -142,6 +142,11 @@ namespace OpenRCT2::File
         return Platform::GetLastModified(path);
     }
 
+    uint64_t GetLastModifiedNs(u8string_view path)
+    {
+        return Platform::GetLastModifiedNs(path);
+    }
+
     uint64_t GetSize(u8string_view path)
     {
         return Platform::GetFileSize(path);

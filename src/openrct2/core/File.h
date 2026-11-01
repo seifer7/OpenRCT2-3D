@@ -24,5 +24,7 @@ namespace OpenRCT2::File
     std::vector<u8string> ReadAllLines(u8string_view path);
     void WriteAllBytes(u8string_view path, const void* buffer, size_t length);
     uint64_t GetLastModified(u8string_view path);
+    // Nanoseconds since the Unix epoch. GetLastModified keeps its existing units.
+    uint64_t GetLastModifiedNs(u8string_view path);
     uint64_t GetSize(u8string_view path);
 } // namespace OpenRCT2::File

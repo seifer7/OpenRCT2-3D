@@ -144,6 +144,8 @@ namespace OpenRCT2::Platform
     bool ShouldIgnoreCase();
     bool IsPathSeparator(char c);
     uint64_t GetLastModified(std::string_view path);
+    // Nanoseconds since the Unix epoch. GetLastModified keeps its existing units.
+    uint64_t GetLastModifiedNs(std::string_view path);
     uint64_t GetFileSize(std::string_view path);
     std::string ResolveCasing(std::string_view path, bool fileExists);
     std::string SanitiseFilename(std::string_view originalName);

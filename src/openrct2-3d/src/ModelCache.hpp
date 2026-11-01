@@ -32,9 +32,15 @@ namespace OpenRCT2::View3D
     constexpr size_t kModelCacheMaxVerticesOffset = 44;
     constexpr size_t kModelCachePrimitiveCountOffset = 60;
 
-    // Official and custom object ids are lowercase, with dots, underscores, and hyphens
-    // (`rct2.scenery_small.tcrp`, `tygrysek90.station.abstract-open`). No leading or trailing dot.
+    // JSON object ids keep the case they were authored with. Official ids are lowercase
+    // (`rct2.scenery_small.tcrp`); custom ids may use A-Z (`MyTree`). Allowed characters
+    // are [A-Za-z0-9._-], with no leading or trailing dot. Windows device names are rejected.
     bool identifierIsSafe(std::string_view identifier);
+
+    // FNV-1a of every byte except the checksum field. Same function the cache writer uses.
+    uint64_t cacheFileChecksum(const uint8_t* data, size_t size);
+    // Nanoseconds since the Unix epoch, via File::GetLastModifiedNs.
+    uint64_t cacheSourceModifiedNs(const std::string& path);
 
     struct ModelCacheStats
     {
@@ -54,8 +60,9 @@ namespace OpenRCT2::View3D
     // Loads a converted mesh. When the cache header's source size and modification
     // time still match the GLB, the file is read once and its checksum is checked.
     // The GLB is hashed only when that size or time differs. A matching hash refreshes
-    // the stored time. A missing or bad cache parses the GLB. `error` is empty when
-    // the file is simply absent.
+    // the stored time. Startup compares the header only, and does not build a mesh
+    // when the size and time still match. A missing or bad cache parses the GLB.
+    // `error` is empty when the file is simply absent.
     std::optional<CpuMesh> loadModelForDraw(
         const std::string& identifier, const std::vector<std::string>& sourceDirs, const std::string& cacheDir,
         std::string& error);

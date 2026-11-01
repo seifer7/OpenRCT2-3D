@@ -37,3 +37,8 @@ Summaries of past reviews live in [reviews/](reviews/). Each file is a point-in-
 - [model-style-checklist.md](model-style-checklist.md) — GLB style checklist, derived from the approved Corsican Pine (`data/object-models/rct2.scenery_small.tcrp.glb`).
 - [reviews/pr6.md](reviews/pr6.md) — point-in-time review of PR #6.
 - [reviews/pr7.md](reviews/pr7.md) — point-in-time review of PR #7.
+- [reviews/pr9.md](reviews/pr9.md) — point-in-time review of PR #9.
+- [reviews/pr10.md](reviews/pr10.md) — point-in-time review of PR #10.
+- [reviews/pr11.md](reviews/pr11.md) — point-in-time review of PR #11.
+- [reviews/pr12.md](reviews/pr12.md) — point-in-time review of PR #12.
+- [reviews/pr13.md](reviews/pr13.md) — point-in-time review of PR #13.

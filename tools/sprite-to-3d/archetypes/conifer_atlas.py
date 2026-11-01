@@ -99,6 +99,24 @@ class Canvas:
         return idx
 
 
+def bark_counts(bark_hist, keys, painter):
+    """Histogram counts for keys, in order, with a clear error for a missing key.
+
+    keys is atlas.bark_key_order when params set one, otherwise the painter's
+    default. Every key must be a palette index present in atlas.bark_hist.
+    """
+    missing = [k for k in keys if k not in bark_hist]
+    if missing:
+        raise ValueError(
+            f"{painter} atlas: bark_key_order has palette indices {missing} that are not in "
+            f"atlas.bark_hist (keys present: {sorted(bark_hist)}); every bark_key_order "
+            "entry must be a key of bark_hist"
+        )
+    if not keys:
+        raise ValueError(f"{painter} atlas: bark_key_order is empty")
+    return np.array([bark_hist[k] for k in keys], float)
+
+
 def _as_int_keyed(hist):
     if hist is None:
         return None
@@ -173,7 +191,7 @@ def paint(params, palette):
     keys = [34, 35, 36, 37, 38, 15, 14, 13, 12, 11]
     if spec.get("bark_key_order"):
         keys = [int(k) for k in spec["bark_key_order"]]
-    cnt = np.array([bark_hist[k] for k in keys], float)
+    cnt = bark_counts(bark_hist, keys, "conifer")
     cut = np.round(np.cumsum(cnt) / cnt.sum() * noise.size).astype(int)
     s0 = 0
     for key, c in zip(keys, cut):
@@ -351,7 +369,7 @@ def paint_compact128(spec, palette):
     order = np.argsort(noise, axis=None)
     out = np.empty(noise.size, np.int32)
     keys = [int(k) for k in spec.get("bark_key_order") or _shade_keys(bark_hist, palette)]
-    cnt = np.array([bark_hist[k] for k in keys], float)
+    cnt = bark_counts(bark_hist, keys, "compact128")
     cut = np.round(np.cumsum(cnt) / cnt.sum() * noise.size).astype(int)
     s0 = 0
     for key, c in zip(keys, cut):

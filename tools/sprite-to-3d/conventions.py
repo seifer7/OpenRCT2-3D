@@ -54,14 +54,20 @@ HEIGHT_TOLERANCE_SIM = 2.0
 # Per-view tip deltas (render tip minus that view's sprite tip, in sim units).
 # Over TIP_VIEW_WARN_SIM warns; over TIP_VIEW_FAIL_SIM fails. The tallest-tip
 # check above (HEIGHT_TOLERANCE_SIM) still applies on its own.
+# Both limits are inclusive (validate.py tests |delta| > limit), so exactly
+# ±TIP_VIEW_FAIL_SIM is a WARN. The reference pine measures +0/+4/+4/+3: it sits
+# ON the fail limit with no headroom. Do not tighten TIP_VIEW_FAIL_SIM, or turn
+# the test into >=, without first trimming the pine's leader and re-approving
+# it (test_class_rules.PerViewTipTest pins this). TIP_VIEW_EPS only absorbs float noise.
 TIP_VIEW_WARN_SIM = 2.0
 TIP_VIEW_FAIL_SIM = 4.0
+TIP_VIEW_EPS = 1e-6
 BASE_SINK_MAX = 0.1
 # Raw-mask IoU reference levels. Reported and recorded in the meta as
 # iou.threshold_per_view / iou.threshold_mean; they no longer gate.
 IOU_MIN_PER_VIEW = 0.65
 IOU_MIN_MEAN = 0.70
-# The IoU gate (batch 1 QA decision 1). Both the sprite mask and the model
+# The IoU gate (batch 1 QA Decision 1). Both the sprite mask and the model
 # mask get a morphological close with a square IOU_CLOSE_KERNEL x
 # IOU_CLOSE_KERNEL structuring element (3 = 3x3, "3px") before scoring, so a
 # stippled sprite is not scored pixel by pixel. The thresholds are tighter
@@ -77,6 +83,15 @@ TEXEL_DENSITY_TOLERANCE = 0.25
 # no pixel data is stored. Each one may hold at most this many entries, and
 # rebuild.py does not copy them into the meta.
 MAX_HIST_ENTRIES = 16
+
+
+def is_histogram_key(key):
+    """True for a palette-histogram key: "hist" or any "*_hist" (sprite_hist, rim_hist, ...).
+
+    The one definition shared by rebuild.py (limit and strip) and validate.py
+    (flag histograms copied into a meta).
+    """
+    return key == "hist" or str(key).endswith("_hist")
 # Opaque-pixel floor per view for classes not in SIZE_CLASSES.
 DEFAULT_MIN_RENDER_PX = 500
 

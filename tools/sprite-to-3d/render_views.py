@@ -36,6 +36,31 @@ def vertex_depths(positions, view):
     return out
 
 
+# Depth tolerance in Blender units (camera_depth). Interpolation error is about
+# 1e-12; real surfaces in a 1-tile model are far more than 1e-6 apart.
+DEPTH_EPS = 1e-6
+UNTEXTURED_RGBA = (180, 180, 180, 255)
+
+
+def _rgba_key(rgba):
+    """Pack RGBA uint8 into one integer per pixel, the tie-break order."""
+    rgba = np.asarray(rgba, np.uint32)
+    return (rgba[..., 0] << 24) | (rgba[..., 1] << 16) | (rgba[..., 2] << 8) | rgba[..., 3]
+
+
+def _depth_wins(depth, zbuffer, sample, current):
+    """Fragments that replace what is in the buffer.
+
+    Nearer by more than DEPTH_EPS wins. Within DEPTH_EPS of the stored depth it
+    is a tie, and the larger packed RGBA wins, so the result is the same for
+    any triangle order (a strict < keeps the first-drawn of two coplanar faces,
+    a <= the last-drawn).
+    """
+    nearer = depth < zbuffer - DEPTH_EPS
+    tie = np.abs(depth - zbuffer) <= DEPTH_EPS
+    return nearer | (tie & (_rgba_key(sample) > _rgba_key(current)))
+
+
 def rasterize(positions, uvs, indices, image, view):
     """Return an RGBA image. Texels with alpha <= 127 are holes (MASK 0.5).
 
@@ -44,6 +69,14 @@ def rasterize(positions, uvs, indices, image, view):
     this orthographic camera) and kept in a z-buffer, so the colours in the
     review sheet do not depend on triangle order. Which pixels are opaque does
     not depend on the depth test, so silhouettes and IoU are unchanged by it.
+
+    The depth test and the inside test both use a tolerance: a fragment wins
+    when it is nearer by more than DEPTH_EPS, and fragments within DEPTH_EPS of
+    each other (coplanar or touching faces) are resolved by colour, not by
+    which triangle came first (see _depth_wins).
+
+    A mesh with UVs but no embedded image (image is None) is drawn untextured,
+    like a mesh without UVs; the validator's "embedded image" row FAILs it.
     """
     width, height = RENDER_SIZE
     colour = np.zeros((height, width, 4), np.uint8)
@@ -51,7 +84,8 @@ def rasterize(positions, uvs, indices, image, view):
     pixels = project_vertices(positions, view)
     depths = vertex_depths(positions, view)
     atlas = image
-    ah, aw = atlas.shape[:2] if atlas is not None else (1, 1)
+    textured = uvs is not None and atlas is not None
+    ah, aw = atlas.shape[:2] if textured else (1, 1)
     for t in range(0, len(indices), 3):
         i0, i1, i2 = (int(i) for i in indices[t : t + 3])
         p0, p1, p2 = pixels[i0], pixels[i1], pixels[i2]
@@ -80,20 +114,21 @@ def rasterize(positions, uvs, indices, image, view):
         depth = b0 * depths[i0] + b1 * depths[i1] + b2 * depths[i2]
         zsub = zbuffer[miny : maxy + 1, minx : maxx + 1]
         sub = colour[miny : maxy + 1, minx : maxx + 1]
-        if uvs is None:
-            draw = inside & (depth < zsub)
-            sub[draw] = (180, 180, 180, 255)
-            zsub[draw] = depth[draw]
+        if not textured:
+            sample = np.broadcast_to(np.array(UNTEXTURED_RGBA, np.uint8), sub.shape)
+            draw = inside & _depth_wins(depth, zsub, sample, sub)
+            sub[draw] = sample[draw]
+            zsub[draw] = np.minimum(depth[draw], zsub[draw])
             continue
         uv = b0[..., None] * uvs[i0] + b1[..., None] * uvs[i1] + b2[..., None] * uvs[i2]
         ix = np.clip((uv[..., 0] * aw).astype(np.int32), 0, aw - 1)
-        iy = np.clip((uv[..., 1] * atlas.shape[0]).astype(np.int32), 0, ah - 1)
+        iy = np.clip((uv[..., 1] * ah).astype(np.int32), 0, ah - 1)
         sample = atlas[iy, ix]
         # MASK holes neither draw nor write depth, so a card's cut-out
         # shows whatever is behind it.
-        draw = inside & (sample[..., 3] > 127) & (depth < zsub)
+        draw = inside & (sample[..., 3] > 127) & _depth_wins(depth, zsub, sample, sub)
         sub[draw] = sample[draw]
-        zsub[draw] = depth[draw]
+        zsub[draw] = np.minimum(depth[draw], zsub[draw])
     return colour
 
 
@@ -191,7 +226,7 @@ def close_mask(mask, kernel):
 
 
 def closed_silhouette_iou(sprite_rgba, render_rgba, kernel):
-    """IoU after closing both masks with the same kernel (QA decision 1)."""
+    """IoU after closing both masks with the same kernel (batch 1 QA Decision 1)."""
     a = close_mask(sprite_rgba[..., 3] > 0, kernel)
     b = close_mask(render_rgba[..., 3] > 0, kernel)
     union = int(np.count_nonzero(a | b))

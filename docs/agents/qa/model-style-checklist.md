@@ -19,7 +19,7 @@ Written 2026-11-01 AEST. **Must** items are hard requirements. **Target** items 
 - [ ] **Must:** quarter-tile comparison pastes use the quadrant anchor (`SceneryQuadrantOffsets` − 1: (7, 7), (7, 23), (23, 23), (23, 7)) and the same `sprite_y_nudge` −1 as a full tile. `vOffsetCentre` applies to full-tile objects only.
 - [ ] **Must:** tree canopy overhang is **≤ ±0.85 BU** (≈27 sim). TCRP reaches −0.812 / +0.690.
 - [ ] **Must:** the top height matches the tallest sprite tip to within **±2 sim (±0.0625 BU)**. TCRP's tip is 4.1875 BU = 134 sim.
-- [ ] **Must:** each view's tip is within **±4 sim** of that view's sprite tip. **Target:** within ±2 sim (beyond ±2 warns). TCRP's per-view deltas are 0, +4, +4, +3, so it carries the warning.
+- [ ] **Must:** each view's tip is within **±4 sim** of that view's sprite tip. **Target:** within ±2 sim (beyond ±2 warns). Both limits are inclusive: exactly ±4 is a WARN, not a FAIL. TCRP's per-view deltas are 0, +4, +4, +3, so it sits on the fail limit and carries the warning.
 - [ ] **Must:** the base sink below z = 0 is **≤ 0.1 BU** (≈3 sim). TCRP is −0.094.
 
 ## 4. Geometry budget
@@ -54,7 +54,7 @@ Written 2026-11-01 AEST. **Must** items are hard requirements. **Target** items 
 - [ ] **Must:** GLB ≤ **128 KB**. **Target:** ≤ 100 KB. TCRP is 85.4 KB, with a 17.7 KB PNG and 1.5 KB of JSON.
 
 ## 8. Match to the 2D sprite (all 4 directions, rotation 0)
-- [ ] **Must:** closed-mask silhouette IoU against the sprite (3×3 morphological close on **both** masks, `IOU_CLOSE_KERNEL` = 3) has a **mean ≥ 0.75** and is **≥ 0.70 for each view**. Raw IoU is reported beside it (the old raw reference was mean ≥ 0.70, each ≥ 0.65) but does not gate. TCRP: closed 0.780 / 0.737 / 0.787 / 0.734, mean 0.759; raw mean 0.725.
+- [ ] **Must:** closed-mask silhouette IoU against the sprite (3×3 morphological close on **both** masks, `IOU_CLOSE_KERNEL` = 3) has a **mean ≥ 0.75** and is **≥ 0.70 for each view**. Raw IoU is reported beside it (the old raw reference was mean ≥ 0.70, each ≥ 0.65) but does not gate. **Only closed IoU is gated**, both the fresh measurement and the meta's recorded `iou.closed` block (views and mean); the meta's raw `iou.views` / `iou.mean` and `iou.raw_measured` are records and are not checked against any threshold. TCRP: closed 0.780 / 0.737 / 0.787 / 0.734, mean 0.759; raw mean 0.725.
 - [ ] **Must:** each view renders at least the class `min_render_px` opaque pixels (prop_quarter 100, prop_tile 250, tree_quarter 150, otherwise 500).
 - [ ] **Must:** the render/sprite pixel-area ratio (raw masks) is **0.9-1.3** for each view.
 - [ ] **Must:** palette histograms stay in `params.json` (≤ 16 entries each; counts derived locally from the extracted sprite, no pixel data stored) and are not copied into the meta.

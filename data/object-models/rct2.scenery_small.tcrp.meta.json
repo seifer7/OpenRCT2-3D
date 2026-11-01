@@ -425,5 +425,23 @@
    "label_beauties.py"
   ]
  },
+ "iou": {
+  "views": [0.733, 0.712, 0.766, 0.687],
+  "mean": 0.725,
+  "threshold_per_view": 0.65,
+  "threshold_mean": 0.7,
+  "source": "Approved Blender 4.2 Workbench fit measured on 2026-11-01 against the four TCRP direction sprites. Mean silhouette IoU 0.725. The validator recomputes this only when a local sprite folder is passed.",
+  "closed": {
+   "views": [0.78, 0.737, 0.787, 0.734],
+   "mean": 0.759,
+   "kernel_px": 3,
+   "threshold_per_view": 0.7,
+   "threshold_mean": 0.75
+  },
+  "raw_measured": {
+   "views": [0.733, 0.712, 0.766, 0.687],
+   "mean": 0.725
+  }
+ },
  "rebuild": "python make_texture2.py; blender -b -P build_tcrp2.py; python compare_views.py; python label_beauties.py"
 }

@@ -5,6 +5,12 @@
 
 from __future__ import annotations
 
+
+def triangle_count(mesh):
+    """Triangles in a built mesh (any archetype): an n-gon face is n - 2 triangles."""
+    return sum(len(face) - 2 for face in mesh.F)
+
+
 def build_mesh(archetype, params, tiles):
     if archetype == "conifer":
         from . import conifer

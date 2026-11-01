@@ -1,7 +1,7 @@
 # Copyright (c) 2026 OpenRCT2 developers
 # Licensed under the GNU General Public License version 3.
 
-"""Triangle budgets (QA decision 5): soft_max_tris warns, hard_tris fails, the tree floor warns.
+"""Triangle budgets (batch 1 QA Decision 5): soft_max_tris warns, hard_tris fails, the tree floor warns.
 
 Every number is read from conventions.SIZE_CLASSES.
 """
@@ -121,7 +121,7 @@ class SoftCapTest(unittest.TestCase):
 
 
 class TriangleJustificationTest(unittest.TestCase):
-    """QA decision 5d: prop_quarter stays at 250; a justification annotates the WARN."""
+    """Batch 1 QA Decision 5, condition 4: prop_quarter stays at 250; a justification annotates the WARN."""
 
     def test_justification_annotates_but_keeps_the_warning(self):
         reason = "two stacked flower tiers; the bush reads flat below 280"

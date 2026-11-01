@@ -156,7 +156,10 @@ def add_beam(mesh, tiles, part, offset):
         uvs = ((0, 0), (fu, 0), (fu, fv), (0, fv))
         mesh.f([mesh.v(p, _tile_uv(tile, *uv)) for p, uv in zip(quad, uvs)], part["tile"])
     if part.get("ends", True):
-        for r, rev in ((r0, True), (r1, False)):
+        # Corners run counter-clockwise in the (side, up) plane, so a ring's
+        # natural order faces -d: outward at p0. The p1 cap is reversed so it
+        # faces +d. Normals come from the winding, so these must face out.
+        for r, rev in ((r0, False), (r1, True)):
             fu = min(1.0, 2 * max(w0, w1) / max(tw, 1))
             fv = min(1.0, 2 * max(h0, h1) / max(th, 1))
             uvs = ((0, fv), (fu, fv), (fu, 0), (0, 0))

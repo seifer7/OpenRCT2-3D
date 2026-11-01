@@ -37,7 +37,7 @@ The default output directory is `tools/sprite-to-3d/out/` (gitignored): `<id>.gl
 3. Builds the conifer mesh from `examples/rct2.scenery_small.tcrp/params.json`.
 4. Exports the GLB with Blender 4.2 when `blender` is on `PATH`, otherwise with the Python writer. Pass `--no-blender` to force the Python writer. The approved file in the tree is the Blender export; `--no-blender` matches its vertex structure (welded vertices, u16 indices) and is not a second committed copy.
 5. Runs `patch_glb.py` so the sampler is nearest, with no mipmaps, and the material is alpha MASK at 0.5.
-6. Measures raw and closed-mask IoU against the extracted sprites, writes the flat meta (with both in its `iou` block), and runs the validator. The gate is closed-mask IoU (3×3 close on both masks): at least 0.70 on every view and 0.75 on average. Raw IoU is reported beside it and does not gate.
+6. Measures raw and closed-mask IoU against the extracted sprites, writes the flat meta (with both in its `iou` block), and runs the validator. The validator's review sheet goes to `<out>/<id>.review.png`, next to the GLB in the `--out` directory (gitignored as `*.review.png`). The gate is closed-mask IoU (3×3 close on both masks): at least 0.70 on every view and 0.75 on average. Raw IoU is reported beside it and does not gate.
 
 Check the pipeline output, and the approved GLB when that file or the loader branch is available:
 

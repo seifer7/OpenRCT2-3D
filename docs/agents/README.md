@@ -7,3 +7,4 @@ Project notes, memories, decisions, surveys, and other working documents live in
 - `repo-setup.md` — repository setup record
 - `scenery-sprites-angles-and-3d-view-survey.md` — scenery sprites, angles, and 3D view survey
 - `glb-model-pipeline-recommendation.md` — GLB model pipeline recommendation
+- `sprite-to-3d-style-guide.md` — how to build scenery GLBs in the Corsican Pine style

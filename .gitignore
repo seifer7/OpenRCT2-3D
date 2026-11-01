@@ -22,6 +22,14 @@ objectsversion
 lib
 libversion
 
+# Sprite-to-3D local inputs and review sheets.
+# cache/ holds extracted RCT sprites and palette lookups from the user's install.
+# out/ and any *.review.png hold comparison renders that paste those sprites.
+# Do not commit them. Code-generated reference models live under data/object-models/.
+/tools/sprite-to-3d/cache/
+/tools/sprite-to-3d/out/
+*.review.png
+
 # Downloaded or built data files
 data/g2.dat
 data/fonts.dat

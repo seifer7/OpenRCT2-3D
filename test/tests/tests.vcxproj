@@ -121,7 +121,7 @@
     <ClCompile Include="TileElementsView.cpp" />
     <ClCompile Include="WidgetStateTests.cpp" />
     <ClCompile Include="..\..\src\openrct2-3d\src\GlbMesh.cpp">
-      <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\src;$(SolutionDir)src\openrct2-3d\third_party\cgltf;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\src;$(SolutionDir)src\openrct2-3d\third_party\cgltf;$(SolutionDir)src\openrct2-3d\third_party\bimg\3rdparty\stb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <ClCompile Include="..\..\src\openrct2-3d\src\ModelCache.cpp">
       <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\src;$(SolutionDir)src\openrct2-3d\third_party\cgltf;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>

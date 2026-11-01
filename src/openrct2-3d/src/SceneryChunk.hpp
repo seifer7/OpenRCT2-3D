@@ -12,6 +12,7 @@
 #include "SceneryScale.hpp"
 
 #include <cstdint>
+#include <openrct2/drawing/ImageId.hpp>
 #include <vector>
 
 namespace OpenRCT2::View3D
@@ -26,8 +27,8 @@ namespace OpenRCT2::View3D
         bool vegetation = false;
         bool modelCandidate = false;
         // Sprite images are stored for the fallback. They are uploaded only when
-        // this placement is drawn without a model. Bits are a memcpy of ImageId.
-        uint64_t spriteImage[4] = {};
+        // this placement is drawn without a model.
+        ImageId spriteImage[4] = {};
         bool spriteFace[4] = {};
         // Top of the object's declared height, in viewer units. entry height, not a fixed box.
         float topZ = 0.0f;

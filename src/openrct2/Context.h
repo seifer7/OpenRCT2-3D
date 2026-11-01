@@ -148,6 +148,13 @@ namespace OpenRCT2
     using PrepareSceneryModelsFn = void (*)();
     void SetPrepareSceneryModels(PrepareSceneryModelsFn fn);
 
+    // The 3D view registers this. Tile edits and map loads call NotifyMapChanged
+    // on the simulation thread. A negative coordinate means the whole map.
+    // The headless build does not register a hook, so the call is a no-op there.
+    using MapChangedFn = void (*)(int32_t tileX, int32_t tileY);
+    void SetMapChangedHook(MapChangedFn fn);
+    void NotifyMapChanged(int32_t tileX, int32_t tileY);
+
     void ContextInit();
     void ContextResetSubsystems();
     void ContextSetCurrentCursor(CursorID cursor);

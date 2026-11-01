@@ -38,4 +38,9 @@ namespace OpenRCT2::View3D::Park
     // that object, and the original direction sprites otherwise. Returns false when the terrain
     // shaders are unavailable; the caller still clears the sky and draws the UI.
     bool draw(uint16_t backWidth, uint16_t backHeight);
+
+    // Eye position and the column-major view-projection from the last draw. False before the first frame.
+    bool copyCamera(float& eyeX, float& eyeY, float& eyeZ, float viewProj[16]);
+    // Ground point the camera is aimed at. False before the first frame.
+    bool copyViewFocus(float& focusX, float& focusY);
 } // namespace OpenRCT2::View3D::Park

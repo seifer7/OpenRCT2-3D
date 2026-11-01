@@ -9,6 +9,61 @@
 
 #pragma once
 
+#include <cstdint>
+#include <openrct2/drawing/ImageId.hpp>
+
+namespace OpenRCT2::View3D
+{
+    // Colours from the small-scenery element, applied to the sprite the 3D view draws.
+    // A ghost remap is left alone.
+    inline ImageId sceneryRemapImage(
+        ImageId image, bool hasPrimary, uint8_t primary, bool hasSecondary, uint8_t secondary, bool hasTertiary,
+        uint8_t tertiary)
+    {
+        if (image.IsRemap())
+        {
+            return image;
+        }
+        if (hasPrimary)
+        {
+            image = image.WithPrimary(static_cast<OpenRCT2::Drawing::Colour>(primary));
+            if (hasSecondary)
+            {
+                image = image.WithSecondary(static_cast<OpenRCT2::Drawing::Colour>(secondary));
+            }
+        }
+        if (hasTertiary)
+        {
+            image = image.WithTertiary(static_cast<OpenRCT2::Drawing::Colour>(tertiary));
+        }
+        return image;
+    }
+
+    // What one placement draws this frame. A resident model is the mesh. A model
+    // that is still loading waits, so its sprite faces are not uploaded. A model
+    // the GPU could not take (handle cap or a full atlas) and an object with no
+    // model both draw the X-sprite. A failed upload is not a white mesh.
+    enum class PlacementDraw : uint8_t
+    {
+        model,
+        sprite,
+        waiting,
+    };
+
+    inline PlacementDraw placementDraw(bool modelCandidate, bool resident, bool uploadFailed)
+    {
+        if (modelCandidate && resident)
+        {
+            return PlacementDraw::model;
+        }
+        if (modelCandidate && !uploadFailed)
+        {
+            return PlacementDraw::waiting;
+        }
+        return PlacementDraw::sprite;
+    }
+} // namespace OpenRCT2::View3D
+
 namespace OpenRCT2::View3D::Park
 {
     // Drops scenery meshes and sprite textures. Safe before bgfx::shutdown.

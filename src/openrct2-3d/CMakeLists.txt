@@ -57,6 +57,9 @@ add_library(
     src/MeshDraw.cpp
     src/SceneryDraw.cpp
     src/ModelCache.cpp
+    src/SceneryChunk.cpp
+    src/GpuBudget.cpp
+    src/ModelLoadQueue.cpp
     third_party/cgltf/cgltf.cpp
     third_party/stb_image_impl.cpp)
 # cgltf and stb_image are third-party. Keep their warnings from failing this build.
@@ -78,7 +81,9 @@ target_include_directories(
             "${CMAKE_CURRENT_SOURCE_DIR}/third_party/bimg/3rdparty/stb")
 
 # Offscreen preview of a GLB and the crossed-sprite fallback. Not installed.
-add_executable(openrct2-3d-preview preview/ModelPreview.cpp src/GlbMesh.cpp src/MeshDraw.cpp third_party/cgltf/cgltf.cpp third_party/stb_image_impl.cpp)
+add_executable(
+    openrct2-3d-preview preview/ModelPreview.cpp src/GlbMesh.cpp src/MeshDraw.cpp src/GpuBudget.cpp third_party/cgltf/cgltf.cpp
+                        third_party/stb_image_impl.cpp)
 target_include_directories(
     openrct2-3d-preview PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf"
                                        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/bimg/3rdparty/stb")

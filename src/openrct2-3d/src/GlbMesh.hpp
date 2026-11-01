@@ -79,7 +79,13 @@ namespace OpenRCT2::View3D
         uint32_t maxIndices = 200000;
         uint32_t maxPrimitives = 8;
         uint32_t maxImageBytes = 16u * 1024u * 1024u;
+        // Decode bound. A PNG header above this is rejected before the bitmap is allocated.
+        uint32_t maxImageEdge = 256;
     };
+
+    // Decodes PNG images into RGBA and drops the PNG bytes. Rejects an image whose
+    // header is over maxImageEdge or whose bitmap would exceed maxImageBytes, before allocating it.
+    bool decodeMeshImages(CpuMesh& mesh, std::string& error);
 
     // Bump this when loadGlbMesh's output changes: the axis conversion, kGlbVerticalScale,
     // vertex fields, or which material properties are kept. The .o3d cache stores this

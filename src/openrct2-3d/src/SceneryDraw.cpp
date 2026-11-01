@@ -75,7 +75,7 @@ namespace OpenRCT2::View3D::Park
 
         uint64_t mix(uint64_t hash, uint64_t value)
         {
-            hash ^= value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
+            hash ^= value + 0x9e3779b97f4a7c15uLL + (hash << 6) + (hash >> 2);
             return hash;
         }
 

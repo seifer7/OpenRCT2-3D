@@ -7,6 +7,7 @@
  * OpenRCT2 is licensed under the GNU General Public License version 3.
  *****************************************************************************/
 
+#include "TestData.h"
 #include "openrct2-3d/src/GlbMesh.hpp"
 #include "openrct2-3d/src/SpriteQuad.hpp"
 #include "openrct2-3d/src/ViewerScale.hpp"
@@ -15,6 +16,7 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <openrct2/core/File.h>
+#include <openrct2/core/Path.hpp>
 #include <string>
 #include <vector>
 
@@ -22,28 +24,11 @@ using namespace OpenRCT2::View3D;
 
 namespace
 {
+    // The same bytes as data/object-models/rct2.scenery_small.tcrp.glb, copied into testdata
+    // so CMake's testdata link and the Visual Studio xcopy both find it. No path macro.
     std::string tcrpGlbPath()
     {
-        const char* candidates[] = {
-#ifdef OPENRCT2_TCRP_GLB
-            OPENRCT2_TCRP_GLB,
-#endif
-            "data/object-models/rct2.scenery_small.tcrp.glb",
-            "../data/object-models/rct2.scenery_small.tcrp.glb",
-            "../../data/object-models/rct2.scenery_small.tcrp.glb",
-        };
-        for (const char* path : candidates)
-        {
-            if (path != nullptr && OpenRCT2::File::Exists(path))
-            {
-                return path;
-            }
-        }
-#ifdef OPENRCT2_TCRP_GLB
-        return OPENRCT2_TCRP_GLB;
-#else
-        return "../data/object-models/rct2.scenery_small.tcrp.glb";
-#endif
+        return OpenRCT2::Path::Combine(TestData::GetBasePath(), u8"object-models", u8"rct2.scenery_small.tcrp.glb");
     }
 
     std::vector<uint8_t> readFile(const std::string& path)
@@ -115,7 +100,9 @@ TEST(SpriteQuad, FacesTheFourIsometricCameras)
 
 TEST(GlbMesh, CorsicanPineSitsOnTheTile)
 {
-    const std::vector<uint8_t> bytes = readFile(tcrpGlbPath());
+    const std::string path = tcrpGlbPath();
+    ASSERT_TRUE(OpenRCT2::File::Exists(path)) << path;
+    const std::vector<uint8_t> bytes = readFile(path);
     ASSERT_FALSE(bytes.empty());
 
     std::string error;

@@ -58,8 +58,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
-      <!-- Raw string: $(SolutionDir) ends in a backslash, which would escape a normal string quote. GlbMeshTests also tries relative paths if this file is missing. -->
-      <PreprocessorDefinitions>GTEST_LANG_CXX11;OPENRCT2_TCRP_GLB=R&quot;($(SolutionDir)data/object-models/rct2.scenery_small.tcrp.glb)&quot;;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>GTEST_LANG_CXX11;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PrecompiledHeader Condition="'$(UsePCH)'=='true'">Use</PrecompiledHeader>
       <PrecompiledHeaderFile Condition="'$(UsePCH)'=='true'">tests_pch.h</PrecompiledHeaderFile>
       <ForcedIncludeFiles Condition="'$(UsePCH)'=='true'">tests_pch.h</ForcedIncludeFiles>
@@ -102,6 +101,7 @@
     <ClCompile Include="ReplayTests.cpp" />
     <ClCompile Include="PlayTests.cpp" />
     <ClCompile Include="Pathfinding.cpp" />
+    <ClCompile Include="Platform.cpp" />
     <ClCompile Include="RideRatings.cpp" />
     <ClCompile Include="EntityImportTests.cpp" />
     <ClCompile Include="S6ImportExportTests.cpp" />

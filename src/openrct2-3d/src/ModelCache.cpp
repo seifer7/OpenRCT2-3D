@@ -19,11 +19,23 @@
 #include <openrct2/core/File.h>
 #include <openrct2/core/FileScanner.h>
 #include <openrct2/core/Path.hpp>
+#include <openrct2/core/String.hpp>
 #include <unordered_set>
 
 #ifdef _WIN32
+    #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
+    #endif
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
     #include <process.h>
+    #include <windows.h>
+    #undef CreateDirectory
+    #undef CreateWindow
+    #undef GetMessage
 #else
+    #include <sys/stat.h>
     #include <unistd.h>
 #endif
 
@@ -37,9 +49,10 @@ namespace OpenRCT2::View3D
 
         // Header, little-endian:
         //  0 magic, 4 format version, 8 source size, 16 source mtime, 24 source hash,
-        // 32 body checksum, 40 converter version, 44 maxVertices, 48 maxIndices,
+        // 32 checksum, 40 converter version, 44 maxVertices, 48 maxIndices,
         // 52 maxPrimitives, 56 maxImageBytes, 60 primitive count, 64 image count.
-        // The body checksum is FNV-1a of every byte after the header.
+        // The checksum is FNV-1a of every byte except the checksum field itself
+        // (bytes 0-31 and 40 through EOF). Modification time is nanoseconds.
 
         struct SourceStamp
         {
@@ -55,17 +68,42 @@ namespace OpenRCT2::View3D
             failed,
         };
 
-        bool limitsMatch(uint32_t maxVertices, uint32_t maxIndices, uint32_t maxPrimitives, uint32_t maxImageBytes);
-
         uint64_t hashBytes(const uint8_t* data, size_t size)
         {
-            uint64_t hash = 14695981039346656037ull;
+            uint64_t hash = 14695981039346656037uLL;
             for (size_t i = 0; i < size; i++)
             {
                 hash ^= data[i];
-                hash *= 1099511628211ull;
+                hash *= 1099511628211uLL;
             }
             return hash;
+        }
+
+        // Covers the header counts and the body. The 8 checksum bytes at offset 32 are skipped.
+        uint64_t checksumFile(const uint8_t* data, size_t size)
+        {
+            uint64_t hash = 14695981039346656037uLL;
+            const auto feed = [&](size_t begin, size_t end) {
+                for (size_t i = begin; i < end; i++)
+                {
+                    hash ^= data[i];
+                    hash *= 1099511628211uLL;
+                }
+            };
+            feed(0, std::min(size, kModelCacheChecksumOffset));
+            if (size > kModelCacheChecksumOffset + 8)
+            {
+                feed(kModelCacheChecksumOffset + 8, size);
+            }
+            return hash;
+        }
+
+        void storeU64(std::vector<uint8_t>& out, size_t offset, uint64_t value)
+        {
+            for (size_t i = 0; i < 8; i++)
+            {
+                out[offset + i] = static_cast<uint8_t>(value >> (8 * i));
+            }
         }
 
         std::string lowerCopy(std::string_view text)
@@ -105,11 +143,46 @@ namespace OpenRCT2::View3D
             return false;
         }
 
-        bool identifierIsSafe(std::string_view identifier)
+        // Nanoseconds since the Unix epoch. POSIX st_mtime is whole seconds, so a
+        // same-size edit in that second would otherwise look unchanged.
+        uint64_t sourceModifiedNs(const std::string& path)
         {
-            return !identifier.empty() && identifier.find('/') == std::string_view::npos
-                && identifier.find('\\') == std::string_view::npos && identifier.find(':') == std::string_view::npos
-                && identifier.find("..") == std::string_view::npos && !isReservedWindowsName(identifier);
+#ifdef _WIN32
+            const std::wstring wide = String::toWideChar(path);
+            WIN32_FILE_ATTRIBUTE_DATA info{};
+            if (GetFileAttributesExW(wide.c_str(), GetFileExInfoStandard, &info) == 0)
+            {
+                return 0;
+            }
+            const uint64_t ticks = (static_cast<uint64_t>(info.ftLastWriteTime.dwHighDateTime) << 32uLL)
+                | static_cast<uint64_t>(info.ftLastWriteTime.dwLowDateTime);
+            constexpr uint64_t kUnixEpoch = 116444736000000000uLL;
+            if (ticks < kUnixEpoch)
+            {
+                return 0;
+            }
+            return (ticks - kUnixEpoch) * 100uLL;
+#else
+            struct stat info{};
+            if (stat(path.c_str(), &info) != 0)
+            {
+                return 0;
+            }
+    #if defined(__APPLE__)
+            if (info.st_mtimespec.tv_sec < 0)
+            {
+                return 0;
+            }
+            return static_cast<uint64_t>(info.st_mtimespec.tv_sec) * 1000000000uLL
+                + static_cast<uint64_t>(info.st_mtimespec.tv_nsec);
+    #else
+            if (info.st_mtim.tv_sec < 0)
+            {
+                return 0;
+            }
+            return static_cast<uint64_t>(info.st_mtim.tv_sec) * 1000000000uLL + static_cast<uint64_t>(info.st_mtim.tv_nsec);
+    #endif
+#endif
         }
 
         std::string temporaryCachePath(const std::string& cachePath)
@@ -163,6 +236,11 @@ namespace OpenRCT2::View3D
             bool ok() const
             {
                 return _ok;
+            }
+
+            size_t position() const
+            {
+                return _pos;
             }
 
             uint32_t u32()
@@ -223,54 +301,9 @@ namespace OpenRCT2::View3D
         {
             SourceStamp stamp;
             stamp.size = bytes.size();
-            stamp.mtime = File::GetLastModified(path);
+            stamp.mtime = sourceModifiedNs(path);
             stamp.hash = hashBytes(bytes.data(), bytes.size());
             return stamp;
-        }
-
-        bool cacheIsCurrent(const std::string& cachePath, const SourceStamp& stamp)
-        {
-            if (!File::Exists(cachePath))
-            {
-                return false;
-            }
-            try
-            {
-                const std::vector<uint8_t> bytes = File::ReadAllBytes(cachePath);
-                if (bytes.size() < kModelCacheHeaderBytes)
-                {
-                    return false;
-                }
-                Reader reader(bytes.data(), bytes.size());
-                char magic[4] = {};
-                reader.bytes(magic, 4);
-                if (!reader.ok() || std::memcmp(magic, kMagic, 4) != 0)
-                {
-                    return false;
-                }
-                const uint32_t version = reader.u32();
-                const uint64_t size = reader.u64();
-                const uint64_t mtime = reader.u64();
-                const uint64_t hash = reader.u64();
-                const uint64_t bodyChecksum = reader.u64();
-                const uint32_t converter = reader.u32();
-                const uint32_t maxVertices = reader.u32();
-                const uint32_t maxIndices = reader.u32();
-                const uint32_t maxPrimitives = reader.u32();
-                const uint32_t maxImageBytes = reader.u32();
-                if (!reader.ok() || version != kModelCacheVersion || converter != kGlbConverterVersion
-                    || !limitsMatch(maxVertices, maxIndices, maxPrimitives, maxImageBytes) || size != stamp.size
-                    || mtime != stamp.mtime || hash != stamp.hash || bytes.size() < kModelCacheHeaderBytes)
-                {
-                    return false;
-                }
-                const uint64_t actual = hashBytes(bytes.data() + kModelCacheHeaderBytes, bytes.size() - kModelCacheHeaderBytes);
-                return actual == bodyChecksum;
-            }
-            catch (const std::exception&)
-            {
-                return false;
-            }
         }
 
         bool limitsMatch(uint32_t maxVertices, uint32_t maxIndices, uint32_t maxPrimitives, uint32_t maxImageBytes)
@@ -333,7 +366,7 @@ namespace OpenRCT2::View3D
             appendU64(out, stamp.size);
             appendU64(out, stamp.mtime);
             appendU64(out, stamp.hash);
-            appendU64(out, hashBytes(body.data(), body.size()));
+            appendU64(out, 0);
             appendU32(out, kGlbConverterVersion);
             appendU32(out, limits.maxVertices);
             appendU32(out, limits.maxIndices);
@@ -342,6 +375,7 @@ namespace OpenRCT2::View3D
             appendU32(out, static_cast<uint32_t>(mesh.primitives.size()));
             appendU32(out, static_cast<uint32_t>(mesh.images.size()));
             out.insert(out.end(), body.begin(), body.end());
+            storeU64(out, kModelCacheChecksumOffset, checksumFile(out.data(), out.size()));
 
             const std::string temporary = temporaryCachePath(cachePath);
             try
@@ -413,8 +447,7 @@ namespace OpenRCT2::View3D
             const uint32_t maxImageBytes = reader.u32();
             const uint32_t primitiveCount = reader.u32();
             const uint32_t imageCount = reader.u32();
-            if (bytes.size() < kModelCacheHeaderBytes
-                || hashBytes(bytes.data() + kModelCacheHeaderBytes, bytes.size() - kModelCacheHeaderBytes) != bodyChecksum)
+            if (bytes.size() < kModelCacheHeaderBytes || checksumFile(bytes.data(), bytes.size()) != bodyChecksum)
             {
                 error = "cache checksum does not match";
                 return std::nullopt;
@@ -550,6 +583,11 @@ namespace OpenRCT2::View3D
                 }
                 mesh.images.push_back(std::move(image));
             }
+            if (!reader.ok() || reader.position() != bytes.size())
+            {
+                error = reader.ok() ? "cache has trailing bytes" : "cache ended early";
+                return std::nullopt;
+            }
             return CachedMesh{ stamp, std::move(mesh) };
         }
 
@@ -588,6 +626,16 @@ namespace OpenRCT2::View3D
 
         CacheAction convertFile(const std::string& identifier, const std::string& glbPath, const std::string& cacheDir)
         {
+            const uint64_t glbSize = File::GetSize(glbPath);
+            const uint64_t glbMtime = sourceModifiedNs(glbPath);
+            const std::string cachePath = cachePathFor(cacheDir, identifier);
+            std::string cacheError;
+            const std::optional<CachedMesh> cached = readCache(cachePath, cacheError);
+            if (cached.has_value() && cached->stamp.size == glbSize && cached->stamp.mtime == glbMtime)
+            {
+                return CacheAction::skipped;
+            }
+
             std::string error;
             std::vector<uint8_t> bytes;
             if (!readFile(glbPath, bytes, error))
@@ -596,10 +644,18 @@ namespace OpenRCT2::View3D
                 return CacheAction::failed;
             }
             const SourceStamp stamp = stampOf(glbPath, bytes);
-            const std::string cachePath = cachePathFor(cacheDir, identifier);
-            if (cacheIsCurrent(cachePath, stamp))
+            if (cached.has_value() && cached->stamp.size == stamp.size && cached->stamp.hash == stamp.hash)
             {
+                std::string writeError;
+                if (!writeCache(cachePath, stamp, cached->mesh, writeError))
+                {
+                    LOG_WARNING("View3D: could not refresh cache time for %s (%s)", identifier.c_str(), writeError.c_str());
+                }
                 return CacheAction::skipped;
+            }
+            if (!cacheError.empty() && File::Exists(cachePath))
+            {
+                LOG_WARNING("View3D: cache for %s is unusable (%s)", identifier.c_str(), cacheError.c_str());
             }
             const std::optional<CpuMesh> mesh = loadGlbMesh(bytes.data(), bytes.size(), {}, error);
             if (!mesh.has_value())
@@ -696,6 +752,23 @@ namespace OpenRCT2::View3D
         return stats;
     }
 
+    bool identifierIsSafe(std::string_view identifier)
+    {
+        if (identifier.empty() || identifier.front() == '.' || identifier.back() == '.')
+        {
+            return false;
+        }
+        for (unsigned char ch : identifier)
+        {
+            const bool allowed = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '-';
+            if (!allowed)
+            {
+                return false;
+            }
+        }
+        return !isReservedWindowsName(identifier);
+    }
+
     std::optional<CpuMesh> loadModelForDraw(
         const std::string& identifier, const std::vector<std::string>& sourceDirs, const std::string& cacheDir,
         std::string& error)
@@ -712,7 +785,7 @@ namespace OpenRCT2::View3D
             return std::nullopt;
         }
         const uint64_t glbSize = File::GetSize(glbPath);
-        const uint64_t glbMtime = File::GetLastModified(glbPath);
+        const uint64_t glbMtime = sourceModifiedNs(glbPath);
         const std::string cachePath = cacheDir.empty() ? std::string() : cachePathFor(cacheDir, identifier);
         std::string cacheError;
         // One read of the .o3d. Size and mtime are enough when they still match; the
@@ -732,7 +805,10 @@ namespace OpenRCT2::View3D
         {
             std::string writeError;
             Path::CreateDirectory(cacheDir);
-            writeCache(cachePath, stamp, cached->mesh, writeError);
+            if (!writeCache(cachePath, stamp, cached->mesh, writeError))
+            {
+                LOG_WARNING("View3D: could not refresh cache time for %s (%s)", identifier.c_str(), writeError.c_str());
+            }
             return cached->mesh;
         }
         if (!cacheError.empty() && File::Exists(cachePath))

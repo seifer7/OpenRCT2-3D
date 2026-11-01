@@ -567,8 +567,15 @@ namespace OpenRCT2::View3D
                 const bool atlasFit = image.nearest
                     && image.width + static_cast<int32_t>(padded) <= static_cast<int32_t>(kAtlasSize)
                     && image.height + static_cast<int32_t>(padded) <= static_cast<int32_t>(kAtlasSize);
-                if (atlasFit && _atlas.pack(static_cast<uint32_t>(image.width), static_cast<uint32_t>(image.height), slot))
+                if (atlasFit)
                 {
+                    // A full atlas fails the upload. The caller evicts a model, which
+                    // frees that model's rect, and retries. A private texture would
+                    // spend a handle instead of reusing the atlas.
+                    if (!_atlas.pack(static_cast<uint32_t>(image.width), static_cast<uint32_t>(image.height), slot))
+                    {
+                        return abandon();
+                    }
                     packed = true;
                     texture = atlasTexture(slot.page);
                     sharedTexture = bgfx::isValid(texture);

@@ -8,7 +8,7 @@ The first milestone (one GLB, one sprite cross, a startup cache) is `scenery-3d-
 
 1. Drain tile edits into the chunk grid. A 16×16 tile chunk (`kSceneryChunkTiles`) is rebuilt only when it is dirty. The first 3D frame, a map-size change, and `NotifyMapChanged(-1, -1)` mark every chunk.
 2. Ask the load queue for models that are in view and not on the GPU yet. The queue's worker reads a validated `.o3d`. It does not touch `GameState` and it does not convert a GLB.
-3. Upload at most `kUploadsPerFrame` (2) models or `kUploadBytesPerFrame` (1 MB) of mesh bytes, whichever comes first. Until that upload, the object is the X-sprite.
+3. Upload at most `kUploadsPerFrame` (2) models or `kUploadBytesPerFrame` (1 MB) of mesh bytes, whichever comes first. While that load is in flight the object is not given sprite faces. If the upload cannot fit (handle cap or a full atlas), it is the X-sprite and the model is tried again later. It is not drawn white, and the miss is not stored as a permanent GPU failure.
 4. Build one instanced batch per model type, and one per sprite image, from the chunks that pass the view-distance and frustum tests.
 5. Evict GPU meshes that do not fit `kDefaultVramBudgetBytes` (256 MB). Visible types are pinned for that frame. A dropped type is loaded again the next time it is in view.
 
@@ -30,7 +30,9 @@ Startup (`prepareModelCache`) is the only validation:
 - Size and nanosecond mtime against the GLB. If both match, the cache is trusted and nothing is hashed.
 - If the size or the mtime differs, or there is no cache yet, the GLB is hashed. A matching hash rewrites the stored size and mtime and does not reconvert. A different hash reconverts. Files that need that hash are processed in parallel.
 
-An id that passes is stored under its case-folded name. The data directory is scanned first, so the first file wins and the later spelling is not converted and does not get its own cache. Lookup ignores case, so either spelling reads that one file. The cache stem is folded so a case-insensitive disk cannot hold two copies. A failed conversion, or a cache that fails and cannot be rebuilt from its GLB, is left out of the set.
+King Grok timed the previous policy (a full body checksum on every launch) on 10,000 real caches, 698 MB: cold 2.6–2.9 s, warm about 1.0 s, first conversion 3.9 s. On this policy the same shape of set, 10,000 synthetic caches padded to 70 KB (about 683 MB), warm-started in 43 ms with zero checksum passes (`ModelCache.WarmStartSizeAndMtimeOfTenThousand`, `O3D_WARM_BENCH=1`). The warm path reads the header only, so the body size is not hashed. That 43 ms is a page-cache warm run on this machine, not a replacement for King Grok's cold figure.
+
+An id that passes is stored under its case-folded name. The data directory is scanned first, so the first file wins and the later spelling is not converted and does not get its own cache. `MyTree.glb` and `mytree.glb` do not both get a cache. Lookup ignores case, so either spelling reads the one file the first name produced. The cache stem is folded so a case-insensitive disk cannot hold two copies. A failed conversion, or a cache that fails and cannot be rebuilt from its GLB, is left out of the set.
 
 In-game, an id in that set is read into a `CpuMesh` with no checksum, no source size or mtime check, no version check, no `stat`, and no GLB read. An id that is not in the set draws the X-sprite. A missing file, a short read, or an I/O error does the same and does not crash. That is error handling.
 

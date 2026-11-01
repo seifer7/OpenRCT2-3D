@@ -2,6 +2,8 @@
 
 Point-in-time review. This note records the review as it stood when it was written. It is not a live status of the pull request.
 
+**Merged as reviewed.** GitHub merged PR #6 on 2026-11-01 at 03:35:56 UTC. The merged head is `459d931e1c373eb191000b9f2d957913d2e9af54` (merge commit `0addc497e57f5cb626cc22ce1cec103d7ff9c77d` on `develop`). That is the head this review checked. The fixes requested below had not landed. They are expected in follow-up pull requests.
+
 - Pull request: "Draw small scenery in the 3D view from GLB models" (`cursor/scenery-glb-milestone-1ca6` → `develop`, base `ba627e2808`).
 - **Head reviewed:** `459d931e1c373eb191000b9f2d957913d2e9af54` (pushed 2026-11-01 13:18:54 AEST). The head had moved from `f98c30ac`; everything below was re-checked at `459d931e`.
 - Finished 2026-11-01 ~13:30 AEST. Read-only. Line references are at that head. Paths are under `src/openrct2-3d/src/` unless shown otherwise.

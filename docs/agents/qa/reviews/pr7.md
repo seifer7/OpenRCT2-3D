@@ -2,6 +2,8 @@
 
 Point-in-time review. This note records the review as it stood when it was written. It is not a live status of the pull request.
 
+**Merged as reviewed.** GitHub merged PR #7 on 2026-11-01 at 03:36:18 UTC. The merged head is `277b0b70b2b5905f7e19b29ec88deb00f507dce8` (merge commit `668547918194deca56e7025ae58b0400b5b2f112` on `develop`). That is the head this review checked (`277b0b70`). The fixes requested below had not landed. They are expected in follow-up pull requests.
+
 - Pull request: [#7](https://github.com/seifer7/OpenRCT2-3D/pull/7) "Add a reproducible sprite-to-3D pipeline, with the Corsican Pine as the reference".
 - **Head reviewed:** `277b0b70b2b5905f7e19b29ec88deb00f507dce8` (recorded in the review as `277b0b70b2`). Base `develop` at `ba627e2808`. 26 files, +4176/−2.
 - Scope: Python tooling (`tools/sprite-to-3d`), docs, `.gitignore`, and a regenerated pine GLB, atlas, and meta under `data/object-models/rct2.scenery_small.tcrp/`. No C++ or Visual Studio project changes.

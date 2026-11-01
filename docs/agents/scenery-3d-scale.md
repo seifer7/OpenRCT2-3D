@@ -27,14 +27,14 @@ An animated tile that invalidates every frame rebuilds only its own 16×16 chunk
 Startup (`prepareModelCache`) is the only validation:
 
 - Header magic, format version, converter version, and `MeshLoadLimits`.
-- Size and nanosecond mtime against the GLB. The GLB is hashed only when those differ. A matching hash refreshes the stored time.
-- The body checksum, streamed in 64 KB chunks. The whole file is not buffered for that pass.
+- Size and nanosecond mtime against the GLB. If both match, the cache is trusted and nothing is hashed.
+- If the size or the mtime differs, or there is no cache yet, the GLB is hashed. A matching hash rewrites the stored size and mtime and does not reconvert. A different hash reconverts. Files that need that hash are processed in parallel.
 
 An id that passes is stored under its case-folded name. The data directory is scanned first, so the first file wins and the later spelling is not converted and does not get its own cache. Lookup ignores case, so either spelling reads that one file. The cache stem is folded so a case-insensitive disk cannot hold two copies. A failed conversion, or a cache that fails and cannot be rebuilt from its GLB, is left out of the set.
 
-In-game, an id in that set is read into a `CpuMesh` with no checksum, no source size or mtime check, no version check, and no GLB read. An id that is not in the set draws the X-sprite. A missing file, a short read, or an I/O error does the same and does not crash. That is error handling.
+In-game, an id in that set is read into a `CpuMesh` with no checksum, no source size or mtime check, no version check, no `stat`, and no GLB read. An id that is not in the set draws the X-sprite. A missing file, a short read, or an I/O error does the same and does not crash. That is error handling.
 
-Parsing still checks the cheap bounds: the file must be at least a header and at most 64 MB, primitive and image counts must fit `MeshLoadLimits` and the bytes actually read, and an index must point at a vertex that was read. A file replaced after startup must not be able to over-read or force a huge allocation. Those checks are a memory-safety guard. They are not a second validation, and they do not decide whether the bytes are the model startup accepted.
+Parsing still checks the cheap bounds: the file must be at least a header and at most 64 MB, image width and height must be at most 256, primitive and image counts must fit `MeshLoadLimits` and the bytes actually read, and an index must point at a vertex that was read. A file replaced after startup must not be able to over-read or force a huge allocation. Those checks are a memory-safety guard. They are not a second validation.
 
 Trade-off: an edit to a GLB or a `.o3d` during a session is invisible until the next startup. The mesh may be wrong if the file changed and still parsed. It will not allocate from a hostile count.
 

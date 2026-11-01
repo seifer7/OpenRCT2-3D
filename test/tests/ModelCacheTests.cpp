@@ -186,11 +186,13 @@ TEST(ModelCache, ConvertsSkipsAndRebuilds)
     EXPECT_NEAR(loaded->primitives[0].vertices[0].z, 1.0f * kGlbVerticalScale, 1.0e-4f);
 
     const std::vector<uint8_t> before = cacheBytes(dir, "pine");
+    resetCacheChecksumPassCount();
     const ModelCacheStats second = prepareModelCache(sources, dir.cache, nullptr);
     EXPECT_EQ(second.converted, 0);
     EXPECT_EQ(second.skipped, 1);
     EXPECT_EQ(second.failed, 0);
     EXPECT_EQ(cacheBytes(dir, "pine"), before);
+    EXPECT_EQ(cacheChecksumPassCount(), 0u);
 
     dir.writeGlb("pine.glb", triangleGlb(2.0f));
     // A rewrite in the same nanosecond keeps the fast path. Move the stamp so this checks a real change.
@@ -320,7 +322,7 @@ static bool setModifiedNs(const std::string& path, uint64_t ns)
 // First vertex Z sits 28 bytes into the body: two counts, the flag word, cutoff, image index, then x and y.
 constexpr size_t kFirstVertexZ = kModelCacheHeaderBytes + 28;
 
-TEST(ModelCache, StartupRebuildsTruncatedBody)
+TEST(ModelCache, MatchingStampTrustsAShortCache)
 {
     CacheDir dir;
     dir.writeGlb("pine.glb", triangleGlb(1.0f));
@@ -333,15 +335,18 @@ TEST(ModelCache, StartupRebuildsTruncatedBody)
     const std::string cacheFile = OpenRCT2::Path::Combine(dir.cache, "pine.o3d");
     OpenRCT2::File::WriteAllBytes(cacheFile, bytes.data(), bytes.size());
 
-    EXPECT_EQ(prepareModelCache(sources, dir.cache, nullptr).converted, 1);
+    resetCacheChecksumPassCount();
+    const ModelCacheStats again = prepareModelCache(sources, dir.cache, nullptr);
+    EXPECT_EQ(again.skipped, 1);
+    EXPECT_EQ(again.converted, 0);
+    EXPECT_EQ(cacheChecksumPassCount(), 0u);
     EXPECT_TRUE(modelIsValidated("pine"));
     std::string error;
-    const std::optional<CpuMesh> mesh = loadModelForDraw("pine", sources, dir.cache, error);
-    ASSERT_TRUE(mesh.has_value()) << error;
-    EXPECT_NEAR(mesh->primitives[0].vertices[0].z, 1.0f * kGlbVerticalScale, 1.0e-4f);
+    EXPECT_FALSE(loadModelForDraw("pine", sources, dir.cache, error).has_value());
+    EXPECT_FALSE(error.empty());
 }
 
-TEST(ModelCache, StartupRebuildsCorruptBody)
+TEST(ModelCache, MatchingStampTrustsACorruptBody)
 {
     CacheDir dir;
     dir.writeGlb("pine.glb", triangleGlb(1.0f));
@@ -351,18 +356,16 @@ TEST(ModelCache, StartupRebuildsCorruptBody)
     std::vector<uint8_t> bytes = cacheBytes(dir, "pine");
     ASSERT_GT(bytes.size(), kFirstVertexZ + 4);
     bytes[kFirstVertexZ] ^= 0xff;
-    float corruptedZ = 0.0f;
-    std::memcpy(&corruptedZ, bytes.data() + kFirstVertexZ, sizeof(corruptedZ));
-    EXPECT_NE(corruptedZ, 1.0f * kGlbVerticalScale);
     const std::string cacheFile = OpenRCT2::Path::Combine(dir.cache, "pine.o3d");
     OpenRCT2::File::WriteAllBytes(cacheFile, bytes.data(), bytes.size());
 
-    EXPECT_EQ(prepareModelCache(sources, dir.cache, nullptr).converted, 1);
-    EXPECT_TRUE(modelIsValidated("pine"));
+    resetCacheChecksumPassCount();
+    EXPECT_EQ(prepareModelCache(sources, dir.cache, nullptr).skipped, 1);
+    EXPECT_EQ(cacheChecksumPassCount(), 0u);
     std::string error;
     const std::optional<CpuMesh> mesh = loadModelForDraw("pine", sources, dir.cache, error);
     ASSERT_TRUE(mesh.has_value()) << error;
-    EXPECT_NEAR(mesh->primitives[0].vertices[0].z, 1.0f * kGlbVerticalScale, 1.0e-4f);
+    EXPECT_NE(mesh->primitives[0].vertices[0].z, 1.0f * kGlbVerticalScale);
 }
 
 TEST(ModelCache, ConverterVersionAndLimitsRebuild)

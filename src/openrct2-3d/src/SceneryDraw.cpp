@@ -10,15 +10,24 @@
 #include "SceneryDraw.hpp"
 
 #include "GlbMesh.hpp"
+#include "GpuBudget.hpp"
 #include "MeshDraw.hpp"
 #include "ModelCache.hpp"
+#include "ModelLoadQueue.hpp"
+#include "ParkView.hpp"
+#include "SceneryChunk.hpp"
+#include "SceneryScale.hpp"
 #include "SpriteQuad.hpp"
 #include "ViewerScale.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <mutex>
 #include <openrct2/Context.h>
 #include <openrct2/GameState.h>
+#include <openrct2/OpenRCT2.h>
 #include <openrct2/PlatformEnvironment.h>
 #include <openrct2/core/File.h>
 #include <openrct2/core/Path.hpp>
@@ -64,19 +73,68 @@ namespace OpenRCT2::View3D::Park
             int32_t handle = -1;
         };
 
-        std::unordered_map<std::string, int32_t> _models;
         std::vector<SpriteCache> _sprites;
         std::vector<Batch> _batches;
-        uint64_t _signature = 0;
-        bool _haveSignature = false;
         bool _loggedShader = false;
         std::vector<Drawing::PaletteIndex> _blit;
         std::vector<uint8_t> _rgba;
+        SceneryChunkGrid _grid;
+        bool _gridReady = false;
+        std::vector<std::string> _typeIds;
+        std::unordered_map<std::string, uint32_t> _typeIndex;
+        std::unordered_map<uint32_t, int32_t> _gpu;
+        std::unique_ptr<ModelLoadQueue> _loads;
+        std::mutex _dirtyMutex;
+        std::vector<std::pair<int32_t, int32_t>> _dirtyTiles;
+        bool _dirtyAll = true;
+        uint64_t _frame = 0;
+        LruBudget _vram(kDefaultVramBudgetBytes);
 
-        uint64_t mix(uint64_t hash, uint64_t value)
+        void onMapChanged(int32_t tileX, int32_t tileY)
         {
-            hash ^= value + 0x9e3779b97f4a7c15uLL + (hash << 6) + (hash >> 2);
-            return hash;
+            if (gOpenRCT2Headless)
+            {
+                return;
+            }
+            std::lock_guard<std::mutex> guard(_dirtyMutex);
+            if (tileX < 0 || tileY < 0)
+            {
+                _dirtyAll = true;
+                _dirtyTiles.clear();
+                return;
+            }
+            // A long 2D session can invalidate the same tiles for many frames before 3D draws.
+            if (_dirtyTiles.size() > 8192)
+            {
+                _dirtyAll = true;
+                _dirtyTiles.clear();
+                return;
+            }
+            _dirtyTiles.emplace_back(tileX, tileY);
+        }
+
+        uint32_t typeKeyFor(const std::string& identifier)
+        {
+            const auto found = _typeIndex.find(identifier);
+            if (found != _typeIndex.end())
+            {
+                return found->second;
+            }
+            const uint32_t key = static_cast<uint32_t>(_typeIds.size());
+            _typeIds.push_back(identifier);
+            _typeIndex.emplace(identifier, key);
+            return key;
+        }
+
+        void ensureLoads()
+        {
+            if (_loads != nullptr)
+            {
+                return;
+            }
+            _loads = std::make_unique<ModelLoadQueue>(
+                [](const std::string& identifier, std::string& error) { return loadModelForDraw(identifier, {}, {}, error); },
+                true);
         }
 
         std::vector<std::string> modelSourceDirs()
@@ -122,42 +180,11 @@ namespace OpenRCT2::View3D::Park
             RegisterSceneryModels()
             {
                 SetPrepareSceneryModels(&prepareSceneryModels);
+                SetMapChangedHook(&onMapChanged);
             }
         };
 
         const RegisterSceneryModels kRegisterSceneryModels;
-
-        int32_t modelHandle(const std::string& identifier)
-        {
-            const auto found = _models.find(identifier);
-            if (found != _models.end())
-            {
-                return found->second;
-            }
-            int32_t handle = -1;
-            std::string error;
-            const std::optional<CpuMesh> mesh = loadModelForDraw(identifier, modelSourceDirs(), modelCacheDir(), error);
-            if (mesh.has_value())
-            {
-                handle = meshDrawUploadModel(*mesh);
-                if (handle < 0)
-                {
-                    std::fprintf(stderr, "View3D: model %s failed to upload\n", identifier.c_str());
-                }
-                else
-                {
-                    std::fprintf(
-                        stderr, "View3D: loaded scenery model %s (%zu primitives)\n", identifier.c_str(),
-                        mesh->primitives.size());
-                }
-            }
-            else if (!error.empty())
-            {
-                std::fprintf(stderr, "View3D: model %s failed (%s)\n", identifier.c_str(), error.c_str());
-            }
-            _models.emplace(identifier, handle);
-            return handle;
-        }
 
         bool isVegetation(const SmallSceneryEntry& entry)
         {
@@ -186,22 +213,10 @@ namespace OpenRCT2::View3D::Park
             const TileCoordsXY& tile, const SmallSceneryElement& element, const SmallSceneryEntry& entry, float& x, float& y,
             float& z)
         {
-            x = static_cast<float>(tile.x);
-            y = static_cast<float>(tile.y);
-            // Full-tile objects, including half and three-quarter footprints, sit on
-            // the tile centre. That is the GLB origin. Quarter-tile objects sit on
-            // the quadrant the 2D painter uses, without the viewport rotation.
-            if (entry.flags.has(SmallSceneryFlag::occupiesFullTile))
-            {
-                x += 0.5f;
-                y += 0.5f;
-            }
-            else
-            {
-                const uint8_t quadrant = element.getSceneryQuadrant() & 3;
-                x += static_cast<float>(SceneryQuadrantOffsets[quadrant].x) / 32.0f;
-                y += static_cast<float>(SceneryQuadrantOffsets[quadrant].y) / 32.0f;
-            }
+            // Stored quadrant, not the view-rotated index the 2D painter adds.
+            // Models and the X-sprite fallback share this point, and yaw is about it.
+            sceneryAnchor(
+                tile.x, tile.y, entry.flags.has(SmallSceneryFlag::occupiesFullTile), element.getSceneryQuadrant(), x, y);
             z = viewerZ(element.getBaseZ());
         }
 
@@ -291,154 +306,332 @@ namespace OpenRCT2::View3D::Park
             return handle;
         }
 
-        uint64_t scenerySignature()
+        void appendElement(SceneryChunk& chunk, const TileCoordsXY& tile, const SmallSceneryElement& element)
         {
-            const TileCoordsXY mapSize = getGameState().mapSize;
-            uint64_t hash = mix(0, static_cast<uint32_t>(mapSize.x));
-            hash = mix(hash, static_cast<uint32_t>(mapSize.y));
-            for (int32_t y = 0; y < mapSize.y; y++)
+            const SmallSceneryEntry* entry = element.getEntry();
+            if (entry == nullptr || element.isInvisible())
             {
-                for (int32_t x = 0; x < mapSize.x; x++)
+                return;
+            }
+            float ax;
+            float ay;
+            float az;
+            anchor(tile, element, *entry, ax, ay, az);
+            ChunkPlacement placement;
+            placement.x = ax;
+            placement.y = ay;
+            placement.z = az;
+            placement.yaw = modelYawRadians(element.getDirection());
+            placement.vegetation = isVegetation(*entry);
+            std::string identifier;
+            const Object* object = ObjectEntryGetObject(ObjectType::smallScenery, element.getEntryIndex());
+            if (object != nullptr)
+            {
+                identifier = std::string(object->GetIdentifier());
+            }
+            placement.modelCandidate = !identifier.empty() && modelIsValidated(identifier);
+            if (placement.modelCandidate)
+            {
+                placement.typeKey = typeKeyFor(identifier);
+            }
+            for (int face = 0; face < 4; face++)
+            {
+                placement.spriteHandles[face] = spriteHandleForFace(faceImage(element, *entry, face), face);
+            }
+            chunk.placements.push_back(placement);
+        }
+
+        void rebuildChunk(int32_t chunkX, int32_t chunkY)
+        {
+            SceneryChunk* chunk = _grid.at(chunkX, chunkY);
+            if (chunk == nullptr)
+            {
+                return;
+            }
+            chunk->placements.clear();
+            const int32_t x0 = chunkX * kSceneryChunkTiles;
+            const int32_t y0 = chunkY * kSceneryChunkTiles;
+            const int32_t x1 = std::min(x0 + kSceneryChunkTiles, _grid.tilesX());
+            const int32_t y1 = std::min(y0 + kSceneryChunkTiles, _grid.tilesY());
+            chunk->box.minX = static_cast<float>(x0);
+            chunk->box.minY = static_cast<float>(y0);
+            chunk->box.maxX = static_cast<float>(x1);
+            chunk->box.maxY = static_cast<float>(y1);
+            chunk->box.minZ = 0.0f;
+            chunk->box.maxZ = 8.0f;
+            for (int32_t y = y0; y < y1; y++)
+            {
+                for (int32_t x = x0; x < x1; x++)
                 {
                     const TileCoordsXY tile{ x, y };
                     for (const SmallSceneryElement* element : TileElementsView<SmallSceneryElement>(tile))
                     {
-                        if (element == nullptr || element->isInvisible())
+                        if (element != nullptr)
                         {
-                            continue;
+                            appendElement(*chunk, tile, *element);
                         }
-                        const SmallSceneryEntry* entry = element->getEntry();
-                        if (entry == nullptr)
-                        {
-                            continue;
-                        }
-                        hash = mix(hash, static_cast<uint32_t>(x));
-                        hash = mix(hash, static_cast<uint32_t>(y));
-                        hash = mix(hash, static_cast<uint32_t>(element->getBaseZ()));
-                        hash = mix(hash, element->getEntryIndex());
-                        hash = mix(hash, element->getDirection());
-                        hash = mix(hash, element->getSceneryQuadrant());
-                        hash = mix(hash, witherBand(*entry, element->getAge()));
-                        hash = mix(hash, static_cast<uint8_t>(element->getPrimaryColour()));
-                        hash = mix(hash, static_cast<uint8_t>(element->getSecondaryColour()));
-                        hash = mix(hash, static_cast<uint8_t>(element->getTertiaryColour()));
-                        hash = mix(hash, element->isGhost() ? 1u : 0u);
                     }
                 }
             }
-            return hash;
+            chunk->dirty = false;
+            chunk->built = true;
         }
 
-        void rebuild()
+        bool chunkVisible(
+            const SceneryChunk& chunk, bool haveCamera, float eyeX, float eyeY, float eyeZ, const float planes[6][4])
+        {
+            if (!haveCamera)
+            {
+                return true;
+            }
+            return !boxOutsideDistance(chunk.box, eyeX, eyeY, eyeZ, kDefaultViewDistanceTiles)
+                && !boxOutsideFrustum(chunk.box, planes);
+        }
+
+        void readCamera(bool& haveCamera, float& eyeX, float& eyeY, float& eyeZ, float planes[6][4])
+        {
+            float viewProj[16] = {};
+            haveCamera = copyCamera(eyeX, eyeY, eyeZ, viewProj);
+            if (haveCamera)
+            {
+                extractFrustumPlanes(viewProj, planes);
+            }
+        }
+
+        std::vector<uint32_t> visibleModelKeys()
+        {
+            std::vector<uint32_t> keys;
+            bool haveCamera = false;
+            float eyeX = 0.0f;
+            float eyeY = 0.0f;
+            float eyeZ = 0.0f;
+            float planes[6][4] = {};
+            readCamera(haveCamera, eyeX, eyeY, eyeZ, planes);
+            for (int32_t y = 0; y < _grid.chunksY(); y++)
+            {
+                for (int32_t x = 0; x < _grid.chunksX(); x++)
+                {
+                    const SceneryChunk* chunk = _grid.at(x, y);
+                    if (chunk == nullptr || !chunk->built || !chunkVisible(*chunk, haveCamera, eyeX, eyeY, eyeZ, planes))
+                    {
+                        continue;
+                    }
+                    for (const ChunkPlacement& placement : chunk->placements)
+                    {
+                        if (placement.modelCandidate)
+                        {
+                            keys.push_back(placement.typeKey);
+                        }
+                    }
+                }
+            }
+            return keys;
+        }
+
+        void syncChunks()
+        {
+            const TileCoordsXY mapSize = getGameState().mapSize;
+            if (!_gridReady || _grid.tilesX() != mapSize.x || _grid.tilesY() != mapSize.y)
+            {
+                _grid.reset(mapSize.x, mapSize.y);
+                _gridReady = true;
+                _dirtyAll = true;
+            }
+            std::vector<std::pair<int32_t, int32_t>> tiles;
+            bool all = false;
+            {
+                std::lock_guard<std::mutex> guard(_dirtyMutex);
+                all = _dirtyAll;
+                tiles.swap(_dirtyTiles);
+                _dirtyAll = false;
+            }
+            if (all)
+            {
+                _grid.markAllDirty();
+            }
+            else
+            {
+                for (const auto& tile : tiles)
+                {
+                    _grid.markTile(tile.first, tile.second);
+                }
+            }
+            int32_t rebuilt = 0;
+            for (int32_t y = 0; y < _grid.chunksY(); y++)
+            {
+                for (int32_t x = 0; x < _grid.chunksX(); x++)
+                {
+                    if (_grid.dirty(x, y))
+                    {
+                        rebuildChunk(x, y);
+                        rebuilt++;
+                    }
+                }
+            }
+            if (rebuilt > 0)
+            {
+                std::fprintf(stderr, "View3D: rebuilt %d scenery chunk(s)\n", rebuilt);
+            }
+        }
+
+        void uploadReadyModels()
+        {
+            ensureLoads();
+            const std::vector<uint32_t> pinned = visibleModelKeys();
+            uint32_t uploaded = 0;
+            uint32_t bytes = 0;
+            while (uploaded < kUploadsPerFrame && bytes < kUploadBytesPerFrame)
+            {
+                std::string identifier;
+                std::optional<CpuMesh> mesh = _loads->takeReady(identifier);
+                if (!mesh.has_value())
+                {
+                    break;
+                }
+                const uint32_t key = typeKeyFor(identifier);
+                uint32_t meshBytes = 0;
+                for (const MeshPrimitive& primitive : mesh->primitives)
+                {
+                    meshBytes += static_cast<uint32_t>(primitive.vertices.size() * sizeof(MeshVertex));
+                    meshBytes += static_cast<uint32_t>(primitive.indices.size() * sizeof(uint32_t));
+                }
+                for (const MeshImage& image : mesh->images)
+                {
+                    meshBytes += static_cast<uint32_t>(image.rgba.size() + image.png.size());
+                }
+                const std::vector<uint32_t> dropped = _vram.evict(meshBytes, pinned);
+                for (uint32_t droppedId : dropped)
+                {
+                    const auto gpu = _gpu.find(droppedId);
+                    if (gpu != _gpu.end())
+                    {
+                        if (gpu->second >= 0)
+                        {
+                            meshDrawReleaseModel(gpu->second);
+                        }
+                        _gpu.erase(gpu);
+                    }
+                    if (droppedId < _typeIds.size())
+                    {
+                        _loads->forget(_typeIds[droppedId]);
+                    }
+                }
+                const int32_t handle = meshDrawUploadModel(*mesh);
+                _gpu[key] = handle;
+                if (handle >= 0)
+                {
+                    _vram.insert(key, meshBytes, _frame);
+                    std::fprintf(
+                        stderr, "View3D: loaded scenery model %s (%zu primitives)\n", identifier.c_str(),
+                        mesh->primitives.size());
+                }
+                else
+                {
+                    std::fprintf(stderr, "View3D: model %s failed to upload\n", identifier.c_str());
+                }
+                uploaded++;
+                bytes += meshBytes;
+            }
+        }
+
+        void composeVisible()
         {
             _batches.clear();
-            const TileCoordsXY mapSize = getGameState().mapSize;
-            std::unordered_map<std::string, size_t> modelBatches;
-            struct SpriteKey
+            bool haveCamera = false;
+            float eyeX = 0.0f;
+            float eyeY = 0.0f;
+            float eyeZ = 0.0f;
+            float planes[6][4] = {};
+            readCamera(haveCamera, eyeX, eyeY, eyeZ, planes);
+            std::unordered_map<uint32_t, size_t> modelBatches;
+            std::unordered_map<int32_t, size_t> spriteBatches;
+            for (int32_t y = 0; y < _grid.chunksY(); y++)
             {
-                ImageId image;
-                int face = 0;
-            };
-            std::vector<SpriteKey> spriteKeys;
-            std::vector<size_t> spriteBatches;
-            int32_t modelObjects = 0;
-            int32_t spriteObjects = 0;
-            int32_t instances = 0;
-
-            for (int32_t y = 0; y < mapSize.y; y++)
-            {
-                for (int32_t x = 0; x < mapSize.x; x++)
+                for (int32_t x = 0; x < _grid.chunksX(); x++)
                 {
-                    const TileCoordsXY tile{ x, y };
-                    for (const SmallSceneryElement* element : TileElementsView<SmallSceneryElement>(tile))
+                    const SceneryChunk* chunk = _grid.at(x, y);
+                    if (chunk == nullptr || !chunk->built)
                     {
-                        if (element == nullptr || element->isInvisible())
+                        continue;
+                    }
+                    if (!chunkVisible(*chunk, haveCamera, eyeX, eyeY, eyeZ, planes))
+                    {
+                        continue;
+                    }
+                    for (const ChunkPlacement& placement : chunk->placements)
+                    {
+                        int32_t modelHandle = -1;
+                        if (placement.modelCandidate)
                         {
-                            continue;
+                            const auto gpu = _gpu.find(placement.typeKey);
+                            if (gpu != _gpu.end())
+                            {
+                                modelHandle = gpu->second;
+                            }
+                            else if (placement.typeKey < _typeIds.size())
+                            {
+                                ensureLoads();
+                                const std::string& identifier = _typeIds[placement.typeKey];
+                                if (_loads->phase(identifier) == ModelLoadPhase::absent)
+                                {
+                                    _loads->request(identifier);
+                                }
+                            }
+                            if (modelHandle >= 0)
+                            {
+                                _vram.touch(placement.typeKey, _frame);
+                            }
                         }
-                        const SmallSceneryEntry* entry = element->getEntry();
-                        if (entry == nullptr)
+                        if (modelHandle >= 0)
                         {
-                            continue;
-                        }
-                        float ax;
-                        float ay;
-                        float az;
-                        anchor(tile, *element, *entry, ax, ay, az);
-                        const bool vegetation = isVegetation(*entry);
-
-                        std::string identifier;
-                        const Object* object = ObjectEntryGetObject(ObjectType::smallScenery, element->getEntryIndex());
-                        if (object != nullptr)
-                        {
-                            identifier = std::string(object->GetIdentifier());
-                        }
-                        const int32_t model = identifier.empty() ? -1 : modelHandle(identifier);
-                        if (model >= 0)
-                        {
-                            const auto batchIndex = modelBatches.find(identifier);
+                            const auto found = modelBatches.find(placement.typeKey);
                             size_t index;
-                            if (batchIndex == modelBatches.end())
+                            if (found == modelBatches.end())
                             {
                                 index = _batches.size();
-                                modelBatches.emplace(identifier, index);
+                                modelBatches.emplace(placement.typeKey, index);
                                 Batch batch;
-                                batch.handle = model;
+                                batch.handle = modelHandle;
                                 batch.model = true;
-                                batch.vegetation = vegetation;
+                                batch.vegetation = placement.vegetation;
                                 _batches.push_back(std::move(batch));
-                                modelObjects++;
                             }
                             else
                             {
-                                index = batchIndex->second;
+                                index = found->second;
                             }
                             _batches[index].instances.push_back(
-                                MeshInstance{ ax, ay, az, modelYawRadians(element->getDirection()) });
-                            instances++;
+                                MeshInstance{ placement.x, placement.y, placement.z, placement.yaw });
                             continue;
                         }
-
-                        spriteObjects++;
                         for (int face = 0; face < 4; face++)
                         {
-                            const ImageId image = faceImage(*element, *entry, face);
-                            size_t index = spriteKeys.size();
-                            bool found = false;
-                            for (size_t i = 0; i < spriteKeys.size(); i++)
+                            const int32_t handle = placement.spriteHandles[face];
+                            if (handle < 0)
                             {
-                                if (spriteKeys[i].face == face && spriteKeys[i].image == image)
-                                {
-                                    index = spriteBatches[i];
-                                    found = true;
-                                    break;
-                                }
+                                continue;
                             }
-                            if (!found)
+                            const auto found = spriteBatches.find(handle);
+                            size_t index;
+                            if (found == spriteBatches.end())
                             {
-                                const int32_t handle = spriteHandleForFace(image, face);
-                                if (handle < 0)
-                                {
-                                    continue;
-                                }
                                 index = _batches.size();
-                                spriteKeys.push_back(SpriteKey{ image, face });
-                                spriteBatches.push_back(index);
+                                spriteBatches.emplace(handle, index);
                                 Batch batch;
                                 batch.handle = handle;
                                 batch.model = false;
-                                batch.vegetation = vegetation;
+                                batch.vegetation = placement.vegetation;
                                 _batches.push_back(std::move(batch));
                             }
-                            _batches[index].instances.push_back(MeshInstance{ ax, ay, az, 0.0f });
-                            instances++;
+                            else
+                            {
+                                index = found->second;
+                            }
+                            _batches[index].instances.push_back(MeshInstance{ placement.x, placement.y, placement.z, 0.0f });
                         }
                     }
                 }
             }
-            std::fprintf(
-                stderr, "View3D: scenery rebuilt (%d model types, %d sprite objects, %d draws)\n", modelObjects, spriteObjects,
-                instances);
         }
 
         bool hideBatch(const Batch& batch)
@@ -459,15 +652,23 @@ namespace OpenRCT2::View3D::Park
 
     void releaseScenery()
     {
+        _loads.reset();
         meshDrawShutdown();
-        _models.clear();
         _sprites.clear();
         _batches.clear();
-        _signature = 0;
-        _haveSignature = false;
         _loggedShader = false;
         _blit.clear();
         _rgba.clear();
+        _grid = {};
+        _gridReady = false;
+        _typeIds.clear();
+        _typeIndex.clear();
+        _gpu.clear();
+        _vram = LruBudget(kDefaultVramBudgetBytes);
+        _frame = 0;
+        std::lock_guard<std::mutex> guard(_dirtyMutex);
+        _dirtyTiles.clear();
+        _dirtyAll = true;
     }
 
     void drawScenery()
@@ -481,13 +682,10 @@ namespace OpenRCT2::View3D::Park
             }
             return;
         }
-        const uint64_t signature = scenerySignature();
-        if (!_haveSignature || signature != _signature)
-        {
-            rebuild();
-            _signature = signature;
-            _haveSignature = true;
-        }
+        _frame++;
+        syncChunks();
+        uploadReadyModels();
+        composeVisible();
         for (const Batch& batch : _batches)
         {
             if (batch.instances.empty() || hideBatch(batch))

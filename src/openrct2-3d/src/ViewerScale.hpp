@@ -59,8 +59,37 @@ namespace OpenRCT2::View3D
         return { gx, -gz, gy * kGlbVerticalScale };
     }
 
+    // Quarter-tile paint anchors at view rotation 0, in sim units from the tile corner.
+    // Paint.SmallScenery.cpp takes SceneryQuadrantOffsets and subtracts 1 (the same
+    // nudge as a full tile's 16,16 -> 15,15; see OpenRCT2 issue 17616). The table is
+    // {8,8}, {8,24}, {24,24}, {24,8}, so the painted points are:
+    //   0 (7, 7), 1 (7, 23), 2 (23, 23), 3 (23, 7).
+    // The painter also adds the viewport rotation before indexing. The 3D view uses
+    // the element's stored quadrant and does not. vOffsetCentre changes only the
+    // full-tile paint offset and is not applied here.
+    constexpr int32_t kQuarterTileSimX[4] = { 7, 7, 23, 23 };
+    constexpr int32_t kQuarterTileSimY[4] = { 7, 23, 23, 7 };
+
+    // Full-tile objects, including half and three-quarter footprints, stay on the
+    // tile centre (16, 16 sim). Those footprints' 2D image offset of (3, 3) is deferred.
+    inline void sceneryAnchor(int32_t tileX, int32_t tileY, bool fullTile, uint8_t quadrant, float& x, float& y)
+    {
+        x = static_cast<float>(tileX);
+        y = static_cast<float>(tileY);
+        if (fullTile)
+        {
+            x += 0.5f;
+            y += 0.5f;
+            return;
+        }
+        const uint8_t index = quadrant & 3;
+        x += static_cast<float>(kQuarterTileSimX[index]) / 32.0f;
+        y += static_cast<float>(kQuarterTileSimY[index]) / 32.0f;
+    }
+
     // Small-scenery direction 0 is the authored facing. Each step is a clockwise
-    // quarter turn about +Z, matching CoordsXY::rotate.
+    // quarter turn about +Z, matching CoordsXY::rotate. The mesh origin is the pivot,
+    // so a quarter-tile instance placed by sceneryAnchor rotates about that quadrant.
     constexpr float modelYawRadians(uint8_t direction)
     {
         return -static_cast<float>(direction & 3u) * kQuarterTurnRadians;

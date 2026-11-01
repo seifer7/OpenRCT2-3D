@@ -10,7 +10,9 @@
 #include "openrct2-3d/src/ModelCache.hpp"
 #include "openrct2-3d/src/ViewerScale.hpp"
 
+#include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <gtest/gtest.h>
@@ -37,6 +39,10 @@
     #include <fcntl.h>
     #include <sys/stat.h>
     #include <unistd.h>
+#endif
+
+#ifdef __linux__
+    #include <fcntl.h>
 #endif
 
 using namespace OpenRCT2::View3D;
@@ -214,10 +220,11 @@ TEST(ModelCache, BadFileDoesNotCrashOrCache)
     EXPECT_EQ(stats.failed, 1);
     EXPECT_FALSE(OpenRCT2::File::Exists(OpenRCT2::Path::Combine(dir.cache, "broken.o3d")));
 
-    std::string error;
+    std::string error = "stale";
     const std::optional<CpuMesh> mesh = loadModelForDraw("broken", sources, dir.cache, error);
     EXPECT_FALSE(mesh.has_value());
-    EXPECT_FALSE(error.empty());
+    EXPECT_TRUE(error.empty());
+    EXPECT_FALSE(modelIsValidated("broken"));
 }
 
 TEST(ModelCache, DataDirWinsOverUserDir)
@@ -237,7 +244,7 @@ TEST(ModelCache, DataDirWinsOverUserDir)
     EXPECT_NEAR(mesh->primitives[0].vertices[0].z, 1.0f * kGlbVerticalScale, 1.0e-4f);
 }
 
-TEST(ModelCache, BadCacheFallsBackToGlb)
+TEST(ModelCache, StartupRebuildsGarbageCache)
 {
     CacheDir dir;
     dir.writeGlb("pine.glb", triangleGlb(1.0f));
@@ -248,11 +255,13 @@ TEST(ModelCache, BadCacheFallsBackToGlb)
     const std::string garbage = "not a cache";
     OpenRCT2::File::WriteAllBytes(cacheFile, garbage.data(), garbage.size());
 
+    const ModelCacheStats again = prepareModelCache(sources, dir.cache, nullptr);
+    EXPECT_EQ(again.converted, 1);
+    EXPECT_TRUE(modelIsValidated("pine"));
     std::string error;
     const std::optional<CpuMesh> mesh = loadModelForDraw("pine", sources, dir.cache, error);
     ASSERT_TRUE(mesh.has_value()) << error;
     EXPECT_NEAR(mesh->primitives[0].vertices[0].z, 1.0f * kGlbVerticalScale, 1.0e-4f);
-    EXPECT_TRUE(error.empty());
 }
 
 static uint32_t readU32(const std::vector<uint8_t>& bytes, size_t offset)
@@ -311,7 +320,7 @@ static bool setModifiedNs(const std::string& path, uint64_t ns)
 // First vertex Z sits 28 bytes into the body: two counts, the flag word, cutoff, image index, then x and y.
 constexpr size_t kFirstVertexZ = kModelCacheHeaderBytes + 28;
 
-TEST(ModelCache, TruncatedBodyFallsBackToGlb)
+TEST(ModelCache, StartupRebuildsTruncatedBody)
 {
     CacheDir dir;
     dir.writeGlb("pine.glb", triangleGlb(1.0f));
@@ -324,13 +333,15 @@ TEST(ModelCache, TruncatedBodyFallsBackToGlb)
     const std::string cacheFile = OpenRCT2::Path::Combine(dir.cache, "pine.o3d");
     OpenRCT2::File::WriteAllBytes(cacheFile, bytes.data(), bytes.size());
 
+    EXPECT_EQ(prepareModelCache(sources, dir.cache, nullptr).converted, 1);
+    EXPECT_TRUE(modelIsValidated("pine"));
     std::string error;
     const std::optional<CpuMesh> mesh = loadModelForDraw("pine", sources, dir.cache, error);
     ASSERT_TRUE(mesh.has_value()) << error;
     EXPECT_NEAR(mesh->primitives[0].vertices[0].z, 1.0f * kGlbVerticalScale, 1.0e-4f);
 }
 
-TEST(ModelCache, CorruptBodyFallsBackToGlb)
+TEST(ModelCache, StartupRebuildsCorruptBody)
 {
     CacheDir dir;
     dir.writeGlb("pine.glb", triangleGlb(1.0f));
@@ -346,6 +357,8 @@ TEST(ModelCache, CorruptBodyFallsBackToGlb)
     const std::string cacheFile = OpenRCT2::Path::Combine(dir.cache, "pine.o3d");
     OpenRCT2::File::WriteAllBytes(cacheFile, bytes.data(), bytes.size());
 
+    EXPECT_EQ(prepareModelCache(sources, dir.cache, nullptr).converted, 1);
+    EXPECT_TRUE(modelIsValidated("pine"));
     std::string error;
     const std::optional<CpuMesh> mesh = loadModelForDraw("pine", sources, dir.cache, error);
     ASSERT_TRUE(mesh.has_value()) << error;
@@ -366,10 +379,8 @@ TEST(ModelCache, ConverterVersionAndLimitsRebuild)
     writeU64(bytes, kModelCacheChecksumOffset, cacheFileChecksum(bytes.data(), bytes.size()));
     OpenRCT2::File::WriteAllBytes(cacheFile, bytes.data(), bytes.size());
 
-    std::string error;
-    const std::optional<CpuMesh> mesh = loadModelForDraw("pine", sources, dir.cache, error);
-    ASSERT_TRUE(mesh.has_value()) << error;
-    EXPECT_NEAR(mesh->primitives[0].vertices[0].z, 1.0f * kGlbVerticalScale, 1.0e-4f);
+    EXPECT_EQ(prepareModelCache(sources, dir.cache, nullptr).converted, 1);
+    EXPECT_TRUE(modelIsValidated("pine"));
     const std::vector<uint8_t> rebuilt = cacheBytes(dir, "pine");
     EXPECT_EQ(readU32(rebuilt, kModelCacheConverterOffset), kGlbConverterVersion);
 
@@ -377,8 +388,7 @@ TEST(ModelCache, ConverterVersionAndLimitsRebuild)
     writeU32(bytes, kModelCacheMaxVerticesOffset, 1);
     writeU64(bytes, kModelCacheChecksumOffset, cacheFileChecksum(bytes.data(), bytes.size()));
     OpenRCT2::File::WriteAllBytes(cacheFile, bytes.data(), bytes.size());
-    const std::optional<CpuMesh> again = loadModelForDraw("pine", sources, dir.cache, error);
-    ASSERT_TRUE(again.has_value()) << error;
+    EXPECT_EQ(prepareModelCache(sources, dir.cache, nullptr).converted, 1);
     EXPECT_EQ(readU32(cacheBytes(dir, "pine"), kModelCacheMaxVerticesOffset), 65535u);
 }
 
@@ -421,6 +431,7 @@ TEST(ModelCache, UpperCaseIdentifierIsConverted)
     const std::optional<CpuMesh> mesh = loadModelForDraw("MyTree", sources, dir.cache, error);
     ASSERT_TRUE(mesh.has_value()) << error;
     EXPECT_NEAR(mesh->primitives[0].vertices[0].z, 1.0f * kGlbVerticalScale, 1.0e-4f);
+    EXPECT_TRUE(OpenRCT2::File::Exists(OpenRCT2::Path::Combine(dir.cache, "mytree.o3d")));
 }
 
 TEST(ModelCache, RejectedNameIsNotCached)
@@ -434,59 +445,208 @@ TEST(ModelCache, RejectedNameIsNotCached)
     EXPECT_FALSE(OpenRCT2::File::Exists(OpenRCT2::Path::Combine(dir.cache, "has space.o3d")));
 }
 
-TEST(ModelCache, TamperedCountFallsBackToGlb)
+TEST(ModelCache, StartupRejectsChecksumWhenGlbCannotRebuild)
 {
-    // The doubled body is re-checksummed, so a valid checksum is not a security boundary:
-    // that file loads as two primitives. Lowering the count afterwards, without updating
-    // the checksum, must not load the shorter mesh.
     CacheDir dir;
     dir.writeGlb("pine.glb", triangleGlb(1.0f));
     const std::vector<std::string> sources = { dir.source };
     ASSERT_EQ(prepareModelCache(sources, dir.cache, nullptr).converted, 1);
 
     std::vector<uint8_t> bytes = cacheBytes(dir, "pine");
-    const std::vector<uint8_t> body(bytes.begin() + kModelCacheHeaderBytes, bytes.end());
-    ASSERT_FALSE(body.empty());
-    bytes.insert(bytes.end(), body.begin(), body.end());
-    writeU32(bytes, kModelCachePrimitiveCountOffset, 2);
-    writeU64(bytes, kModelCacheChecksumOffset, cacheFileChecksum(bytes.data(), bytes.size()));
+    ASSERT_GT(bytes.size(), kFirstVertexZ);
+    bytes[kFirstVertexZ] ^= 0xff;
     const std::string cacheFile = OpenRCT2::Path::Combine(dir.cache, "pine.o3d");
     OpenRCT2::File::WriteAllBytes(cacheFile, bytes.data(), bytes.size());
+    const std::string junk = "this is not a glb";
+    dir.writeGlb("pine.glb", std::vector<uint8_t>(junk.begin(), junk.end()));
 
-    std::string error;
-    const std::optional<CpuMesh> doubled = loadModelForDraw("pine", sources, dir.cache, error);
-    ASSERT_TRUE(doubled.has_value()) << error;
-    EXPECT_EQ(doubled->primitives.size(), 2u);
-
-    writeU32(bytes, kModelCachePrimitiveCountOffset, 1);
-    OpenRCT2::File::WriteAllBytes(cacheFile, bytes.data(), bytes.size());
-    const std::optional<CpuMesh> mesh = loadModelForDraw("pine", sources, dir.cache, error);
-    ASSERT_TRUE(mesh.has_value()) << error;
-    EXPECT_EQ(mesh->primitives.size(), 1u);
-    const std::vector<uint8_t> rebuilt = cacheBytes(dir, "pine");
-    EXPECT_EQ(readU32(rebuilt, kModelCachePrimitiveCountOffset), 1u);
-    EXPECT_LT(rebuilt.size(), bytes.size());
+    const ModelCacheStats stats = prepareModelCache(sources, dir.cache, nullptr);
+    EXPECT_EQ(stats.failed, 1);
+    EXPECT_EQ(stats.converted, 0);
+    EXPECT_FALSE(modelIsValidated("pine"));
+    std::string error = "stale";
+    EXPECT_FALSE(loadModelForDraw("pine", sources, dir.cache, error).has_value());
+    EXPECT_TRUE(error.empty());
 }
 
-TEST(ModelCache, TrailingBytesFallBackToGlb)
+TEST(ModelCache, InGameLoadDoesNotChecksum)
 {
     CacheDir dir;
     dir.writeGlb("pine.glb", triangleGlb(1.0f));
     const std::vector<std::string> sources = { dir.source };
     ASSERT_EQ(prepareModelCache(sources, dir.cache, nullptr).converted, 1);
-
-    const std::vector<uint8_t> original = cacheBytes(dir, "pine");
-    std::vector<uint8_t> bytes = original;
-    bytes.push_back(0xAB);
-    writeU64(bytes, kModelCacheChecksumOffset, cacheFileChecksum(bytes.data(), bytes.size()));
-    const std::string cacheFile = OpenRCT2::Path::Combine(dir.cache, "pine.o3d");
-    OpenRCT2::File::WriteAllBytes(cacheFile, bytes.data(), bytes.size());
+    ASSERT_TRUE(modelIsValidated("pine"));
+    resetCacheChecksumPassCount();
 
     std::string error;
     const std::optional<CpuMesh> mesh = loadModelForDraw("pine", sources, dir.cache, error);
     ASSERT_TRUE(mesh.has_value()) << error;
     EXPECT_EQ(mesh->primitives.size(), 1u);
-    EXPECT_EQ(cacheBytes(dir, "pine"), original);
+    EXPECT_EQ(cacheChecksumPassCount(), 0u);
+
+    std::vector<uint8_t> bytes = cacheBytes(dir, "pine");
+    ASSERT_GT(bytes.size(), kFirstVertexZ + 4);
+    bytes[kFirstVertexZ] ^= 0xff;
+    const std::string cacheFile = OpenRCT2::Path::Combine(dir.cache, "pine.o3d");
+    OpenRCT2::File::WriteAllBytes(cacheFile, bytes.data(), bytes.size());
+    const std::optional<CpuMesh> corrupted = loadModelForDraw("pine", sources, dir.cache, error);
+    ASSERT_TRUE(corrupted.has_value()) << error;
+    EXPECT_EQ(corrupted->primitives.size(), 1u);
+    ASSERT_FALSE(corrupted->primitives[0].vertices.empty());
+    EXPECT_EQ(cacheChecksumPassCount(), 0u);
+    EXPECT_NE(corrupted->primitives[0].vertices[0].z, 1.0f * kGlbVerticalScale);
+}
+
+TEST(ModelCache, InGameHugeCountStaysBounded)
+{
+    CacheDir dir;
+    dir.writeGlb("pine.glb", triangleGlb(1.0f));
+    const std::vector<std::string> sources = { dir.source };
+    ASSERT_EQ(prepareModelCache(sources, dir.cache, nullptr).converted, 1);
+    resetCacheChecksumPassCount();
+
+    std::vector<uint8_t> bytes = cacheBytes(dir, "pine");
+    writeU32(bytes, kModelCachePrimitiveCountOffset, 1000000u);
+    const std::string cacheFile = OpenRCT2::Path::Combine(dir.cache, "pine.o3d");
+    OpenRCT2::File::WriteAllBytes(cacheFile, bytes.data(), bytes.size());
+
+    std::string error;
+    EXPECT_FALSE(loadModelForDraw("pine", sources, dir.cache, error).has_value());
+    EXPECT_FALSE(error.empty());
+    EXPECT_EQ(cacheChecksumPassCount(), 0u);
+    EXPECT_EQ(readU32(cacheBytes(dir, "pine"), kModelCachePrimitiveCountOffset), 1000000u);
+}
+
+TEST(ModelCache, InGameMissingAndShortFileFallBack)
+{
+    CacheDir dir;
+    dir.writeGlb("pine.glb", triangleGlb(1.0f));
+    const std::vector<std::string> sources = { dir.source };
+    ASSERT_EQ(prepareModelCache(sources, dir.cache, nullptr).converted, 1);
+    const std::string cacheFile = OpenRCT2::Path::Combine(dir.cache, "pine.o3d");
+    OpenRCT2::File::Delete(cacheFile);
+
+    std::string error;
+    EXPECT_FALSE(loadModelForDraw("pine", sources, dir.cache, error).has_value());
+    EXPECT_FALSE(error.empty());
+
+    const std::string tiny = "short";
+    OpenRCT2::File::WriteAllBytes(cacheFile, tiny.data(), tiny.size());
+    error.clear();
+    EXPECT_FALSE(loadModelForDraw("pine", sources, dir.cache, error).has_value());
+    EXPECT_FALSE(error.empty());
+}
+
+TEST(ModelCache, UnvalidatedIdFallsBack)
+{
+    std::string error = "stale";
+    EXPECT_FALSE(loadModelForDraw("not-prepared", {}, {}, error).has_value());
+    EXPECT_TRUE(error.empty());
+    EXPECT_FALSE(modelIsValidated("not-prepared"));
+}
+
+TEST(ModelCache, CaseFoldedDuplicateUsesDataDir)
+{
+    CacheDir data;
+    CacheDir user;
+    data.writeGlb("MyTree.glb", triangleGlb(1.0f));
+    user.writeGlb("mytree.glb", triangleGlb(4.0f));
+    const std::vector<std::string> sources = { data.source, user.source };
+
+    const ModelCacheStats first = prepareModelCache(sources, data.cache, nullptr);
+    EXPECT_EQ(first.converted, 1);
+    EXPECT_EQ(first.failed, 0);
+    EXPECT_TRUE(modelIsValidated("MyTree"));
+    EXPECT_FALSE(modelIsValidated("mytree"));
+    EXPECT_TRUE(OpenRCT2::File::Exists(OpenRCT2::Path::Combine(data.cache, "mytree.o3d")));
+
+    std::string error;
+    const std::optional<CpuMesh> mesh = loadModelForDraw("MyTree", sources, data.cache, error);
+    ASSERT_TRUE(mesh.has_value()) << error;
+    EXPECT_NEAR(mesh->primitives[0].vertices[0].z, 1.0f * kGlbVerticalScale, 1.0e-4f);
+
+    const ModelCacheStats second = prepareModelCache(sources, data.cache, nullptr);
+    EXPECT_EQ(second.converted, 0);
+    EXPECT_EQ(second.skipped, 1);
+}
+
+TEST(ModelCache, StartupChecksumOfTenThousand)
+{
+    CacheDir dir;
+    dir.writeGlb("pine.glb", triangleGlb(1.0f));
+    const std::vector<std::string> sources = { dir.source };
+    ASSERT_EQ(prepareModelCache(sources, dir.cache, nullptr).converted, 1);
+    const std::vector<uint8_t> bytes = cacheBytes(dir, "pine");
+    constexpr int32_t kCount = 10000;
+    std::vector<std::string> paths;
+    paths.reserve(kCount);
+    for (int32_t i = 0; i < kCount; i++)
+    {
+        const std::string path = OpenRCT2::Path::Combine(dir.cache, "m" + std::to_string(i) + ".o3d");
+        OpenRCT2::File::WriteAllBytes(path, bytes.data(), bytes.size());
+        paths.push_back(path);
+    }
+#ifdef __linux__
+    for (const std::string& path : paths)
+    {
+        const int fd = open(path.c_str(), O_RDONLY);
+        if (fd >= 0)
+        {
+            posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);
+            close(fd);
+        }
+    }
+    // Optional. The unit-test user usually cannot drop the page cache; a
+    // measurement run sets O3D_DROP_CACHE=1 and is allowed to write drop_caches.
+    if (const char* drop = std::getenv("O3D_DROP_CACHE"); drop != nullptr && drop[0] == '1')
+    {
+        sync();
+        const int fd = open("/proc/sys/vm/drop_caches", O_WRONLY);
+        if (fd >= 0)
+        {
+            const char three[] = "3\n";
+            if (write(fd, three, 2) == 2)
+            {
+                std::printf("o3d checksum dropped page cache\n");
+            }
+            close(fd);
+        }
+    }
+#endif
+    resetCacheChecksumPassCount();
+    const auto coldStart = std::chrono::steady_clock::now();
+    for (const std::string& path : paths)
+    {
+        ASSERT_TRUE(cacheChecksumMatchesFile(path));
+    }
+    const auto coldUs = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - coldStart)
+                            .count();
+    const auto warmStart = std::chrono::steady_clock::now();
+    for (const std::string& path : paths)
+    {
+        ASSERT_TRUE(cacheChecksumMatchesFile(path));
+    }
+    const auto warmUs = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - warmStart)
+                            .count();
+    EXPECT_EQ(cacheChecksumPassCount(), static_cast<uint64_t>(kCount) * 2u);
+    std::printf(
+        "o3d checksum %d files bytes=%zu cold_us=%lld warm_us=%lld per_cold_us=%.3f per_warm_us=%.3f\n", kCount, bytes.size(),
+        static_cast<long long>(coldUs), static_cast<long long>(warmUs), static_cast<double>(coldUs) / kCount,
+        static_cast<double>(warmUs) / kCount);
+}
+
+static bool filesystemKeepsSubSecondMtime()
+{
+    CacheDir dir;
+    dir.writeGlb("probe.glb", triangleGlb(1.0f));
+    const std::string path = OpenRCT2::Path::Combine(dir.source, "probe.glb");
+    const uint64_t base = cacheSourceModifiedNs(path);
+    const uint64_t want = (base / 1000000000uLL) * 1000000000uLL + 111111111uLL;
+    if (!setModifiedNs(path, want))
+    {
+        return false;
+    }
+    return cacheSourceModifiedNs(path) == want;
 }
 
 TEST(ModelCache, MtimeOnlyChangeRefreshesStamp)
@@ -519,6 +679,10 @@ TEST(ModelCache, MtimeOnlyChangeRefreshesStamp)
 
 TEST(ModelCache, SameSecondEditIsNotStale)
 {
+    if (!filesystemKeepsSubSecondMtime())
+    {
+        GTEST_SKIP() << "filesystem rounds modification times to whole seconds";
+    }
     CacheDir dir;
     dir.writeGlb("pine.glb", triangleGlb(1.0f));
     const std::vector<std::string> sources = { dir.source };
@@ -536,6 +700,9 @@ TEST(ModelCache, SameSecondEditIsNotStale)
     ASSERT_EQ(updated / 1000000000uLL, second);
     ASSERT_NE(updated, stored);
 
+    const ModelCacheStats stats = prepareModelCache(sources, dir.cache, nullptr);
+    EXPECT_EQ(stats.converted, 1);
+    EXPECT_EQ(stats.skipped, 0);
     std::string error;
     const std::optional<CpuMesh> mesh = loadModelForDraw("pine", sources, dir.cache, error);
     ASSERT_TRUE(mesh.has_value()) << error;

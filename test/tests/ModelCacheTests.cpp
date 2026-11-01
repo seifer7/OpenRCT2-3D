@@ -711,3 +711,42 @@ TEST(ModelCache, SameSecondEditIsNotStale)
     ASSERT_TRUE(mesh.has_value()) << error;
     EXPECT_NEAR(mesh->primitives[0].vertices[0].z, 2.0f * kGlbVerticalScale, 1.0e-4f);
 }
+
+TEST(ModelCache, WarmStartSizeAndMtimeOfTenThousand)
+{
+    const char* flag = std::getenv("O3D_WARM_BENCH");
+    if (flag == nullptr || std::strcmp(flag, "1") != 0)
+    {
+        GTEST_SKIP() << "set O3D_WARM_BENCH=1 to time 10000 size+mtime matches";
+    }
+    CacheDir dir;
+    const std::vector<uint8_t> glb = triangleGlb(1.0f);
+    constexpr int32_t kCount = 10000;
+    for (int32_t i = 0; i < kCount; i++)
+    {
+        dir.writeGlb("m" + std::to_string(i) + ".glb", glb);
+    }
+    const std::vector<std::string> sources = { dir.source };
+    const ModelCacheStats built = prepareModelCache(sources, dir.cache, nullptr);
+    ASSERT_EQ(built.converted, kCount);
+
+    // Bodies the size of the 698 MB real set. Each file keeps its own header.
+    // The warm path reads that header only, so the extra bytes must not be hashed.
+    for (int32_t i = 0; i < kCount; i++)
+    {
+        const std::string path = OpenRCT2::Path::Combine(dir.cache, "m" + std::to_string(i) + ".o3d");
+        std::vector<uint8_t> padded = OpenRCT2::File::ReadAllBytes(path);
+        padded.resize(70u * 1024u, 0);
+        OpenRCT2::File::WriteAllBytes(path, padded.data(), padded.size());
+    }
+
+    resetCacheChecksumPassCount();
+    const auto warmStart = std::chrono::steady_clock::now();
+    const ModelCacheStats warm = prepareModelCache(sources, dir.cache, nullptr);
+    const auto warmUs = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - warmStart)
+                            .count();
+    EXPECT_EQ(warm.skipped, kCount);
+    EXPECT_EQ(warm.converted, 0);
+    EXPECT_EQ(cacheChecksumPassCount(), 0u);
+    std::printf("o3d size+mtime warm files=%d warm_us=%lld checksum_passes=0\n", kCount, static_cast<long long>(warmUs));
+}

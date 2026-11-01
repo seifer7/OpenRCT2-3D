@@ -399,7 +399,8 @@ namespace OpenRCT2::View3D
             const uint32_t version = reader.u32();
             if (checkChecksum && version != kModelCacheVersion)
             {
-                error = kOldCacheVersion;
+                error = (version >= 1 && version < kModelCacheVersion) ? kOldCacheVersion
+                                                                       : "cache version does not match this build";
                 return std::nullopt;
             }
             SourceStamp stamp;
@@ -613,8 +614,10 @@ namespace OpenRCT2::View3D
                 const uint32_t version = reader.u32();
                 if (version != kModelCacheVersion)
                 {
-                    // A bit-flipped or newer version is not "an older format".
-                    header.error = version < kModelCacheVersion ? kOldCacheVersion : "cache version is newer than this build";
+                    // Versions 1..3 are the formats this branch wrote. Zero and any
+                    // other value are a bit flip or a newer build, not "an older format".
+                    const bool knownOlder = version >= 1 && version < kModelCacheVersion;
+                    header.error = knownOlder ? kOldCacheVersion : "cache version does not match this build";
                     return header;
                 }
                 if (length < kModelCacheHeaderBytes)

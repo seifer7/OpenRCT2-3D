@@ -434,6 +434,15 @@ TEST(SceneryScale, PngBombIsRejectedBeforeDecode)
     EXPECT_TRUE(mesh.images[0].rgba.empty());
 }
 
+TEST(SceneryScale, HandleCapFallsBackToSpriteNotWhite)
+{
+    EXPECT_EQ(placementDraw(true, true, false), PlacementDraw::model);
+    EXPECT_EQ(placementDraw(true, true, true), PlacementDraw::model);
+    EXPECT_EQ(placementDraw(true, false, false), PlacementDraw::waiting);
+    EXPECT_EQ(placementDraw(true, false, true), PlacementDraw::sprite);
+    EXPECT_EQ(placementDraw(false, false, false), PlacementDraw::sprite);
+}
+
 TEST(SceneryScale, RemapColoursReachTheSpriteImage)
 {
     const ImageId painted = sceneryRemapImage(ImageId(40), true, 5, true, 9, false, 0);

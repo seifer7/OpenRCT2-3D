@@ -120,6 +120,9 @@ namespace OpenRCT2::View3D::Park
         std::vector<std::string> _typeIds;
         std::unordered_map<std::string, uint32_t> _typeIndex;
         std::unordered_map<uint32_t, int32_t> _gpu;
+        // Upload failed after eviction. Draw the X-sprite and try the model again.
+        // This is not _gpu[key] = -1: a later frame can still admit the mesh.
+        std::unordered_set<uint32_t> _spriteFallback;
         std::unique_ptr<ModelLoadQueue> _loads;
         std::mutex _dirtyMutex;
         std::vector<std::pair<int32_t, int32_t>> _dirtyTiles;
@@ -327,6 +330,11 @@ namespace OpenRCT2::View3D::Park
             }
             const SpriteQuad quad = makeDirectionSpriteQuad(face, g1->width, g1->height, g1->xOffset, g1->yOffset);
             const int32_t handle = meshDrawUploadSprite(quad, _rgba.data(), width, height);
+            if (handle < 0)
+            {
+                // Handle cap or a full atlas. Do not remember the miss: a later frame may fit.
+                return -1;
+            }
             _spriteHandles.emplace(key, handle);
             return handle;
         }
@@ -597,6 +605,7 @@ namespace OpenRCT2::View3D::Park
                 if (handle >= 0)
                 {
                     _gpu[key] = handle;
+                    _spriteFallback.erase(key);
                     _vram.insert(key, meshBytes, _frame);
                     std::fprintf(
                         stderr, "View3D: loaded scenery model %s (%zu primitives)\n", identifier.c_str(),
@@ -604,6 +613,9 @@ namespace OpenRCT2::View3D::Park
                 }
                 else
                 {
+                    // Not stored as _gpu[key] = -1. The next frame asks again, and the
+                    // placement draws the X-sprite until a retry fits.
+                    _spriteFallback.insert(key);
                     _loads->forget(identifier);
                     if (_loggedUploadFail.insert(identifier).second)
                     {
@@ -636,23 +648,29 @@ namespace OpenRCT2::View3D::Park
                     }
                     for (const ChunkPlacement& placement : chunk->placements)
                     {
+                        bool resident = false;
                         int32_t modelHandle = -1;
                         if (placement.modelCandidate)
                         {
                             const auto gpu = _gpu.find(placement.typeKey);
                             if (gpu != _gpu.end() && gpu->second >= 0)
                             {
+                                resident = true;
                                 modelHandle = gpu->second;
                                 _vram.touch(placement.typeKey, _frame);
                             }
-                            else if (gpu == _gpu.end() && placement.typeKey < _typeIds.size())
+                            else if (placement.typeKey < _typeIds.size())
                             {
                                 toLoad.push_back(_typeIds[placement.typeKey]);
-                                // Still loading. Do not upload the four sprite faces.
-                                continue;
                             }
                         }
-                        if (modelHandle >= 0)
+                        const bool uploadFailed = _spriteFallback.find(placement.typeKey) != _spriteFallback.end();
+                        const PlacementDraw kind = placementDraw(placement.modelCandidate, resident, uploadFailed);
+                        if (kind == PlacementDraw::waiting)
+                        {
+                            continue;
+                        }
+                        if (kind == PlacementDraw::model)
                         {
                             const auto found = _modelBatches.find(placement.typeKey);
                             size_t index;
@@ -746,6 +764,7 @@ namespace OpenRCT2::View3D::Park
         _typeIds.clear();
         _typeIndex.clear();
         _gpu.clear();
+        _spriteFallback.clear();
         _vram = LruBudget(kDefaultVramBudgetBytes);
         _frame = 0;
         std::lock_guard<std::mutex> guard(_dirtyMutex);

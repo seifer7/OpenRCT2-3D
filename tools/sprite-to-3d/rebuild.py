@@ -5,8 +5,10 @@
 
   python3 tools/sprite-to-3d/rebuild.py \\
       --object rct2.scenery_small.tcrp \\
-      --rct2-data-path /path/to/rct2 \\
-      --out data/object-models
+      --rct2-data-path /path/to/rct2
+
+Output goes to tools/sprite-to-3d/out unless --out is set. Overwriting
+data/object-models/<id>.glb or .meta.json also requires --force.
 
 The atlas is coloured from Data/g1.dat. Sprites are extracted into
 tools/sprite-to-3d/cache (gitignored) and used only for the IoU check.
@@ -124,7 +126,7 @@ def write_meta(path, spec, params, tiles, mesh, palette_source, sprite_meta, glb
             "image_indices": spec["direction_images"],
             "offsets": offsets,
         },
-        "alignment": spec.get("alignment") or {"sprite_shift": [0, 0], "sprite_y_nudge": -1},
+        "alignment": spec["alignment"],
         "units": {
             "blender_unit_per_tile": 1,
             "sim_units_per_tile": 32,
@@ -197,6 +199,21 @@ def write_meta(path, spec, params, tiles, mesh, palette_source, sprite_meta, glb
     return meta
 
 
+def _refuse_protected_overwrite(path, force):
+    """Block silent replacement of a model that already ships in data/object-models."""
+    protected = os.path.realpath(os.path.join(REPO_ROOT, "data", "object-models"))
+    target = os.path.realpath(path)
+    if os.path.dirname(target) != protected or not os.path.exists(path):
+        return
+    if force:
+        print(f"overwriting {path} because --force was passed")
+        return
+    raise SystemExit(
+        f"{path} already exists. Rebuild writes to tools/sprite-to-3d/out by default. "
+        "Pass --force to overwrite data/object-models/<id>.glb or <id>.meta.json."
+    )
+
+
 def main(argv):
     parser = argparse.ArgumentParser(description="Rebuild a sprite-to-3D example object.")
     parser.add_argument("--object", default="rct2.scenery_small.tcrp")
@@ -205,7 +222,15 @@ def main(argv):
     parser.add_argument("--palette", help="palette file, used only when Data/g1.dat is not available")
     parser.add_argument("--palette-base", type=int, default=0, help="palette index of the first colour in --palette")
     parser.add_argument("--palette-header", action="store_true", help="colour the atlas from ImageImporter.h StandardPalette")
-    parser.add_argument("--out", help="directory for <id>.glb and <id>.meta.json (flat, default data/object-models)")
+    parser.add_argument(
+        "--out",
+        help="directory for <id>.glb and <id>.meta.json (default tools/sprite-to-3d/out, gitignored)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing data/object-models/<id>.glb or .meta.json",
+    )
     parser.add_argument("--no-blender", action="store_true", help="export the GLB with the Python writer")
     parser.add_argument("--skip-validate", action="store_true")
     args = parser.parse_args(argv)
@@ -215,9 +240,12 @@ def main(argv):
     params = _read(os.path.join(example, "params.json"))
     if spec["archetype"] != "conifer":
         raise SystemExit(f"rebuild.py currently builds the conifer archetype, not {spec['archetype']}")
-    # Flat layout: data/object-models/<id>.glb and <id>.meta.json. The loader
-    # does not search subfolders. The atlas is only a build intermediate.
-    out_dir = args.out or os.path.join(REPO_ROOT, "data", "object-models")
+    alignment = spec.get("alignment") or {}
+    if "sprite_shift" not in alignment or "sprite_y_nudge" not in alignment:
+        raise SystemExit("object.json alignment needs sprite_shift and sprite_y_nudge; there is no default paste")
+    # Flat files. The default directory is gitignored so a rebuild cannot
+    # replace the approved GLB in data/object-models unless --force is set.
+    out_dir = args.out or os.path.join(TOOL_DIR, "out")
     os.makedirs(out_dir, exist_ok=True)
     build_dir = os.path.join(TOOL_DIR, "out", "build")
     os.makedirs(build_dir, exist_ok=True)
@@ -244,6 +272,9 @@ def main(argv):
     print(f"mesh triangles {count}")
 
     glb_path = os.path.join(out_dir, spec["object_id"] + ".glb")
+    meta_path = os.path.join(out_dir, spec["object_id"] + ".meta.json")
+    _refuse_protected_overwrite(glb_path, args.force)
+    _refuse_protected_overwrite(meta_path, args.force)
     params_path = os.path.join(example, "params.json")
     used_blender = not args.no_blender and blender_bin()
     if not used_blender:
@@ -259,7 +290,6 @@ def main(argv):
     patch(glb_path)
     print(f"patched samplers on {glb_path}")
 
-    meta_path = os.path.join(out_dir, spec["object_id"] + ".meta.json")
     write_meta(
         meta_path, spec, params, atlas["tiles"], mesh, palette_source, sprite_meta,
         os.path.basename(glb_path), exporter,

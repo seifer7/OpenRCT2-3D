@@ -8,7 +8,7 @@
       --params tools/sprite-to-3d/examples/rct2.scenery_small.tcrp/params.json \\
       --atlas tools/sprite-to-3d/out/build/rct2.scenery_small.tcrp.atlas.png \\
       --atlas-json tools/sprite-to-3d/out/build/rct2.scenery_small.tcrp.atlas.json \\
-      --out data/object-models
+      --out tools/sprite-to-3d/out
 
 Scale: 1 Blender unit = 1 tile = 32 sim units on every axis.
 Origin: tile centre, z = 0 at the element base. Blender +Z up.

@@ -27,11 +27,10 @@ From the repository root, with the venv active:
 ```bash
 python3 tools/sprite-to-3d/rebuild.py \
   --object rct2.scenery_small.tcrp \
-  --rct2-data-path /path/to/rct2 \
-  --out data/object-models
+  --rct2-data-path /path/to/rct2
 ```
 
-That writes `data/object-models/rct2.scenery_small.tcrp.glb` and `rct2.scenery_small.tcrp.meta.json`. The atlas PNG and tile JSON stay in `tools/sprite-to-3d/out/build/` (gitignored). The command:
+The default output directory is `tools/sprite-to-3d/out/` (gitignored): `<id>.glb` and `<id>.meta.json` land there, and the atlas intermediates stay in `tools/sprite-to-3d/out/build/`. That default does not touch `data/object-models/`. Replacing a GLB or meta that already ships there requires both `--out data/object-models` and `--force`. The command:
 
 1. Extracts `TCRP.DAT` into `tools/sprite-to-3d/cache/` (gitignored).
 2. Reads the palette from `Data/g1.dat` and paints the atlas. The pine's atlas matches that palette.
@@ -56,7 +55,11 @@ python3 tools/sprite-to-3d/validate.py \
   --out tools/sprite-to-3d/out/rct2.scenery_small.tcrp.review.png
 ```
 
-The review PNG pastes the original sprites beside the renders. It is gitignored (`*.review.png` and `tools/sprite-to-3d/out/`). Do not commit it.
+The review PNG pastes the original sprites beside the renders. It is gitignored (`*.review.png` and `tools/sprite-to-3d/out/`). Do not commit it. The meta must contain `alignment` (`sprite_shift` and `sprite_y_nudge`) or the validator refuses to score sprites. The pine's fitted alignment is `[-2, 0]` and `-1`. With that paste, IoU against the real TCRP sprites is 0.733, 0.712, 0.766, 0.687 (mean 0.725).
+
+```bash
+python3 -m pytest tools/sprite-to-3d
+```
 
 ## Other commands
 
@@ -78,7 +81,7 @@ blender -b -P tools/sprite-to-3d/build.py -- \
   --params tools/sprite-to-3d/examples/rct2.scenery_small.tcrp/params.json \
   --atlas tools/sprite-to-3d/out/build/rct2.scenery_small.tcrp.atlas.png \
   --atlas-json tools/sprite-to-3d/out/build/rct2.scenery_small.tcrp.atlas.json \
-  --out data/object-models
+  --out tools/sprite-to-3d/out
 ```
 
 Add `--views` for the four RCT-angle renders, or `--beauty` for the perspective previews. Both apply the Z squash only while rendering.

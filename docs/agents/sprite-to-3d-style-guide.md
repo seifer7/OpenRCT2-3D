@@ -126,7 +126,7 @@ Silhouette IoU is the overlap of opaque pixels (`alpha > 0` on the sprite, `alph
 
 ### Matching footprint and height
 
-- **Height.** The declared `height_sim` is the object's logical height (the DAT height byte for small scenery; the pine is 134). The top of the mesh, in Blender Z, should land on `height_sim / 32`. The pine's tip is exactly 4.1875. Foliage may pass the tip by a small amount; the validator allows 0.2 units. The placed sprite's vertical span and the render's vertical span must stay within a ratio of 0.7 to 1.35. A model that is twice as tall fails this outright.
+- **Height.** The declared `height_sim` is the object's logical height (the DAT height byte for small scenery; the pine is 134). The top of the mesh, in Blender Z, should land on `height_sim / 32`. The pine's tip is exactly 4.1875. When sprites are supplied, the validator measures tip height upward from the z=0 anchor row. It does not use the bottom of the mask, so the sunk trunk is not part of the height. The comparison render already includes the Z squash, so one pixel is one sim unit. The four sprites do not share one tip (their y offsets differ by a few pixels). The check is the rendered tip against the tallest sprite tip, within ±2 sim. Per-view deltas are notes.
 - **Footprint.** `footprint_tiles` is the tile rectangle the object occupies. The horizontal AABB must sit inside that rectangle expanded by `max_overhang_tiles`. Trees overhang. The pine is a 1×1 tile with overhang 0.4, and its foliage reaches about 0.31 tiles past the tile edge. The trunk and the origin stay inside the tile. The AABB must contain the origin in both horizontal axes.
 - **Base.** Some geometry must reach Z = 0 (or the declared sink just below it). A floating tree fails.
 
@@ -228,8 +228,8 @@ Every numeric cap is in `tools/sprite-to-3d/conventions.py` (`SIZE_CLASSES` and 
 | `prop_tile` | Full-tile prop that is not a tree | Same file limits as a small object. A short prop may use fewer than 600 triangles; that lower bound is a warning for trees only. |
 | `tree_small` | One-tile tree shorter than the pine | Canopy may reach ±0.85 units. Atlas stays 128². |
 | `tree_1tile` | One-tile tree the size of the pine | Canopy class. The target band is 600–1200 triangles and the hard cap is the file maximum. 256² is allowed for this class only with a written `texture.justification`, or for the pine object id, which is the reference exception. |
-| `tree_large` | Taller or wider tree, still one mesh | Same file cap as `tree_1tile`. A bigger tree does not get more triangles or a 512² atlas; it spends the same budget on a larger silhouette. Canopy allowance applies. 256² needs a justification. |
-| `large_scenery` | Multi-tile scenery, one mesh for the whole footprint | The file cap does not multiply by the tile count. A four-tile object still has to fit the same triangle cap and the same 256² ceiling, so the practical share is that cap divided by the number of tiles. One mesh is one draw. 256² needs a justification. |
+| `tree_large` | Taller or wider tree, still one mesh | Deliberately capped at the same 1500 triangles and 256² atlas as a 1-tile tree for now. A bigger tree does not get a larger file. Canopy allowance applies. 256² needs a justification. |
+| `large_scenery` | Multi-tile scenery, one mesh for the whole footprint | Deliberately capped at 1500 triangles and 256² for now, the same file ceiling as one tile. Multi-tile large scenery will need its own per-tile budget later; until then the cap does not grow with the footprint. 256² needs a justification. |
 
 New models use a 128² atlas. 256² is the pine's atlas and the ceiling, not the default. A 256² RGBA texture is about 256 KB before the GPU rounds it up (about 328 KB), which dominates VRAM once thousands of distinct models are loaded. The validator warns when a new model is above 128² unless `texture.justification` is a non-empty string. The pine object id is the exception and does not warn.
 

@@ -17,9 +17,7 @@ import argparse
 import json
 import math
 import os
-import subprocess
 import sys
-import tempfile
 
 import numpy as np
 
@@ -113,24 +111,69 @@ def _object_id(meta, glb_path):
     return name[:-4] if name.endswith(".glb") else name
 
 
-def _size_class_name(meta, object_id):
-    if meta.get("size_class") in C.SIZE_CLASSES:
-        return meta["size_class"]
-    text = " ".join(
-        str(meta.get(key) or "") for key in ("object", "display_name", "archetype")
-    ).lower()
-    if object_id == C.PINE_OBJECT_ID or "pine" in text or "conifer" in text or "tree" in text:
-        return "tree_1tile"
-    return "prop_tile"
+def _size_class_budget(meta):
+    """Return (name, budget) or (None, None). Canopy comes only from the class table."""
+    name = meta.get("size_class")
+    if name not in C.SIZE_CLASSES:
+        return None, None
+    return name, C.SIZE_CLASSES[name]
 
 
-def _is_canopy(meta, object_id, size_name):
-    if (C.SIZE_CLASSES.get(size_name) or {}).get("canopy"):
-        return True
-    if object_id == C.PINE_OBJECT_ID:
-        return True
-    text = str(meta.get("object") or "").lower()
-    return "pine" in text or "tree" in text
+def alignment_of(meta):
+    """Return (shift_xy, y_nudge) or None when the meta does not declare alignment.
+
+    There is no default. A missing block used to paste sprites at shift (0, 0)
+    and the pine's IoU fell from 0.725 to about 0.67.
+    """
+    alignment = meta.get("alignment")
+    if not isinstance(alignment, dict):
+        return None
+    shift = alignment.get("sprite_shift")
+    nudge = alignment.get("sprite_y_nudge")
+    if not isinstance(shift, (list, tuple)) or len(shift) != 2 or nudge is None:
+        return None
+    return [float(shift[0]), float(shift[1])], float(nudge)
+
+
+def tip_height_sim(mask, anchor_y):
+    """Sim height of the top opaque row above the z=0 anchor row.
+
+    The comparison rasteriser applies the render-only Z squash, so one pixel
+    in this image is already one sim Z unit. Do not scale by 1/sqrt(2/3) again.
+    The mask bottom is ignored: a trunk sunk below z=0 must not add to the tip.
+    """
+    image = np.asarray(mask)
+    opaque = image[..., 3] > 0 if image.ndim == 3 else image.astype(bool)
+    rows = np.nonzero(opaque.any(axis=1))[0]
+    if len(rows) == 0:
+        return None
+    return float(anchor_y) - float(rows[0])
+
+
+def sprite_anchor_y(shift, nudge):
+    """Row where the sprite's draw anchor lands after the fitted paste."""
+    return C.ORIGIN_PIXEL[1] + float(nudge) - float(shift[1])
+
+
+def compare_tip_heights(render_masks, sprite_masks, shift, nudge):
+    """Model tip against the tallest sprite tip, both above their anchor rows.
+
+    Returns ok, model_tip, tallest_sprite_tip, per-view (sprite_tip, render_tip, delta).
+    delta is render tip minus sprite tip, in sim units.
+    """
+    render_y = C.ORIGIN_PIXEL[1]
+    sprite_y = sprite_anchor_y(shift, nudge)
+    rows = []
+    for view in range(4):
+        sprite_tip = tip_height_sim(sprite_masks[view], sprite_y)
+        render_tip = tip_height_sim(render_masks[view], render_y)
+        if sprite_tip is None or render_tip is None:
+            return False, None, None, rows
+        rows.append((sprite_tip, render_tip, render_tip - sprite_tip))
+    model_tip = max(item[1] for item in rows)
+    tallest_sprite = max(item[0] for item in rows)
+    ok = abs(model_tip - tallest_sprite) <= C.HEIGHT_TOLERANCE_SIM
+    return ok, model_tip, tallest_sprite, rows
 
 
 def _height_sim(meta):
@@ -355,8 +398,19 @@ def render_and_score(mesh, meta, sprites_dir, out_path, report, require_iou):
     placed = None
     ious = None
     if sprites_dir:
-        shift = meta.get("alignment", {}).get("sprite_shift", [0, 0])
-        nudge = meta.get("alignment", {}).get("sprite_y_nudge", -1)
+        alignment = alignment_of(meta)
+        if alignment is None:
+            report.row(
+                "alignment",
+                "FAIL",
+                "meta.alignment.sprite_shift and sprite_y_nudge are required when --sprites is set; "
+                "there is no default paste",
+            )
+            if out_path:
+                write_review(out_path, renders, None)
+                report.note(f"wrote {out_path}")
+            return None
+        shift, nudge = alignment
         loaded = load_sprite_folder(sprites_dir)
         placed = [place_sprite(s, shift, nudge) for s in loaded]
         ious = []
@@ -372,29 +426,32 @@ def render_and_score(mesh, meta, sprites_dir, out_path, report, require_iou):
             "PASS" if iou_ok else "FAIL",
             f"views {[round(s, 3) for s in ious]} mean {mean:.3f}",
         )
-        # Pixel-area ratio of the render mask to the placed sprite. 1 px = 1 sim unit
-        # in this projection, so the spans are also the height check against the sprite.
         ratios = []
-        height_ok = True
         for view in range(4):
             sprite_px = int(np.count_nonzero(placed[view][..., 3] > 0))
             render_px = int(np.count_nonzero(renders[view][..., 3] > 0))
             ratios.append(render_px / sprite_px if sprite_px else 0)
-            span_s = _span(placed[view][..., 3] > 0)[1]
-            span_r = _span(renders[view][..., 3] > 0)[1]
-            if abs(span_r - span_s) > C.HEIGHT_TOLERANCE_SIM:
-                height_ok = False
         ratio_ok = all(C.AREA_RATIO[0] <= r <= C.AREA_RATIO[1] for r in ratios)
         report.row(
             "area ratio",
             "PASS" if ratio_ok else "FAIL",
             ", ".join(f"{r:.2f}" for r in ratios),
         )
-        report.row(
-            "height vs sprite",
-            "PASS" if height_ok else "FAIL",
-            f"vertical spans within ±{C.HEIGHT_TOLERANCE_SIM:.0f} sim",
-        )
+        ok, model_tip, tallest, rows = compare_tip_heights(renders, placed, shift, nudge)
+        for view, (sprite_tip, render_tip, delta) in enumerate(rows):
+            report.note(
+                f"view {view} tip above anchor: sprite {sprite_tip:.1f} sim, "
+                f"render {render_tip:.1f} sim, delta {delta:+.1f}"
+            )
+        if model_tip is None:
+            report.row("height vs sprite", "FAIL", "a view has an empty silhouette")
+        else:
+            report.row(
+                "height vs sprite",
+                "PASS" if ok else "FAIL",
+                f"model tip {model_tip:.1f} sim vs tallest sprite tip {tallest:.1f} sim "
+                f"(±{C.HEIGHT_TOLERANCE_SIM:.0f}; squash already in the render)",
+            )
         declared = (meta.get("iou") or {}).get("views")
         if declared and len(declared) == 4:
             # Stored figures are the approved measurement. A fresh rasteriser will not
@@ -423,9 +480,15 @@ def apply_checklist(report, glb_path, meta, mesh):
     """Enforce the model-style checklist. Numbers come from conventions.py."""
     gltf = mesh["gltf"]
     object_id = _object_id(meta, glb_path)
-    size_name = _size_class_name(meta, object_id)
-    budget = C.SIZE_CLASSES[size_name]
-    canopy = _is_canopy(meta, object_id, size_name)
+    size_name, budget = _size_class_budget(meta)
+    if budget is None:
+        known = ", ".join(sorted(C.SIZE_CLASSES))
+        report.row("size_class", "FAIL", f"{meta.get('size_class')!r} is missing or not one of: {known}")
+        budget = {"hard_tris": C.MAX_TRIANGLES, "max_texture": C.MAX_TEXTURE, "tree_warn_below": None}
+        canopy = False
+    else:
+        report.row("size_class", "PASS", size_name)
+        canopy = bool(budget["canopy"])
 
     def mark(name, ok, detail, warn=False):
         if ok:
@@ -592,35 +655,15 @@ def _print_report(report, title=None):
         print(f"validator: fail ({len(report.errors)} errors, {len(report.warnings)} warnings)")
 
 
-def _git_show(ref, path):
-    try:
-        return subprocess.check_output(["git", "show", f"{ref}:{path}"], cwd=REPO_ROOT, stderr=subprocess.DEVNULL)
-    except subprocess.CalledProcessError:
-        return None
-
-
 def _approved_pair():
-    """PR #6's flat pine, if this checkout has it or the branch ref is present."""
+    """The flat pine on this checkout. Nothing is fetched from another branch."""
     if os.path.isfile(FLAT_GLB) and os.path.isfile(FLAT_META):
         return FLAT_GLB, FLAT_META
-    ref = "origin/cursor/scenery-glb-milestone-1ca6"
-    glb = _git_show(ref, f"data/object-models/{PINE_ID}.glb")
-    meta = _git_show(ref, f"data/object-models/{PINE_ID}.meta.json")
-    if glb is None or meta is None:
-        return None
-    folder = tempfile.mkdtemp(prefix="approved-pine-")
-    glb_path = os.path.join(folder, PINE_ID + ".glb")
-    meta_path = os.path.join(folder, PINE_ID + ".meta.json")
-    open(glb_path, "wb").write(glb)
-    open(meta_path, "wb").write(meta)
-    return glb_path, meta_path
+    return None
 
 
 def self_test():
     """Build the pine with this pipeline and validate it, then the approved GLB."""
-    import test_rct2dat
-
-    test_rct2dat.run()
     error = pixels_match_rct()
     if error > 0.05:
         print(f"FAIL  projection  camera vs RCT formula error {error}")

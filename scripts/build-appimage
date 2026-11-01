@@ -12,6 +12,9 @@ linuxdeploy=/tmp/linuxdeploy-x86_64.AppImage
 curl -fLo $linuxdeploy https://github.com/TheAssassin/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
 chmod +x $linuxdeploy
 pushd bin
+    # appimagetool (linuxdeploy continuous, build 340 and later) will not invent
+    # .DirIcon from the SVG. The installed 256px PNG matches Icon=openrct2.
+    cp install/usr/share/icons/hicolor/256x256/apps/openrct2.png install/openrct2.png
     $linuxdeploy --appimage-extract-and-run --appdir install/ --output appimage --desktop-file install/usr/share/applications/io.openrct2.openrct2.desktop
 popd
 mkdir -p artifacts

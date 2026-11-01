@@ -17,4 +17,6 @@ This folder will also hold:
 - meshes, materials, and the camera
 - the pass that draws the original UI over the 3D park
 
+Small scenery is the first of those meshes. `ViewerScale.hpp` is the vertical scale. `GlbMesh.cpp` loads a GLB with cgltf. `SceneryDraw.cpp` instances that mesh, or draws the original four direction sprites on two crossed quads. Shipped models live in the OpenRCT2 data directory under `object-models/`, named by object id (`rct2.scenery_small.tcrp.glb` is the Corsican Pine). `preview/ModelPreview.cpp` renders one GLB offscreen.
+
 The game still simulates in `gameStateTick()` and still draws with the original 2D renderer unless the View menu option is on. See [docs/3d-viewer.md](../../docs/3d-viewer.md).

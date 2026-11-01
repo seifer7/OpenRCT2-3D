@@ -16,6 +16,7 @@
     <DataLanguagePath Condition="'$(DataLanguagePath)' == ''">$(SolutionDir)data\language\</DataLanguagePath>
     <DataShadersPath Condition="'$(DataShadersPath)' == ''">$(SolutionDir)data\shaders\</DataShadersPath>
     <DataScenarioPath Condition="'$(DataScenarioPath)' == ''">$(SolutionDir)data\scenario_patches\</DataScenarioPath>
+    <DataObjectModelsPath Condition="'$(DataObjectModelsPath)' == ''">$(SolutionDir)data\object-models\</DataObjectModelsPath>
     <ResourcesPath Condition="'$(ResourcesPath)' == ''">$(SolutionDir)resources\</ResourcesPath>
     <G2InputFile Condition="'$(G2InputFile)' == ''">$(ResourcesPath)g2\sprites.json</G2InputFile>
     <FontsInputFile Condition="'$(FontsInputFile)' == ''">$(ResourcesPath)fonts\sprites.json</FontsInputFile>
@@ -42,6 +43,10 @@
     <ScenarioPatchFiles Include="$(DataScenarioPath)**\*"
                         Exclude="$(DataScenarioPath)*.bak;
                                   $(DataScenarioPath)*.tmp" />
+
+    <ObjectModelFiles Include="$(DataObjectModelsPath)**\*"
+                      Exclude="$(DataObjectModelsPath)*.bak;
+                                $(DataObjectModelsPath)*.tmp" />
   </ItemGroup>
 
   <!-- Target Implementations -->
@@ -103,6 +108,26 @@
     <Message Text="Copied scenario patch: %(CopiedScenarioFiles.RecursiveDir)%(CopiedScenarioFiles.Filename)%(CopiedScenarioFiles.Extension)"
              Importance="high"
              Condition="'@(CopiedScenarioFiles)' != ''" />
+  </Target>
+
+  <Target Name="CopyObjectModels"
+          AfterTargets="Build"
+          Inputs="@(ObjectModelFiles)"
+          Outputs="@(ObjectModelFiles->'$(DataOutputPath)object-models\%(RecursiveDir)%(Filename)%(Extension)')">
+
+    <MakeDir Directories="@(ObjectModelFiles->'$(DataOutputPath)object-models\%(RecursiveDir)')" />
+
+    <Copy SourceFiles="@(ObjectModelFiles)"
+          DestinationFiles="@(ObjectModelFiles->'$(DataOutputPath)object-models\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          OverwriteReadOnlyFiles="true"
+          Retries="3">
+      <Output TaskParameter="CopiedFiles" ItemName="CopiedObjectModelFiles" />
+    </Copy>
+
+    <Message Text="Copied object model: %(CopiedObjectModelFiles.RecursiveDir)%(CopiedObjectModelFiles.Filename)%(CopiedObjectModelFiles.Extension)"
+             Importance="high"
+             Condition="'@(CopiedObjectModelFiles)' != ''" />
   </Target>
 
   <Target Name="BuildG2"

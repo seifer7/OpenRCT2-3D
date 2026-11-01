@@ -6,5 +6,7 @@ Project notes, memories, decisions, surveys, and other working documents live in
 - `project-context.md` — project context, repo facts, and decisions
 - `repo-setup.md` — repository setup record
 - `scenery-sprites-angles-and-3d-view-survey.md` — scenery sprites, angles, and 3D view survey
+- `scenery-3d-milestone.md` — first scenery milestone: GLB loader, Corsican Pine, sprite-cross fallback
 - `glb-model-pipeline-recommendation.md` — GLB model pipeline recommendation
+- `sprite-to-3d-style-guide.md` — how to build scenery GLBs in the Corsican Pine style
 - [`qa/`](qa/README.md) — QA Officer: review process, model style checklist, and PR reviews

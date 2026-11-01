@@ -77,7 +77,9 @@ One tile is one unit on every axis, so one slope step (16) is half a vertical un
 
 The terrain and water mesh is rebuilt when a surface tile's height, slope, water, or surface type changes, and when remove base land or remove vertical faces is toggled. Other frames reuse the mesh already on the GPU. A later pass can rebuild the changed tiles instead of the whole park.
 
-Track and scenery have no 3D meshes today. A `TrackElement` identifies a piece, a direction, and a height. The extractor maps that triple onto a mesh prototype and a transform. Until real art exists, a missing piece is a coloured box or a camera-facing sprite from the existing `g1` images.
+Track has no 3D mesh today. A `TrackElement` identifies a piece, a direction, and a height. The extractor maps that triple onto a mesh prototype and a transform. Until real art exists, a missing piece is a coloured box or a camera-facing sprite from the existing `g1` images.
+
+Small scenery is drawn. An object with a GLB at `object-models/<object id>.glb` (under the OpenRCT2 data directory, or the user directory) is instanced from that mesh. The file is glTF Y-up. On load, `x = gx`, `y = -gz`, `z = gy * kGlbVerticalScale`, with the origin at the tile centre and Z = 0 at the tile base. `kLandStepHeight` in `src/openrct2-3d/src/ViewerScale.hpp` is the only vertical scale: one land step is 0.5 viewer units, so viewer Z is sim Z / 32, matching this mesh. A missing GLB is two crossed vertical quads, one face for each `image + direction` sprite. Large scenery, walls, entrances, animation, and remap masks are not drawn yet. See `docs/agents/scenery-3d-milestone.md`.
 
 ## View switch
 

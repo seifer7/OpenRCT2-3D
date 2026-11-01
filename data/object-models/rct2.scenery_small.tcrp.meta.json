@@ -1,0 +1,424 @@
+{
+ "object": "TCRP (Corsican Pine) small scenery, 3D model v2",
+ "version": 2,
+ "generated": "2026-11-01 (AEST, UTC+10)",
+ "previous_version": "v1/ (kept unchanged)",
+ "units_and_scale": {
+  "convention": "uniform sim/32 on all three axes: 1 Blender unit (BU) = 1 tile (32 sim XY units); land step (16 sim z) = 0.5 BU",
+  "origin": "tile centre in XY, z=0 at the tile base (ground)",
+  "axes": "Blender/OBJ-source: Z up. GLB is glTF Y-up (exporter export_yup); convert on load with x=gx, y=-gz, z=gy. OBJ written Y-up, -Z forward",
+  "object_scale": "1.0 (scale applied; no squash in any exported file)",
+  "bbox_BU": {
+   "min": [
+    -0.8118478655815125,
+    -0.7291622161865234,
+    -0.09375
+   ],
+   "max": [
+    0.675508975982666,
+    0.6902368068695068,
+    4.1875
+   ],
+   "size": [
+    1.4874,
+    1.4194,
+    4.2812
+   ]
+  },
+  "bbox_sim": {
+   "min": [
+    -25.98,
+    -23.33,
+    -3.0
+   ],
+   "max": [
+    21.62,
+    22.09,
+    134.0
+   ]
+  },
+  "height_note": "trunk tip at sim z 134 = 4.1875 BU; trunk base sunk to sim z -3 (-0.094 BU) so it never floats on uneven land (same as v1)"
+ },
+ "render_only_z_squash": {
+  "KZ": 0.816497,
+  "formula": "sqrt(2/3)",
+  "why": "RCT dimetric projection draws 1 sim z unit as 1 screen px while XY tiles are 32 px wide per 32 sim; an orthographic camera matching the RCT angle needs Z scaled by sqrt(2/3) for heights to match the sprite pixel-for-pixel",
+  "used_in": [
+   "_render/view0-3.png",
+   "compare_views.png",
+   "beauty_squashed_ref.png"
+  ],
+  "never_in": [
+   "TCRP.glb",
+   "TCRP.obj",
+   "TCRP.blend"
+  ]
+ },
+ "rct_view_match": {
+  "projection": "rotate (x,y) by view: 0:(x,y) 1:(y,-x) 2:(-x,-y) 3:(-y,x); screen=(y'-x', (x'+y')/2 - z)",
+  "camera": "orthographic, direction (d0,d1,KZ) normalised with (d0,d1) = (1,1),(-1,1),(-1,-1),(1,-1) for views 0-3; 128x192 px, ortho_scale=192/(32*sqrt2), shift_y=64/192 so origin lands at pixel (64,160)",
+  "sprite_paste": "(x_offset+66, y_offset+159), includes SHIFT (-2,0)",
+  "antialiasing": "off (Workbench, render_aa OFF)"
+ },
+ "parkview_finding": {
+  "source": "OpenRCT2 develop ParkView.cpp (read, not modified)",
+  "facts": [
+   "kLandStepHeight = 0.5",
+   "worldZ = bigZ*(0.5/16) i.e. sim z/32, guarded by a static_assert",
+   "camera target = map coords/32; terrain 1 unit per tile, Z up",
+   "lookAt up (0,0,1), X negated, 30 deg depression, 50 deg FOV",
+   "scenery is not drawn yet: no model loader exists"
+  ],
+  "conclusion": "sim/32 models (Blender Z-up) match ParkView terrain as-is. Viewer still needs: a glTF loader (with Y-up -> Z-up conversion), placement at (tile+0.5, base z/32), alpha-test MASK (cutoff 0.5) with nearest filtering and no mipmaps, double-sided",
+  "visual_note": "A true 30-degree perspective view shows heights ~22% taller on screen than the RCT sprites (1.2247 px per sim z vs 1); this is expected and correct, not a model error",
+  "survey_doc_conflict": "docs/agents/scenery-sprites-angles-and-3d-view-survey.md line ~133 says model Z should be z/16, and line ~135 calls z/32 terrain-only; the ParkView code uses z/32 for terrain heights and kLandStepHeight 0.5, so z/16 would make models twice as tall as the terrain they stand on. v2 follows the code (z/32); the doc line should be corrected"
+ },
+ "geometry": {
+  "triangles": 864,
+  "budget": "600-1200 target, 1500 hard cap",
+  "vertices": {
+   "source_mesh/OBJ": 1137,
+   "GLB (after UV/normal splits)": 1908
+  },
+  "triangles_by_kind": {
+   "bark": 128,
+   "branch": 372,
+   "pad_top": 56,
+   "pad_side": 168,
+   "pad_under": 28,
+   "tuft": 112
+  },
+  "parts": [
+   "trunk: 8-sided flared tapered prism, 9 rings sim z -3..134, radius 4.4->0.5",
+   "14 foliage clumps, each: 4-sided tapered drooping main branch + 2 three-sided sub-branches; top card (48px pad tile), 6-card skirt ring leaning outward, underside card, crown card, 4 angled rim tufts",
+   "10 bare twigs (4-sided)"
+  ],
+  "clumps": [
+   {
+    "x": 9.207497847632734,
+    "y": 0.3895104929769675,
+    "z": 59.037312754863414,
+    "a": 8.011554282812101,
+    "b": 5.1370799750539495,
+    "th": -5.4228741437376105,
+    "ht": 3.0,
+    "hb": 6.769020854618784
+   },
+   {
+    "x": -7.958655610432649,
+    "y": -0.9276023207900401,
+    "z": 74.17599854742525,
+    "a": 9.23350333581369,
+    "b": 5.323058865011263,
+    "th": -6.267516140032486,
+    "ht": 5.261191372483994,
+    "hb": 3.828349380385767
+   },
+   {
+    "x": -6.808879814289859,
+    "y": 4.588658573357019,
+    "z": 57.426927430934875,
+    "a": 12.22142645447953,
+    "b": 10.975527457071546,
+    "th": 17.178691256737544,
+    "ht": 3.0,
+    "hb": 3.272570068017286
+   },
+   {
+    "x": 5.356845165285481,
+    "y": -8.006447766861159,
+    "z": 40.82350108450982,
+    "a": 10.756718692819318,
+    "b": 6.164780251693051,
+    "th": -10.0590560275621,
+    "ht": 3.0,
+    "hb": 3.0
+   },
+   {
+    "x": 5.6816706218871715,
+    "y": 6.877579367589909,
+    "z": 33.48514008437324,
+    "a": 7.283313179505338,
+    "b": 6.459807427135319,
+    "th": 6.850743318175165,
+    "ht": 4.883365861116672,
+    "hb": 3.0
+   },
+   {
+    "x": -1.9677848425186624,
+    "y": -2.1398311787689943,
+    "z": 47.76776776663556,
+    "a": 10.478771091583296,
+    "b": 6.245538735036734,
+    "th": -4.323606567798538,
+    "ht": 4.720070841230326,
+    "hb": 3.224822082191743
+   },
+   {
+    "x": 3.6762005148119687,
+    "y": 6.6913548632340785,
+    "z": 93.21372795946135,
+    "a": 5.982112511522064,
+    "b": 10.315230795176843,
+    "th": -2.8502493565523817,
+    "ht": 3.1175366397120743,
+    "hb": 4.827344345884237
+   },
+   {
+    "x": -3.1258891780548,
+    "y": 4.169630829406323,
+    "z": 42.37280125668115,
+    "a": 8.223671535890555,
+    "b": 7.200476201223357,
+    "th": -7.4236029492303635,
+    "ht": 9,
+    "hb": 4.16626964937563
+   },
+   {
+    "x": -2.483404868252995,
+    "y": -0.5484514433650176,
+    "z": 100.26048592792608,
+    "a": 12.695798400002088,
+    "b": 7.148670796580934,
+    "th": 1.9277375519118316,
+    "ht": 7.360730217392234,
+    "hb": 3.893788776583255
+   },
+   {
+    "x": 1.2066806749626855,
+    "y": 3.1716874272795472,
+    "z": 117.14148045844921,
+    "a": 5.252983119536609,
+    "b": 9.452951152339821,
+    "th": -5.212526946123509,
+    "ht": 6.151051933606461,
+    "hb": 6.9941942705002855
+   },
+   {
+    "x": -0.6363059108218484,
+    "y": 5.491037148655243,
+    "z": 82.23548383591303,
+    "a": 7.111281012236202,
+    "b": 12.413786743934986,
+    "th": 14.552937801497603,
+    "ht": 3.2060672434701227,
+    "hb": 4.4699971804458585
+   },
+   {
+    "x": -0.24604712902649262,
+    "y": -5.0926013505592485,
+    "z": 86.14190274129588,
+    "a": 5.157639099557631,
+    "b": 8.787303106873939,
+    "th": 8.596101107569456,
+    "ht": 5.178008596370485,
+    "hb": 3.80924422781417
+   },
+   {
+    "x": -0.0903407902180083,
+    "y": 0.45024042914463325,
+    "z": 124.68395775373315,
+    "a": 5.002059267478841,
+    "b": 7.8577099246996,
+    "th": 16.643014440872285,
+    "ht": 6.092018850576495,
+    "hb": 3.6868812396870987
+   },
+   {
+    "x": -2.291167944361473,
+    "y": -3.012036578682844,
+    "z": 66.76766297431233,
+    "a": 9.598993211549343,
+    "b": 15.268098588318987,
+    "th": -2.032430048198141,
+    "ht": 3.7960140687452997,
+    "hb": 7.097951794832883
+   }
+  ]
+ },
+ "texture": {
+  "file": "TCRP_atlas.png",
+  "size": [
+   256,
+   256
+  ],
+  "mode": "RGBA, alpha strictly 0/255",
+  "packed_in": [
+   "TCRP.glb",
+   "TCRP.blend"
+  ],
+  "palette": "RCT sprite palette only: greens 142-150, browns 34-38, grey-blue 11-15",
+  "filtering": "NEAREST mag/min, no mipmaps, clamp (GLB sampler 9728/9728 patched by patch_glb_sampler.py); ~1 texel per sprite pixel",
+  "alpha": "MASK, alphaCutoff 0.5, doubleSided true (GLB patched from exporter's BLEND); Blender blend_method CLIP",
+  "tiles": {
+   "pad_top_L0": [
+    0,
+    0,
+    48,
+    48
+   ],
+   "pad_top_L1": [
+    48,
+    0,
+    48,
+    48
+   ],
+   "pad_top_L2": [
+    96,
+    0,
+    48,
+    48
+   ],
+   "pad_top_L3": [
+    144,
+    0,
+    48,
+    48
+   ],
+   "pad_top_S0": [
+    192,
+    0,
+    32,
+    32
+   ],
+   "pad_top_S1": [
+    224,
+    0,
+    32,
+    32
+   ],
+   "pad_top_S2": [
+    192,
+    32,
+    32,
+    32
+   ],
+   "pad_top_S3": [
+    224,
+    32,
+    32,
+    32
+   ],
+   "pad_side0": [
+    0,
+    48,
+    96,
+    16
+   ],
+   "pad_side1": [
+    0,
+    64,
+    96,
+    16
+   ],
+   "pad_side2": [
+    0,
+    80,
+    96,
+    16
+   ],
+   "pad_side3": [
+    0,
+    96,
+    96,
+    16
+   ],
+   "tuft0": [
+    96,
+    48,
+    16,
+    16
+   ],
+   "tuft1": [
+    112,
+    48,
+    16,
+    16
+   ],
+   "tuft2": [
+    128,
+    48,
+    16,
+    16
+   ],
+   "tuft3": [
+    144,
+    48,
+    16,
+    16
+   ],
+   "tuft4": [
+    96,
+    64,
+    16,
+    16
+   ],
+   "tuft5": [
+    112,
+    64,
+    16,
+    16
+   ],
+   "tuft6": [
+    128,
+    64,
+    16,
+    16
+   ],
+   "tuft7": [
+    144,
+    64,
+    16,
+    16
+   ],
+   "bark": [
+    160,
+    64,
+    32,
+    128
+   ],
+   "branch": [
+    192,
+    64,
+    16,
+    64
+   ]
+  }
+ },
+ "fit": {
+  "method": "(1+1) random search over clump x,y,z,a,b,th; loss=1-mean silhouette IoU over 4 Workbench views vs sprite masks",
+  "silhouette_iou_v2": [
+   0.733,
+   0.712,
+   0.766,
+   0.687
+  ],
+  "mean_v2": 0.725,
+  "silhouette_iou_v1": [
+   0.735,
+   0.686,
+   0.743,
+   0.704
+  ],
+  "mean_v1": 0.717
+ },
+ "files": {
+  "TCRP.glb": "glTF binary, texture packed",
+  "TCRP.obj/.mtl + TCRP_atlas.png": "OBJ triangulated",
+  "TCRP.blend": "Blender 4.2 source scene (scale 1)",
+  "compare_views.png": "sprite vs render vs overlap per view",
+  "beauty.png": "perspective, TRUE proportions",
+  "beauty_squashed_ref.png": "perspective with render-only KZ squash, reference only",
+  "_render/": "4 RCT-angle renders (squashed, no AA)",
+  "scripts": [
+   "make_texture2.py",
+   "tcrp2_geom.py",
+   "build_tcrp2.py",
+   "fit_tcrp2.py",
+   "patch_glb_sampler.py",
+   "compare_views.py",
+   "label_beauties.py"
+  ]
+ },
+ "rebuild": "python make_texture2.py; blender -b -P build_tcrp2.py; python compare_views.py; python label_beauties.py"
+}

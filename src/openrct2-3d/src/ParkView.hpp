@@ -32,9 +32,10 @@ namespace OpenRCT2::View3D::Park
     // Scroll Map held state. Applied on the next draw, along the current view, without turning or changing height.
     void cameraSetMovement(bool forward, bool back, bool left, bool right);
 
-    // Draws terrain, water, and path tiles into view 0. Surface and water images are copied from the
-    // graphics the 2D view has loaded, once, when the 3D view starts. The mesh is rebuilt when the land
-    // or the paths change. Returns false when the terrain shaders are unavailable; the caller still
-    // clears the sky and draws the UI.
+    // Draws terrain, water, path tiles, and small scenery into view 0. Surface and water images are
+    // copied from the graphics the 2D view has loaded, once, when the 3D view starts. The mesh is
+    // rebuilt when the land or the paths change. Small scenery uses a GLB when one is installed for
+    // that object, and the original direction sprites otherwise. Returns false when the terrain
+    // shaders are unavailable; the caller still clears the sky and draws the UI.
     bool draw(uint16_t backWidth, uint16_t backHeight);
 } // namespace OpenRCT2::View3D::Park

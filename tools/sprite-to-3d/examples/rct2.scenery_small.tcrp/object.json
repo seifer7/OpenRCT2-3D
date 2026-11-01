@@ -1,0 +1,32 @@
+{
+  "object_id": "rct2.scenery_small.tcrp",
+  "dat_name": "TCRP",
+  "display_name": "Corsican Pine",
+  "archetype": "conifer",
+  "size_class": "tree_1tile",
+  "footprint_tiles": [1, 1],
+  "height_sim": 134,
+  "base_sink_sim": 3,
+  "max_overhang_tiles": 0.4,
+  "direction_images": [0, 1, 2, 3],
+  "alignment": {
+    "sprite_shift": [-2, 0],
+    "sprite_y_nudge": -1
+  },
+  "recolour": {
+    "primary": false,
+    "secondary": false,
+    "tertiary": false
+  },
+  "expected_triangles": 864,
+  "approved_iou": {
+    "views": [0.733, 0.712, 0.766, 0.687],
+    "mean": 0.725,
+    "source": "Approved Blender 4.2 Workbench fit measured on 2026-11-01 against the four TCRP direction sprites. Mean silhouette IoU 0.725. The validator recomputes this only when a local sprite folder is passed."
+  },
+  "review": {
+    "status": "approved",
+    "note": "Approved reference model for the conifer archetype (Corsican Pine)."
+  },
+  "notes": "Full tile. The 2D painter anchors a full tile at (15, 15); the model origin is the tile centre (16, 16). sprite_y_nudge -1 is that one pixel. sprite_shift [-2, 0] is the fitted correction that puts the trunk on the sprite's trunk."
+}

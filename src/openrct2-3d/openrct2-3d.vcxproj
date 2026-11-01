@@ -61,7 +61,7 @@
     directory of this vcxproj, with a trailing slash, so these paths stay absolute.
   -->
   <PropertyGroup>
-    <View3DIncludes>$(MSBuildThisFileDirectory)src;$(MSBuildThisFileDirectory)third_party\bgfx\include;$(MSBuildThisFileDirectory)third_party\bgfx\3rdparty;$(MSBuildThisFileDirectory)third_party\bgfx\3rdparty\khronos;$(MSBuildThisFileDirectory)third_party\bx\include;$(MSBuildThisFileDirectory)third_party\bx\3rdparty;$(MSBuildThisFileDirectory)third_party\bx\include\compat\msvc;$(MSBuildThisFileDirectory)third_party\bimg\include</View3DIncludes>
+    <View3DIncludes>$(MSBuildThisFileDirectory)src;$(MSBuildThisFileDirectory)third_party\cgltf;$(MSBuildThisFileDirectory)third_party\bimg\3rdparty\stb;$(MSBuildThisFileDirectory)third_party\bgfx\include;$(MSBuildThisFileDirectory)third_party\bgfx\3rdparty;$(MSBuildThisFileDirectory)third_party\bgfx\3rdparty\khronos;$(MSBuildThisFileDirectory)third_party\bx\include;$(MSBuildThisFileDirectory)third_party\bx\3rdparty;$(MSBuildThisFileDirectory)third_party\bx\include\compat\msvc;$(MSBuildThisFileDirectory)third_party\bimg\include</View3DIncludes>
     <IncludePath>$(View3DIncludes);$(IncludePath)</IncludePath>
   </PropertyGroup>
   <ItemDefinitionGroup>
@@ -83,12 +83,28 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="src\BgfxRenderer.hpp" />
+    <ClInclude Include="src\GlbMesh.hpp" />
+    <ClInclude Include="src\MeshDraw.hpp" />
+    <ClInclude Include="src\ModelCache.hpp" />
     <ClInclude Include="src\ParkView.hpp" />
+    <ClInclude Include="src\SceneryDraw.hpp" />
+    <ClInclude Include="src\SpriteQuad.hpp" />
+    <ClInclude Include="src\ViewerScale.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\BgfxRenderer.cpp" />
+    <ClCompile Include="src\GlbMesh.cpp" />
+    <ClCompile Include="src\MeshDraw.cpp" />
+    <ClCompile Include="src\ModelCache.cpp" />
     <ClCompile Include="src\ParkView.cpp" />
+    <ClCompile Include="src\SceneryDraw.cpp" />
     <ClCompile Include="src\View3D.cpp" />
+    <ClCompile Include="third_party\cgltf\cgltf.cpp">
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
+    <ClCompile Include="third_party\stb_image_impl.cpp">
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
     <ClCompile Include="third_party\bimg\src\image.cpp">
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
       <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>

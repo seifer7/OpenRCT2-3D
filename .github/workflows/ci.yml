@@ -1,6 +1,8 @@
 name: CI
 on:
   push:
+    branches:
+      - develop
     paths-ignore:
       - '.editorconfig'
       - '.gitattributes'
@@ -9,6 +11,10 @@ on:
       - '.gitignore'
       - '.vscode/**'
   pull_request:
+    # labeled is included so adding CI Request starts a run. The job gate below
+    # ignores every other label. opened, synchronize, and reopened still run
+    # when the PR already carries CI Request.
+    types: [opened, synchronize, reopened, labeled]
     paths-ignore:
       - '.editorconfig'
       - '.gitattributes'
@@ -37,19 +43,46 @@ env:
   OPENRCT2_VERSION: 0.5.6
 
 # https://docs.github.com/en/actions/using-jobs/using-concurrency#example-using-a-fallback-value
+# Pull requests share a group (head_ref) so a push or a new CI Request label
+# cancels the in-progress run. Any other label is its own group: that event
+# still starts a workflow, and it must not cancel a build already running.
+# Pushes and workflow_dispatch fall through to run_id and do not cancel each other.
 concurrency:
-  group: ${{ github.head_ref || github.run_id }}
+  group: ${{ github.event.action == 'labeled' && github.event.label.name != 'CI Request' && format('{0}-label-{1}', github.head_ref, github.run_id) || github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  # Pull requests run only when they carry CI Request. Skipping this job skips
+  # every other job through needs:, which reports those checks as completed
+  # (skipped) instead of leaving them pending. A labeled event runs only when
+  # the label just added is CI Request. Push and workflow_dispatch are not
+  # pull_request events, so they pass the gate.
+  ci-requested:
+    name: CI requested
+    runs-on: ubuntu-slim
+    if: |
+      github.event_name != 'pull_request' ||
+      (
+        contains(github.event.pull_request.labels.*.name, 'CI Request') &&
+        (github.event.action != 'labeled' || github.event.label.name == 'CI Request')
+      )
+    steps:
+      - name: CI is requested
+        run: echo "CI requested (${{ github.event_name }} / ${{ github.event.action }})"
   build_variables:
     name: Get version info
     runs-on: ubuntu-24.04 # This job is too heavy for ubuntu-slim. It takes almost a minute to checkout the code on slim vs 23s on ubuntu-24.04.
+    needs: ci-requested
     # We want to sign tagged releases with release certificates, but it is only allowed to be ran manually.
     # Disable automatic runs for tags and force release signing for tags.
+    # An explicit if replaces the default "skip when needs was skipped", so the
+    # gate result has to be part of this condition.
     if: |
-      (startsWith(github.ref, 'refs/tags/v') && github.event_name == 'workflow_dispatch' && github.event.inputs.sign == 'release-signing') ||
-      (!startsWith(github.ref, 'refs/tags/v') && github.event.inputs.sign != 'release-signing')
+      needs.ci-requested.result == 'success' &&
+      (
+        (startsWith(github.ref, 'refs/tags/v') && github.event_name == 'workflow_dispatch' && github.event.inputs.sign == 'release-signing') ||
+        (!startsWith(github.ref, 'refs/tags/v') && github.event.inputs.sign != 'release-signing')
+      )
     outputs:
       name: ${{ steps.artifact-name.outputs.name }}
       describe: ${{ steps.ghd.outputs.describe }}
@@ -128,6 +161,7 @@ jobs:
   #         configFile: .commitlint.json
   check-code-formatting:
     name: Check code formatting
+    needs: ci-requested
     runs-on: ubuntu-24.04
     container: ghcr.io/openrct2/openrct2-build:26-format
     permissions:
@@ -150,6 +184,7 @@ jobs:
           event: 'REQUEST_CHANGES'
   check-changelog-formatting:
     name: Check changelog formatting
+    needs: ci-requested
     runs-on: ubuntu-slim
     defaults:
       run:

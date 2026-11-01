@@ -10,3 +10,11 @@ Project notes, memories, decisions, surveys, and other working documents live in
 - `glb-model-pipeline-recommendation.md` — GLB model pipeline recommendation
 - `sprite-to-3d-style-guide.md` — how to build scenery GLBs in the Corsican Pine style
 - [`qa/`](qa/README.md) — QA Officer: review process, model style checklist, and PR reviews
+
+## CI
+
+`ci.yml` and `clang-tidy.yml` run on a pull request only when it carries the `CI Request` label. King Grok applies that label to pull requests that change game code. Docs, tools, and model-only pull requests skip CI.
+
+Pushes to `develop` always run CI. `workflow_dispatch` runs the CI workflow by hand.
+
+To trigger or retrigger a run, add the `CI Request` label, or remove it and add it again, or push a commit while the label is on, or use `workflow_dispatch`. Adding any other label does not start CI.

@@ -557,7 +557,7 @@ TEST(ModelCache, CaseFoldedDuplicateUsesDataDir)
     EXPECT_EQ(first.converted, 1);
     EXPECT_EQ(first.failed, 0);
     EXPECT_TRUE(modelIsValidated("MyTree"));
-    EXPECT_FALSE(modelIsValidated("mytree"));
+    EXPECT_TRUE(modelIsValidated("mytree"));
     EXPECT_TRUE(OpenRCT2::File::Exists(OpenRCT2::Path::Combine(data.cache, "mytree.o3d")));
 
     std::string error;

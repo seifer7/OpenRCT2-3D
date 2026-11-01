@@ -30,7 +30,7 @@ Startup (`prepareModelCache`) is the only validation:
 - Size and nanosecond mtime against the GLB. The GLB is hashed only when those differ. A matching hash refreshes the stored time.
 - The body checksum, streamed in 64 KB chunks. The whole file is not buffered for that pass.
 
-An id that passes is stored with its cache path, in the authored case. The cache file name is the lowercased id, so `MyTree.glb` and `mytree.glb` share one `.o3d`. The data directory is scanned first and wins. A failed conversion, or a cache that fails and cannot be rebuilt from its GLB, is left out of the set.
+An id that passes is stored under its case-folded name. The data directory is scanned first, so the first file wins and the later spelling is not converted and does not get its own cache. Lookup ignores case, so either spelling reads that one file. The cache stem is folded so a case-insensitive disk cannot hold two copies. A failed conversion, or a cache that fails and cannot be rebuilt from its GLB, is left out of the set.
 
 In-game, an id in that set is read into a `CpuMesh` with no checksum, no source size or mtime check, no version check, and no GLB read. An id that is not in the set draws the X-sprite. A missing file, a short read, or an I/O error does the same and does not crash. That is error handling.
 
@@ -47,7 +47,7 @@ bgfx's default handle cap is 4096 (`kHandleCap`). This build does not raise it.
 - One 1×1 white texture covers a primitive with no image.
 - Instance data is a transient bgfx buffer, not a stored handle.
 
-`kDefaultVramBudgetBytes` is 256 MB of mesh and image bytes, not a GPU query. Least-recently-used models that were not drawn this frame are released (vertex ranges returned to the slab, owned textures destroyed). Atlas rectangles are not punched out individually; a later image uses a new rectangle or a dedicated texture, and a dedicated texture is freed on eviction. Sprite images share the atlas too. If the handle estimate is already at the cap, a new dedicated texture is refused and that upload fails closed (sprite skipped, or the model id stays on the sprite fallback).
+`kDefaultVramBudgetBytes` is 256 MB of mesh and image bytes, not a GPU query. Least-recently-used models that were not drawn this frame are released (vertex ranges returned to the slab, atlas rects returned to the packer, owned textures destroyed). A dedicated texture is also freed on eviction. Sprite images share the atlas too. If the handle estimate is already at the cap, a new dedicated texture is refused and that upload fails closed (sprite skipped, or the model id stays on the sprite fallback).
 
 ## Placement
 
@@ -61,7 +61,13 @@ The mesh origin is the pivot. The instance shader rotates about that origin and 
 
 ## View
 
-`kDefaultViewDistanceTiles` is 48. A chunk whose centre is farther than that is not drawn. There is no shader fade. The frustum is the six planes of the camera's projection-view matrix, extracted once per frame. Both tests are a hard cutoff.
+`sceneryViewDistanceTiles()` starts at 48 (`kDefaultViewDistanceTiles`). `setSceneryViewDistanceTiles` changes it. A chunk whose centre is farther than that is not drawn. There is no shader fade. The frustum is the six planes of the camera's projection-view matrix, extracted once per frame and reused for the upload pin set and the draw list. Both tests are a hard cutoff.
+
+A frame rebuilds at most `kChunkRebuildsPerFrame` (8) dirty chunks. The rest stay dirty. A chunk's Z span is the placement base plus the scenery entry's declared height, in viewer units.
+
+Sprite faces are stored on the placement and uploaded only when that placement is drawn without a model. The cache key is the image plus the face. Objects whose model is still loading do not upload sprites.
+
+Slab indices are mesh-local. `setVertexBuffer`'s start vertex is the only base (`slabVertexIndex`). Atlas images keep a 2px gutter outside the UV rect, and `meshDrawReleaseModel` returns that rect to the packer. The UV scale and offset still address the image texels, so a point sample matches a gutterless placement of the same image.
 
 ## Tuning
 
@@ -70,7 +76,9 @@ The constants live in `src/openrct2-3d/src/SceneryScale.hpp`.
 | Constant | Default | Effect |
 | --- | --- | --- |
 | `kSceneryChunkTiles` | 16 | Smaller chunks rebuild less map and test more boxes. |
-| `kDefaultViewDistanceTiles` | 48 | How far scenery is drawn. |
+| `kDefaultViewDistanceTiles` | 48 | Starting view distance. `setSceneryViewDistanceTiles` changes the live value. |
+| `kChunkRebuildsPerFrame` | 8 | Dirty chunks rebuilt on one frame. |
+| `kAtlasGutter` | 2 | Empty pixels around an atlas image, outside the UV rect. |
 | `kDefaultVramBudgetBytes` | 256 MB | When unused models leave the GPU. |
 | `kUploadsPerFrame` | 2 | New models that may appear per frame. |
 | `kUploadBytesPerFrame` | 1 MB | Upload byte cap per frame. |
@@ -79,4 +87,4 @@ The constants live in `src/openrct2-3d/src/SceneryScale.hpp`.
 
 ## Deferred
 
-KTX/BC, meshopt, LOD, impostors, skeletal animation, texture arrays, indirect draws, and instancing of guests and vehicles. The pipeline note still describes those. Per-frame entity lists are not built here. Atlas space is not compacted when a model is evicted.
+KTX/BC, meshopt, LOD, impostors, skeletal animation, texture arrays, indirect draws, and instancing of guests and vehicles. The pipeline note still describes those. Per-frame entity lists are not built here. Freed atlas rects are reused as whole rectangles; neighbouring free space is not merged.

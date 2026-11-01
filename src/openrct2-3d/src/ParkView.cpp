@@ -122,6 +122,8 @@ namespace OpenRCT2::View3D::Park
         float _eyeY = 0.0f;
         float _eyeZ = 0.0f;
         float _viewProj[16] = {};
+        float _focusX = 0.0f;
+        float _focusY = 0.0f;
         bool _haveCamera = false;
         uint16_t _frameHeight = 0;
         // Raised when the 3D view is toggled, and until the first frame, so the pose is taken from the 2D view.
@@ -1553,6 +1555,17 @@ namespace OpenRCT2::View3D::Park
             _eyeX = _fly.eyeX;
             _eyeY = _fly.eyeY;
             _eyeZ = _fly.eyeZ;
+            _focusX = _fly.eyeX;
+            _focusY = _fly.eyeY;
+            if (forwardZ < -0.001f)
+            {
+                const float t = -_fly.eyeZ / forwardZ;
+                if (t > 0.0f)
+                {
+                    _focusX = _fly.eyeX + forwardX * t;
+                    _focusY = _fly.eyeY + forwardY * t;
+                }
+            }
             _haveCamera = true;
             bgfx::setViewTransform(0, view, projection);
         }
@@ -1613,6 +1626,17 @@ namespace OpenRCT2::View3D::Park
         eyeY = _eyeY;
         eyeZ = _eyeZ;
         std::memcpy(viewProj, _viewProj, sizeof(_viewProj));
+        return true;
+    }
+
+    bool copyViewFocus(float& focusX, float& focusY)
+    {
+        if (!_haveCamera)
+        {
+            return false;
+        }
+        focusX = _focusX;
+        focusY = _focusY;
         return true;
     }
 

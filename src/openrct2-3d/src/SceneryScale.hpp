@@ -16,7 +16,12 @@ namespace OpenRCT2::View3D
     // 16x16 tiles. A 256-tile map is 256 chunks.
     constexpr int32_t kSceneryChunkTiles = 16;
     // Chunks whose centre is farther than this, in tiles, are not drawn.
+    // sceneryViewDistanceTiles() is the live value. Tests and tools can change it.
     constexpr float kDefaultViewDistanceTiles = 48.0f;
+    // Dirty chunks rebuilt on one frame. The rest stay dirty for later frames.
+    constexpr int32_t kChunkRebuildsPerFrame = 8;
+    // Empty pixels around an atlas image so a uv of 1 does not sample the neighbour.
+    constexpr uint32_t kAtlasGutter = 2u;
     // GPU bytes for scenery meshes and their textures. LRU drops the coldest model.
     constexpr uint32_t kDefaultVramBudgetBytes = 256u * 1024u * 1024u;
     // Shared geometry slabs. Two handles (vertex + index) per slab.
@@ -29,4 +34,9 @@ namespace OpenRCT2::View3D
     constexpr uint32_t kUploadsPerFrame = 2u;
     constexpr uint32_t kUploadBytesPerFrame = 1024u * 1024u;
     constexpr uint32_t kHandleCap = 4096u;
+    // Stay this far under the cap so terrain, UI, and a burst of sprites still fit.
+    constexpr uint32_t kHandleHeadroom = 256u;
+
+    float sceneryViewDistanceTiles();
+    void setSceneryViewDistanceTiles(float tiles);
 } // namespace OpenRCT2::View3D

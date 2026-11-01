@@ -7,17 +7,24 @@
  * OpenRCT2 is licensed under the GNU General Public License version 3.
  *****************************************************************************/
 
+#include "openrct2-3d/src/GlbMesh.hpp"
 #include "openrct2-3d/src/GpuBudget.hpp"
 #include "openrct2-3d/src/ModelLoadQueue.hpp"
 #include "openrct2-3d/src/SceneryChunk.hpp"
+#include "openrct2-3d/src/SceneryDraw.hpp"
 #include "openrct2-3d/src/SceneryScale.hpp"
 #include "openrct2-3d/src/ViewerScale.hpp"
 
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <gtest/gtest.h>
+#include <openrct2/drawing/FilterPaletteIds.h>
 #include <openrct2/world/Location.hpp>
 #include <openrct2/world/Scenery.h>
 #include <string>
+#include <thread>
+#include <unordered_set>
 
 using namespace OpenRCT2::View3D;
 
@@ -268,4 +275,228 @@ TEST(SceneryScale, LoaderStateMachine)
     EXPECT_EQ(queue.phase("missing"), ModelLoadPhase::failed);
     queue.forget("missing");
     EXPECT_EQ(queue.phase("missing"), ModelLoadPhase::absent);
+}
+
+TEST(SceneryScale, AtlasSlotIsReusedAfterFree)
+{
+    AtlasPacker packer(32, 1, 0);
+    AtlasSlot first;
+    ASSERT_TRUE(packer.pack(32, 32, first));
+    AtlasSlot blocked;
+    EXPECT_FALSE(packer.pack(8, 8, blocked));
+    packer.free(first);
+    AtlasSlot again;
+    ASSERT_TRUE(packer.pack(32, 32, again));
+    EXPECT_EQ(packer.pageCount(), 1u);
+    EXPECT_EQ(again.x, first.x);
+    EXPECT_EQ(again.y, first.y);
+}
+
+TEST(SceneryScale, AtlasGutterStaysOutsideTheImage)
+{
+    AtlasPacker packer(32, 1, 2);
+    AtlasSlot slot;
+    ASSERT_TRUE(packer.pack(28, 28, slot));
+    EXPECT_EQ(slot.x, 2u);
+    EXPECT_EQ(slot.y, 2u);
+    EXPECT_EQ(slot.width, 28u);
+    EXPECT_FALSE(packer.pack(8, 8, slot));
+    packer.free(AtlasSlot{ 0, 2, 2, 28, 28 });
+    ASSERT_TRUE(packer.pack(28, 28, slot));
+    EXPECT_EQ(slot.x, 2u);
+}
+
+TEST(SceneryScale, SlabIndexAppliesTheBaseOnce)
+{
+    EXPECT_EQ(slabVertexIndex(0, 4), 4u);
+    EXPECT_EQ(slabVertexIndex(100, 4), 104u);
+    EXPECT_NE(slabVertexIndex(100, 4), 204u);
+}
+
+TEST(SceneryScale, LruTouchMovesAnIdToMostRecent)
+{
+    LruBudget budget(100);
+    budget.insert(1, 40, 1);
+    budget.insert(2, 40, 2);
+    budget.touch(1, 9);
+    const std::vector<uint32_t> dropped = budget.evict(40, {});
+    ASSERT_EQ(dropped.size(), 1u);
+    EXPECT_EQ(dropped[0], 2u);
+    EXPECT_TRUE(budget.contains(1));
+    EXPECT_FALSE(budget.contains(2));
+}
+
+TEST(SceneryScale, ViewDistanceIsConfigurable)
+{
+    const float saved = sceneryViewDistanceTiles();
+    setSceneryViewDistanceTiles(12.0f);
+    EXPECT_FLOAT_EQ(sceneryViewDistanceTiles(), 12.0f);
+    setSceneryViewDistanceTiles(0.0f);
+    EXPECT_FLOAT_EQ(sceneryViewDistanceTiles(), kDefaultViewDistanceTiles);
+    setSceneryViewDistanceTiles(saved);
+}
+
+TEST(SceneryScale, ZoomedOutGroundDistanceStaysVisible)
+{
+    ChunkBox atFocus;
+    atFocus.maxX = 16.0f;
+    atFocus.maxY = 16.0f;
+    atFocus.maxZ = 4.0f;
+    // Zoom 3 puts the eye about 164 tiles from the focus. A 3D test from that eye culls the focus.
+    EXPECT_TRUE(boxOutsideDistance(atFocus, 0.0f, -164.0f, 80.0f, kDefaultViewDistanceTiles));
+    const float radius = sceneryCullRadius(0.0f, -164.0f, 0.0f, 0.0f);
+    EXPECT_GE(radius, 164.0f);
+    EXPECT_FALSE(boxOutsideGroundDistance(atFocus, 0.0f, 0.0f, radius));
+    ChunkBox far;
+    far.minX = 400.0f;
+    far.maxX = 416.0f;
+    far.maxY = 16.0f;
+    EXPECT_TRUE(boxOutsideGroundDistance(far, 0.0f, 0.0f, radius));
+}
+
+TEST(SceneryScale, TenThousandModelsCycleThroughTheArena)
+{
+    GeometryArena arena(kSlabVertices, kSlabIndices, kMaxGeometrySlabs);
+    LruBudget budget(kDefaultVramBudgetBytes);
+    const uint32_t verts = 1200;
+    const uint32_t indices = 3600;
+    const uint32_t bytes = verts * static_cast<uint32_t>(sizeof(MeshVertex)) + indices * static_cast<uint32_t>(sizeof(uint16_t))
+        + 64u * 64u * 4u;
+    struct Live
+    {
+        uint32_t id = 0;
+        BufferRange vertices;
+        BufferRange indexRange;
+    };
+    std::vector<Live> live;
+    uint32_t evictions = 0;
+    uint32_t admitted = 0;
+    for (uint32_t id = 0; id < 10000; id++)
+    {
+        if (verts > kSlabVertices || indices > kSlabIndices || bytes > kDefaultVramBudgetBytes)
+        {
+            FAIL() << "fixture does not fit one slab";
+        }
+        BufferRange vertexRange;
+        BufferRange indexRange;
+        bool placed = false;
+        while (!placed)
+        {
+            if (budget.used() + bytes <= budget.budget() && arena.alloc(verts, indices, vertexRange, indexRange))
+            {
+                placed = true;
+                break;
+            }
+            const std::optional<uint32_t> dropped = budget.evictOne({});
+            if (!dropped.has_value())
+            {
+                break;
+            }
+            evictions++;
+            for (size_t i = 0; i < live.size(); i++)
+            {
+                if (live[i].id != *dropped)
+                {
+                    continue;
+                }
+                arena.free(live[i].vertices, live[i].indexRange);
+                live.erase(live.begin() + static_cast<std::ptrdiff_t>(i));
+                break;
+            }
+        }
+        if (!placed)
+        {
+            continue;
+        }
+        budget.insert(id, bytes, id);
+        live.push_back(Live{ id, vertexRange, indexRange });
+        admitted++;
+        EXPECT_LE(budget.used(), budget.budget());
+    }
+    EXPECT_EQ(admitted, 10000u);
+    EXPECT_GT(evictions, 0u);
+    EXPECT_LT(live.size(), 10000u);
+}
+
+TEST(SceneryScale, PngBombIsRejectedBeforeDecode)
+{
+    MeshImage image;
+    // Signature plus an IHDR that claims 16384x16384. The bitmap is never allocated.
+    const uint8_t png[] = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+                            0x52, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x40, 0x00, 0x08, 0x06, 0x00, 0x00, 0x00, 0xA9,
+                            0xC8, 0x10, 0x84, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82 };
+    image.png.assign(png, png + sizeof(png));
+    CpuMesh mesh;
+    mesh.images.push_back(std::move(image));
+    std::string error;
+    EXPECT_FALSE(decodeMeshImages(mesh, error));
+    EXPECT_NE(error.find("dimensions"), std::string::npos) << error;
+    EXPECT_TRUE(mesh.images[0].rgba.empty());
+}
+
+TEST(SceneryScale, RemapColoursReachTheSpriteImage)
+{
+    const ImageId painted = sceneryRemapImage(ImageId(40), true, 5, true, 9, false, 0);
+    EXPECT_EQ(static_cast<uint8_t>(painted.GetPrimary()), 5);
+    EXPECT_EQ(static_cast<uint8_t>(painted.GetSecondary()), 9);
+    const ImageId ghost = sceneryRemapImage(
+        ImageId(40).WithRemap(OpenRCT2::Drawing::FilterPaletteID::paletteGhost), true, 5, false, 0, false, 0);
+    EXPECT_TRUE(ghost.IsRemap());
+    EXPECT_NE(static_cast<uint8_t>(ghost.GetPrimary()), 5);
+}
+
+TEST(SceneryScale, LoaderStopsAndDoesNotResurrectForgottenWork)
+{
+    std::atomic<int32_t> started{ 0 };
+    std::atomic<bool> release{ false };
+    {
+        ModelLoadQueue queue(
+            [&](const std::string&, std::string&) -> std::optional<CpuMesh> {
+                started.fetch_add(1);
+                while (!release.load())
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                CpuMesh mesh;
+                MeshPrimitive primitive;
+                primitive.vertices.push_back(MeshVertex{});
+                primitive.indices.push_back(0);
+                mesh.primitives.push_back(std::move(primitive));
+                return mesh;
+            },
+            true);
+        queue.request("held");
+        while (started.load() == 0)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        queue.forget("held");
+        release.store(true);
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        std::string taken;
+        EXPECT_FALSE(queue.takeReady(taken).has_value());
+        EXPECT_EQ(queue.phase("held"), ModelLoadPhase::absent);
+    }
+    std::atomic<int32_t> loads{ 0 };
+    const auto startedAt = std::chrono::steady_clock::now();
+    {
+        ModelLoadQueue queue(
+            [&](const std::string&, std::string&) -> std::optional<CpuMesh> {
+                loads.fetch_add(1);
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                return CpuMesh{};
+            },
+            true);
+        for (int32_t i = 0; i < 20; i++)
+        {
+            queue.request("m" + std::to_string(i));
+        }
+        while (loads.load() == 0)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    const auto elapsed = std::chrono::steady_clock::now() - startedAt;
+    EXPECT_LT(elapsed, std::chrono::milliseconds(400));
+    EXPECT_LT(loads.load(), 20);
 }

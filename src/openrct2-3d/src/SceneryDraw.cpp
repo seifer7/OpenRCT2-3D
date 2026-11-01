@@ -50,6 +50,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace OpenRCT2::View3D::Park
@@ -66,15 +67,42 @@ namespace OpenRCT2::View3D::Park
             std::vector<MeshInstance> instances;
         };
 
-        struct SpriteCache
+        struct SpriteKey
         {
-            ImageId image;
+            uint64_t image = 0;
             int face = 0;
-            int32_t handle = -1;
+            bool operator==(const SpriteKey& other) const
+            {
+                return image == other.image && face == other.face;
+            }
         };
 
-        std::vector<SpriteCache> _sprites;
+        struct SpriteKeyHash
+        {
+            size_t operator()(const SpriteKey& key) const
+            {
+                return std::hash<uint64_t>{}(key.image) ^ (static_cast<size_t>(key.face) << 1);
+            }
+        };
+
+        struct FrameCull
+        {
+            bool haveCamera = false;
+            float eyeX = 0.0f;
+            float eyeY = 0.0f;
+            float eyeZ = 0.0f;
+            float focusX = 0.0f;
+            float focusY = 0.0f;
+            float planes[6][4] = {};
+        };
+
+        bool _dropSprites = false;
+
+        std::unordered_map<SpriteKey, int32_t, SpriteKeyHash> _spriteHandles;
+        std::unordered_set<std::string> _loggedUploadFail;
         std::vector<Batch> _batches;
+        std::unordered_map<uint32_t, size_t> _modelBatches;
+        std::unordered_map<int32_t, size_t> _spriteBatches;
         bool _loggedShader = false;
         std::vector<Drawing::PaletteIndex> _blit;
         std::vector<uint8_t> _rgba;
@@ -101,6 +129,7 @@ namespace OpenRCT2::View3D::Park
             {
                 _dirtyAll = true;
                 _dirtyTiles.clear();
+                _dropSprites = true;
                 return;
             }
             // A long 2D session can invalidate the same tiles for many frames before 3D draws.
@@ -231,22 +260,10 @@ namespace OpenRCT2::View3D::Park
             ImageIndex index = entry.image + direction;
             index += static_cast<ImageIndex>(witherBand(entry, element.getAge())) * 4;
             image = image.WithIndex(index);
-            if (!image.IsRemap())
-            {
-                if (entry.flags.has(SmallSceneryFlag::hasPrimaryColour))
-                {
-                    image = image.WithPrimary(element.getPrimaryColour());
-                    if (entry.flags.has(SmallSceneryFlag::hasSecondaryColour))
-                    {
-                        image = image.WithSecondary(element.getSecondaryColour());
-                    }
-                }
-                if (entry.flags.has(SmallSceneryFlag::hasTertiaryColour))
-                {
-                    image = image.WithTertiary(element.getTertiaryColour());
-                }
-            }
-            return image;
+            return sceneryRemapImage(
+                image, entry.flags.has(SmallSceneryFlag::hasPrimaryColour), static_cast<uint8_t>(element.getPrimaryColour()),
+                entry.flags.has(SmallSceneryFlag::hasSecondaryColour), static_cast<uint8_t>(element.getSecondaryColour()),
+                entry.flags.has(SmallSceneryFlag::hasTertiaryColour), static_cast<uint8_t>(element.getTertiaryColour()));
         }
 
         const Drawing::GamePalette& texturePalette()
@@ -254,19 +271,34 @@ namespace OpenRCT2::View3D::Park
             return Drawing::LightFx::IsAvailable() ? Drawing::LightFx::GetPalette() : Drawing::gPalette;
         }
 
-        int32_t spriteHandleForFace(const ImageId& image, int face)
+        uint64_t imageBits(const ImageId& image)
         {
-            for (const SpriteCache& cached : _sprites)
+            uint64_t bits = 0;
+            static_assert(sizeof(ImageId) == sizeof(bits), "ImageId is the sprite cache key");
+            std::memcpy(&bits, &image, sizeof(bits));
+            return bits;
+        }
+
+        ImageId imageFromBits(uint64_t bits)
+        {
+            ImageId image;
+            std::memcpy(&image, &bits, sizeof(image));
+            return image;
+        }
+
+        int32_t spriteHandleForFace(uint64_t bits, int face)
+        {
+            const SpriteKey key{ bits, face };
+            const auto found = _spriteHandles.find(key);
+            if (found != _spriteHandles.end())
             {
-                if (cached.face == face && cached.image == image)
-                {
-                    return cached.handle;
-                }
+                return found->second;
             }
+            const ImageId image = imageFromBits(bits);
             const G1Element* g1 = GfxGetG1Element(image);
             if (g1 == nullptr || g1->width <= 0 || g1->height <= 0 || g1->width > kMaxSpriteEdge || g1->height > kMaxSpriteEdge)
             {
-                _sprites.push_back(SpriteCache{ image, face, -1 });
+                _spriteHandles.emplace(key, -1);
                 return -1;
             }
             const int32_t width = g1->width;
@@ -302,7 +334,7 @@ namespace OpenRCT2::View3D::Park
             }
             const SpriteQuad quad = makeDirectionSpriteQuad(face, g1->width, g1->height, g1->xOffset, g1->yOffset);
             const int32_t handle = meshDrawUploadSprite(quad, _rgba.data(), width, height);
-            _sprites.push_back(SpriteCache{ image, face, handle });
+            _spriteHandles.emplace(key, handle);
             return handle;
         }
 
@@ -334,10 +366,16 @@ namespace OpenRCT2::View3D::Park
             {
                 placement.typeKey = typeKeyFor(identifier);
             }
+            // Keep the image identity for a later fallback. Do not upload here: a model
+            // object, and anything not on screen, must not take an atlas slot.
             for (int face = 0; face < 4; face++)
             {
-                placement.spriteHandles[face] = spriteHandleForFace(faceImage(element, *entry, face), face);
+                const ImageId image = faceImage(element, *entry, face);
+                placement.spriteImage[face] = imageBits(image);
+                placement.spriteFace[face] = true;
             }
+            const float declared = viewerZ(entry->height);
+            placement.topZ = az + (declared > 0.25f ? declared : 0.25f);
             chunk.placements.push_back(placement);
         }
 
@@ -358,7 +396,7 @@ namespace OpenRCT2::View3D::Park
             chunk->box.maxX = static_cast<float>(x1);
             chunk->box.maxY = static_cast<float>(y1);
             chunk->box.minZ = 0.0f;
-            chunk->box.maxZ = 8.0f;
+            chunk->box.maxZ = 1.0f;
             for (int32_t y = y0; y < y1; y++)
             {
                 for (int32_t x = x0; x < x1; x++)
@@ -373,46 +411,55 @@ namespace OpenRCT2::View3D::Park
                     }
                 }
             }
+            if (!chunk->placements.empty())
+            {
+                chunk->box.minZ = chunk->placements[0].z;
+                chunk->box.maxZ = chunk->placements[0].topZ;
+                for (const ChunkPlacement& placement : chunk->placements)
+                {
+                    chunk->box.minZ = std::min(chunk->box.minZ, placement.z);
+                    chunk->box.maxZ = std::max(chunk->box.maxZ, placement.topZ);
+                }
+            }
             chunk->dirty = false;
             chunk->built = true;
         }
 
-        bool chunkVisible(
-            const SceneryChunk& chunk, bool haveCamera, float eyeX, float eyeY, float eyeZ, const float planes[6][4])
+        bool chunkVisible(const SceneryChunk& chunk, const FrameCull& cull)
         {
-            if (!haveCamera)
+            if (!cull.haveCamera)
             {
                 return true;
             }
-            return !boxOutsideDistance(chunk.box, eyeX, eyeY, eyeZ, kDefaultViewDistanceTiles)
-                && !boxOutsideFrustum(chunk.box, planes);
+            const float radius = sceneryCullRadius(cull.eyeX, cull.eyeY, cull.focusX, cull.focusY);
+            return !boxOutsideGroundDistance(chunk.box, cull.focusX, cull.focusY, radius)
+                && !boxOutsideFrustum(chunk.box, cull.planes);
         }
 
-        void readCamera(bool& haveCamera, float& eyeX, float& eyeY, float& eyeZ, float planes[6][4])
+        void readCamera(FrameCull& cull)
         {
             float viewProj[16] = {};
-            haveCamera = copyCamera(eyeX, eyeY, eyeZ, viewProj);
-            if (haveCamera)
+            cull.haveCamera = copyCamera(cull.eyeX, cull.eyeY, cull.eyeZ, viewProj);
+            if (!cull.haveCamera || !copyViewFocus(cull.focusX, cull.focusY))
             {
-                extractFrustumPlanes(viewProj, planes);
+                cull.focusX = cull.eyeX;
+                cull.focusY = cull.eyeY;
+            }
+            if (cull.haveCamera)
+            {
+                extractFrustumPlanes(viewProj, cull.planes);
             }
         }
 
-        std::vector<uint32_t> visibleModelKeys()
+        std::unordered_set<uint32_t> visibleModelKeys(const FrameCull& cull)
         {
-            std::vector<uint32_t> keys;
-            bool haveCamera = false;
-            float eyeX = 0.0f;
-            float eyeY = 0.0f;
-            float eyeZ = 0.0f;
-            float planes[6][4] = {};
-            readCamera(haveCamera, eyeX, eyeY, eyeZ, planes);
+            std::unordered_set<uint32_t> keys;
             for (int32_t y = 0; y < _grid.chunksY(); y++)
             {
                 for (int32_t x = 0; x < _grid.chunksX(); x++)
                 {
                     const SceneryChunk* chunk = _grid.at(x, y);
-                    if (chunk == nullptr || !chunk->built || !chunkVisible(*chunk, haveCamera, eyeX, eyeY, eyeZ, planes))
+                    if (chunk == nullptr || !chunk->built || !chunkVisible(*chunk, cull))
                     {
                         continue;
                     }
@@ -420,7 +467,7 @@ namespace OpenRCT2::View3D::Park
                     {
                         if (placement.modelCandidate)
                         {
-                            keys.push_back(placement.typeKey);
+                            keys.insert(placement.typeKey);
                         }
                     }
                 }
@@ -457,9 +504,9 @@ namespace OpenRCT2::View3D::Park
                 }
             }
             int32_t rebuilt = 0;
-            for (int32_t y = 0; y < _grid.chunksY(); y++)
+            for (int32_t y = 0; y < _grid.chunksY() && rebuilt < kChunkRebuildsPerFrame; y++)
             {
-                for (int32_t x = 0; x < _grid.chunksX(); x++)
+                for (int32_t x = 0; x < _grid.chunksX() && rebuilt < kChunkRebuildsPerFrame; x++)
                 {
                     if (_grid.dirty(x, y))
                     {
@@ -468,16 +515,13 @@ namespace OpenRCT2::View3D::Park
                     }
                 }
             }
-            if (rebuilt > 0)
-            {
-                std::fprintf(stderr, "View3D: rebuilt %d scenery chunk(s)\n", rebuilt);
-            }
+            (void)rebuilt;
         }
 
-        void uploadReadyModels()
+        void uploadReadyModels(const FrameCull& cull)
         {
             ensureLoads();
-            const std::vector<uint32_t> pinned = visibleModelKeys();
+            const std::unordered_set<uint32_t> pinned = visibleModelKeys(cull);
             uint32_t uploaded = 0;
             uint32_t bytes = 0;
             while (uploaded < kUploadsPerFrame && bytes < kUploadBytesPerFrame)
@@ -493,15 +537,20 @@ namespace OpenRCT2::View3D::Park
                 for (const MeshPrimitive& primitive : mesh->primitives)
                 {
                     meshBytes += static_cast<uint32_t>(primitive.vertices.size() * sizeof(MeshVertex));
-                    meshBytes += static_cast<uint32_t>(primitive.indices.size() * sizeof(uint32_t));
+                    meshBytes += static_cast<uint32_t>(primitive.indices.size() * sizeof(uint16_t));
                 }
                 for (const MeshImage& image : mesh->images)
                 {
-                    meshBytes += static_cast<uint32_t>(image.rgba.size() + image.png.size());
+                    if (!image.rgba.empty())
+                    {
+                        meshBytes += static_cast<uint32_t>(image.rgba.size());
+                    }
+                    else if (image.width > 0 && image.height > 0)
+                    {
+                        meshBytes += static_cast<uint32_t>(image.width) * static_cast<uint32_t>(image.height) * 4u;
+                    }
                 }
-                const std::vector<uint32_t> dropped = _vram.evict(meshBytes, pinned);
-                for (uint32_t droppedId : dropped)
-                {
+                auto releaseId = [&](uint32_t droppedId) {
                     const auto gpu = _gpu.find(droppedId);
                     if (gpu != _gpu.end())
                     {
@@ -515,11 +564,47 @@ namespace OpenRCT2::View3D::Park
                     {
                         _loads->forget(_typeIds[droppedId]);
                     }
+                };
+                for (uint32_t droppedId : _vram.evict(meshBytes, pinned))
+                {
+                    releaseId(droppedId);
                 }
-                const int32_t handle = meshDrawUploadModel(*mesh);
-                _gpu[key] = handle;
+                if (_vram.used() + meshBytes > _vram.budget())
+                {
+                    // Pinned set fills the budget. Do not upload past it, and do not
+                    // remember a permanent failure: a later frame may have room.
+                    _loads->forget(identifier);
+                    continue;
+                }
+                int32_t handle = -1;
+                bool canFit = true;
+                for (const MeshPrimitive& primitive : mesh->primitives)
+                {
+                    if (primitive.vertices.size() > kSlabVertices || primitive.indices.size() > kSlabIndices)
+                    {
+                        canFit = false;
+                    }
+                }
+                if (canFit)
+                {
+                    for (;;)
+                    {
+                        handle = meshDrawUploadModel(*mesh);
+                        if (handle >= 0)
+                        {
+                            break;
+                        }
+                        const std::optional<uint32_t> dropped = _vram.evictOne(pinned);
+                        if (!dropped.has_value())
+                        {
+                            break;
+                        }
+                        releaseId(*dropped);
+                    }
+                }
                 if (handle >= 0)
                 {
+                    _gpu[key] = handle;
                     _vram.insert(key, meshBytes, _frame);
                     std::fprintf(
                         stderr, "View3D: loaded scenery model %s (%zu primitives)\n", identifier.c_str(),
@@ -527,24 +612,23 @@ namespace OpenRCT2::View3D::Park
                 }
                 else
                 {
-                    std::fprintf(stderr, "View3D: model %s failed to upload\n", identifier.c_str());
+                    _loads->forget(identifier);
+                    if (_loggedUploadFail.insert(identifier).second)
+                    {
+                        std::fprintf(stderr, "View3D: model %s failed to upload\n", identifier.c_str());
+                    }
                 }
                 uploaded++;
                 bytes += meshBytes;
             }
         }
 
-        void composeVisible()
+        void composeVisible(const FrameCull& cull)
         {
             _batches.clear();
-            bool haveCamera = false;
-            float eyeX = 0.0f;
-            float eyeY = 0.0f;
-            float eyeZ = 0.0f;
-            float planes[6][4] = {};
-            readCamera(haveCamera, eyeX, eyeY, eyeZ, planes);
-            std::unordered_map<uint32_t, size_t> modelBatches;
-            std::unordered_map<int32_t, size_t> spriteBatches;
+            _modelBatches.clear();
+            _spriteBatches.clear();
+            std::vector<std::string> toLoad;
             for (int32_t y = 0; y < _grid.chunksY(); y++)
             {
                 for (int32_t x = 0; x < _grid.chunksX(); x++)
@@ -554,7 +638,7 @@ namespace OpenRCT2::View3D::Park
                     {
                         continue;
                     }
-                    if (!chunkVisible(*chunk, haveCamera, eyeX, eyeY, eyeZ, planes))
+                    if (!chunkVisible(*chunk, cull))
                     {
                         continue;
                     }
@@ -564,32 +648,26 @@ namespace OpenRCT2::View3D::Park
                         if (placement.modelCandidate)
                         {
                             const auto gpu = _gpu.find(placement.typeKey);
-                            if (gpu != _gpu.end())
+                            if (gpu != _gpu.end() && gpu->second >= 0)
                             {
                                 modelHandle = gpu->second;
-                            }
-                            else if (placement.typeKey < _typeIds.size())
-                            {
-                                ensureLoads();
-                                const std::string& identifier = _typeIds[placement.typeKey];
-                                if (_loads->phase(identifier) == ModelLoadPhase::absent)
-                                {
-                                    _loads->request(identifier);
-                                }
-                            }
-                            if (modelHandle >= 0)
-                            {
                                 _vram.touch(placement.typeKey, _frame);
+                            }
+                            else if (gpu == _gpu.end() && placement.typeKey < _typeIds.size())
+                            {
+                                toLoad.push_back(_typeIds[placement.typeKey]);
+                                // Still loading. Do not upload the four sprite faces.
+                                continue;
                             }
                         }
                         if (modelHandle >= 0)
                         {
-                            const auto found = modelBatches.find(placement.typeKey);
+                            const auto found = _modelBatches.find(placement.typeKey);
                             size_t index;
-                            if (found == modelBatches.end())
+                            if (found == _modelBatches.end())
                             {
                                 index = _batches.size();
-                                modelBatches.emplace(placement.typeKey, index);
+                                _modelBatches.emplace(placement.typeKey, index);
                                 Batch batch;
                                 batch.handle = modelHandle;
                                 batch.model = true;
@@ -606,17 +684,21 @@ namespace OpenRCT2::View3D::Park
                         }
                         for (int face = 0; face < 4; face++)
                         {
-                            const int32_t handle = placement.spriteHandles[face];
+                            if (!placement.spriteFace[face])
+                            {
+                                continue;
+                            }
+                            const int32_t handle = spriteHandleForFace(placement.spriteImage[face], face);
                             if (handle < 0)
                             {
                                 continue;
                             }
-                            const auto found = spriteBatches.find(handle);
+                            const auto found = _spriteBatches.find(handle);
                             size_t index;
-                            if (found == spriteBatches.end())
+                            if (found == _spriteBatches.end())
                             {
                                 index = _batches.size();
-                                spriteBatches.emplace(handle, index);
+                                _spriteBatches.emplace(handle, index);
                                 Batch batch;
                                 batch.handle = handle;
                                 batch.model = false;
@@ -631,6 +713,11 @@ namespace OpenRCT2::View3D::Park
                         }
                     }
                 }
+            }
+            if (!toLoad.empty())
+            {
+                ensureLoads();
+                _loads->requestAbsent(toLoad);
             }
         }
 
@@ -654,8 +741,11 @@ namespace OpenRCT2::View3D::Park
     {
         _loads.reset();
         meshDrawShutdown();
-        _sprites.clear();
+        _spriteHandles.clear();
+        _loggedUploadFail.clear();
         _batches.clear();
+        _modelBatches.clear();
+        _spriteBatches.clear();
         _loggedShader = false;
         _blit.clear();
         _rgba.clear();
@@ -683,9 +773,17 @@ namespace OpenRCT2::View3D::Park
             return;
         }
         _frame++;
+        if (_dropSprites)
+        {
+            _dropSprites = false;
+            _spriteHandles.clear();
+            meshDrawClearSprites();
+        }
         syncChunks();
-        uploadReadyModels();
-        composeVisible();
+        FrameCull cull;
+        readCamera(cull);
+        uploadReadyModels(cull);
+        composeVisible(cull);
         for (const Batch& batch : _batches)
         {
             if (batch.instances.empty() || hideBatch(batch))

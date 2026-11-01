@@ -25,7 +25,12 @@ namespace OpenRCT2::View3D
         float yaw = 0.0f;
         bool vegetation = false;
         bool modelCandidate = false;
-        int32_t spriteHandles[4] = { -1, -1, -1, -1 };
+        // Sprite images are stored for the fallback. They are uploaded only when
+        // this placement is drawn without a model. Bits are a memcpy of ImageId.
+        uint64_t spriteImage[4] = {};
+        bool spriteFace[4] = {};
+        // Top of the object's declared height, in viewer units. entry height, not a fixed box.
+        float topZ = 0.0f;
     };
 
     struct ChunkBox
@@ -85,6 +90,11 @@ namespace OpenRCT2::View3D
     void extractFrustumPlanes(const float clip[16], float planes[6][4]);
     bool boxOutsideFrustum(const ChunkBox& box, const float planes[6][4]);
     bool boxOutsideDistance(const ChunkBox& box, float eyeX, float eyeY, float eyeZ, float maxDistanceTiles);
+    // Horizontal distance from the view focus. The eye's height is not part of it.
+    bool boxOutsideGroundDistance(const ChunkBox& box, float focusX, float focusY, float maxDistanceTiles);
+    // max(configured view distance, horizontal eye-to-focus distance) so a zoomed-out
+    // camera still draws the ground it can see.
+    float sceneryCullRadius(float eyeX, float eyeY, float focusX, float focusY);
 
     // Builds `count` placements across a square of chunks and returns how many survive a cull.
     // `microseconds` is the cull time. Used as the 10k-instance check.

@@ -22,6 +22,7 @@ set(test_files
    "${ROOT_DIR}/src/openrct2-3d/src/GpuBudget.cpp"
    "${ROOT_DIR}/src/openrct2-3d/src/ModelLoadQueue.cpp"
    "${ROOT_DIR}/src/openrct2-3d/third_party/cgltf/cgltf.cpp"
+   "${ROOT_DIR}/src/openrct2-3d/third_party/stb_image_impl.cpp"
    "${CMAKE_CURRENT_SOURCE_DIR}/ModelCacheTests.cpp"
    "${CMAKE_CURRENT_SOURCE_DIR}/SceneryScaleTests.cpp"
    "${CMAKE_CURRENT_SOURCE_DIR}/ImageImporterTests.cpp"
@@ -55,7 +56,8 @@ add_executable(OpenRCT2::OpenRCT2Tests ALIAS OpenRCT2Tests)
 target_link_libraries(OpenRCT2Tests GTest::gtest GTest::gtest_main libopenrct2)
 target_include_directories(
     OpenRCT2Tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../src" "${ROOT_DIR}/src/openrct2-3d/src"
-                          "${ROOT_DIR}/src/openrct2-3d/third_party/cgltf")
+                          "${ROOT_DIR}/src/openrct2-3d/third_party/cgltf"
+                          "${ROOT_DIR}/src/openrct2-3d/third_party/bimg/3rdparty/stb")
 set_target_properties(OpenRCT2Tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 gtest_discover_tests(OpenRCT2Tests
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}

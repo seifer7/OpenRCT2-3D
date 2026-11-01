@@ -69,11 +69,11 @@ namespace OpenRCT2::View3D::Park
 
         struct SpriteKey
         {
-            uint64_t image = 0;
+            ImageId image;
             int face = 0;
             bool operator==(const SpriteKey& other) const
             {
-                return image == other.image && face == other.face;
+                return face == other.face && image == other.image;
             }
         };
 
@@ -81,7 +81,16 @@ namespace OpenRCT2::View3D::Park
         {
             size_t operator()(const SpriteKey& key) const
             {
-                return std::hash<uint64_t>{}(key.image) ^ (static_cast<size_t>(key.face) << 1);
+                size_t hash = std::hash<uint32_t>{}(static_cast<uint32_t>(key.image.GetIndex()));
+                hash ^= static_cast<size_t>(static_cast<uint8_t>(key.image.GetPrimary())) << 8;
+                hash ^= static_cast<size_t>(static_cast<uint8_t>(key.image.GetSecondary())) << 16;
+                hash ^= static_cast<size_t>(static_cast<uint8_t>(key.image.GetTertiary())) << 24;
+                hash ^= static_cast<size_t>(key.face) << 1;
+                if (key.image.IsRemap())
+                {
+                    hash ^= 0x9e3779b97f4a7c15uLL;
+                }
+                return hash;
             }
         };
 
@@ -271,30 +280,14 @@ namespace OpenRCT2::View3D::Park
             return Drawing::LightFx::IsAvailable() ? Drawing::LightFx::GetPalette() : Drawing::gPalette;
         }
 
-        uint64_t imageBits(const ImageId& image)
+        int32_t spriteHandleForFace(const ImageId& image, int face)
         {
-            uint64_t bits = 0;
-            static_assert(sizeof(ImageId) == sizeof(bits), "ImageId is the sprite cache key");
-            std::memcpy(&bits, &image, sizeof(bits));
-            return bits;
-        }
-
-        ImageId imageFromBits(uint64_t bits)
-        {
-            ImageId image;
-            std::memcpy(&image, &bits, sizeof(image));
-            return image;
-        }
-
-        int32_t spriteHandleForFace(uint64_t bits, int face)
-        {
-            const SpriteKey key{ bits, face };
+            const SpriteKey key{ image, face };
             const auto found = _spriteHandles.find(key);
             if (found != _spriteHandles.end())
             {
                 return found->second;
             }
-            const ImageId image = imageFromBits(bits);
             const G1Element* g1 = GfxGetG1Element(image);
             if (g1 == nullptr || g1->width <= 0 || g1->height <= 0 || g1->width > kMaxSpriteEdge || g1->height > kMaxSpriteEdge)
             {
@@ -370,8 +363,7 @@ namespace OpenRCT2::View3D::Park
             // object, and anything not on screen, must not take an atlas slot.
             for (int face = 0; face < 4; face++)
             {
-                const ImageId image = faceImage(element, *entry, face);
-                placement.spriteImage[face] = imageBits(image);
+                placement.spriteImage[face] = faceImage(element, *entry, face);
                 placement.spriteFace[face] = true;
             }
             const float declared = viewerZ(entry->height);

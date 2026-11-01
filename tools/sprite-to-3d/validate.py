@@ -143,7 +143,10 @@ def _fallback_budget():
 def min_render_px(meta):
     """Opaque-pixel floor per view for the meta's size class (conventions.SIZE_CLASSES)."""
     budget = C.SIZE_CLASSES.get(meta.get("size_class")) or _fallback_budget()
-    return int(budget.get("min_render_px") or C.DEFAULT_MIN_RENDER_PX)
+    # Explicit None check: a class may set the floor to 0 (no floor), which an
+    # `or` fallback would silently turn into DEFAULT_MIN_RENDER_PX.
+    value = budget.get("min_render_px")
+    return int(C.DEFAULT_MIN_RENDER_PX if value is None else value)
 
 
 def trunk_base_extent(positions, indices=None, band_sim=None):
@@ -444,16 +447,40 @@ def check_texture(image, meta, report):
 def per_view_tip_status(deltas):
     """Gate per-view tip deltas (render minus sprite, sim units).
 
-    Any view over TIP_VIEW_FAIL_SIM fails; any over TIP_VIEW_WARN_SIM warns.
+    Any view beyond TIP_VIEW_FAIL_SIM fails; any beyond TIP_VIEW_WARN_SIM warns.
+    Both limits are inclusive: a delta of exactly ±TIP_VIEW_FAIL_SIM is a WARN,
+    not a FAIL (the reference pine measures +4 on views 1 and 2; see
+    conventions.TIP_VIEW_FAIL_SIM). TIP_VIEW_EPS absorbs float noise from a
+    fractional anchor row so a delta on the limit cannot flip to FAIL.
     Returns (status, detail).
     """
     worst = max(deltas, key=abs)
     text = ", ".join(f"{d:+.1f}" for d in deltas)
-    if any(abs(d) > C.TIP_VIEW_FAIL_SIM for d in deltas):
+    if any(abs(d) > C.TIP_VIEW_FAIL_SIM + C.TIP_VIEW_EPS for d in deltas):
         return "FAIL", f"views {text} sim; worst {worst:+.1f} is beyond ±{C.TIP_VIEW_FAIL_SIM:.0f}"
-    if any(abs(d) > C.TIP_VIEW_WARN_SIM for d in deltas):
+    if any(abs(d) > C.TIP_VIEW_WARN_SIM + C.TIP_VIEW_EPS for d in deltas):
         return "WARN", f"views {text} sim; worst {worst:+.1f} is beyond ±{C.TIP_VIEW_WARN_SIM:.0f}"
     return "PASS", f"views {text} sim (±{C.TIP_VIEW_WARN_SIM:.0f})"
+
+
+def check_declared_closed_iou(meta, report):
+    """Hold the meta's recorded iou.closed block to the closed-mask gate.
+
+    Stored figures are a recorded measurement. A fresh rasteriser will not hit
+    them exactly; this only catches a meta that claims a pass it didn't earn,
+    per view (IOU_CLOSED_MIN_PER_VIEW) and on the mean (IOU_CLOSED_MIN_MEAN).
+    """
+    closed = (meta.get("iou") or {}).get("closed") or {}
+    declared = closed.get("views")
+    if declared and len(declared) == 4:
+        if any(float(v) < C.IOU_CLOSED_MIN_PER_VIEW for v in declared):
+            report.error("meta iou.closed.views records a view under the closed-mask threshold")
+    mean = closed.get("mean")
+    if mean is not None and float(mean) < C.IOU_CLOSED_MIN_MEAN:
+        report.error(
+            f"meta iou.closed.mean {float(mean):.3f} is under the closed-mask mean threshold "
+            f"{C.IOU_CLOSED_MIN_MEAN:.2f}"
+        )
 
 
 def score_silhouettes(renders, placed, kernel=None):
@@ -499,7 +526,7 @@ def _hist_paths(value, path=""):
     if isinstance(value, dict):
         for key, item in value.items():
             here = f"{path}.{key}" if path else str(key)
-            if key == "hist" or str(key).endswith("_hist"):
+            if C.is_histogram_key(key):
                 found.append((here, item))
             found.extend(_hist_paths(item, here))
     elif isinstance(value, list):
@@ -595,12 +622,7 @@ def render_and_score(mesh, meta, sprites_dir, out_path, report, require_iou):
             )
             status, detail = per_view_tip_status([row[2] for row in rows])
             report.row("per-view tip delta", status, detail)
-        declared = ((meta.get("iou") or {}).get("closed") or {}).get("views")
-        if declared and len(declared) == 4:
-            # Stored figures are a recorded measurement. A fresh rasteriser will not
-            # hit them exactly; this only catches a meta that claims a pass it didn't earn.
-            if any(float(v) < C.IOU_CLOSED_MIN_PER_VIEW for v in declared):
-                report.error("meta iou.closed.views records a view under the closed-mask threshold")
+        check_declared_closed_iou(meta, report)
     elif require_iou:
         report.error("IoU was required but no --sprites directory was given")
     else:
@@ -760,7 +782,14 @@ def apply_checklist(report, glb_path, meta, mesh):
             base <= base_limit + 1e-3,
             f"{base:.3f} within ±{base_limit} (bottom {C.TRUNK_BASE_BAND_SIM:.0f} sim of the mesh)",
         )
-    mark("origin inside footprint", bool(bmin[0] < 0 < bmax[0] and bmin[1] < 0 < bmax[1]), "tile centre")
+    # Quarter-tile classes are authored about their own quadrant centre (the
+    # loader moves them to the tile centre ±8 sim by the stored quadrant).
+    quarter = tuple(budget.get("footprint_tiles") or ()) == (0.5, 0.5)
+    mark(
+        "origin inside footprint",
+        bool(bmin[0] < 0 < bmax[0] and bmin[1] < 0 < bmax[1]),
+        "quadrant centre" if quarter else "tile centre",
+    )
     sink = -float(bmin[2])
     mark("base sink <= 0.1", sink <= C.BASE_SINK_MAX + 1e-4 and float(bmin[2]) <= 0.02, f"z min {bmin[2]:.4f}")
     declared = _height_sim(meta)

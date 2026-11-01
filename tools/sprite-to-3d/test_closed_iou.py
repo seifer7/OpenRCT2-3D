@@ -1,7 +1,7 @@
 # Copyright (c) 2026 OpenRCT2 developers
 # Licensed under the GNU General Public License version 3.
 
-"""Closed-mask IoU gate (batch 1 QA decision 1)."""
+"""Closed-mask IoU gate (batch 1 QA Decision 1)."""
 
 from __future__ import annotations
 
@@ -123,6 +123,56 @@ class GateTest(unittest.TestCase):
         scores = validate.score_silhouettes([_rgba(solid)] * 4, [_rgba(stipple)] * 4)
         self.assertLess(scores["raw"]["mean"], scores["closed"]["mean"])
         self.assertEqual(scores["closed"]["kernel_px"], C.IOU_CLOSE_KERNEL)
+
+
+class DeclaredClosedIouTest(unittest.TestCase):
+    """The meta's recorded iou.closed block is held to the gate: views and mean."""
+
+    def _errors(self, closed):
+        report = validate.Report()
+        validate.check_declared_closed_iou({"iou": {"closed": closed}}, report)
+        return report.errors
+
+    def test_passing_block(self):
+        self.assertEqual(self._errors({"views": [0.78, 0.74, 0.79, 0.73], "mean": 0.76}), [])
+
+    def test_low_view_fails(self):
+        self.assertEqual(len(self._errors({"views": [0.78, 0.69, 0.79, 0.73], "mean": 0.76})), 1)
+
+    def test_low_mean_fails_even_with_every_view_passing(self):
+        errors = self._errors({"views": [0.72, 0.72, 0.72, 0.72], "mean": 0.72})
+        self.assertEqual(len(errors), 1)
+        self.assertIn("mean", errors[0])
+
+    def test_mean_on_the_threshold_passes(self):
+        self.assertEqual(self._errors({"views": [0.75] * 4, "mean": C.IOU_CLOSED_MIN_MEAN}), [])
+
+    def test_missing_block_is_not_an_error_here(self):
+        self.assertEqual(self._errors({}), [])
+        report = validate.Report()
+        validate.check_declared_closed_iou({}, report)
+        self.assertEqual(report.errors, [])
+
+
+class UvsWithoutImageTest(unittest.TestCase):
+    """A GLB with UVs but no embedded image FAILs cleanly instead of raising."""
+
+    def test_validator_fails_without_a_traceback(self):
+        import os
+        import tempfile
+        from unittest import mock
+
+        if not os.path.isfile(validate.FLAT_GLB):
+            self.skipTest("committed pine GLB not in this checkout")
+        mesh = validate.load_mesh(validate.FLAT_GLB)
+        self.assertIsNotNone(mesh["uvs"])
+        mesh["image"] = None
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(validate, "load_mesh", return_value=mesh):
+            report = validate.validate_files(validate.FLAT_GLB, validate.FLAT_META, None, os.path.join(tmp, "r.png"), False)
+        self.assertFalse(report.ok())
+        failed = [name for name, status, _detail in report.rows if status == "FAIL"]
+        self.assertTrue(any("image" in name for name in failed), failed)
+        self.assertFalse(any("could not read GLB" in e for e in report.errors))
 
 
 if __name__ == "__main__":

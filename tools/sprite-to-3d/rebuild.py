@@ -31,8 +31,7 @@ import numpy as np
 import conventions as C
 import extract as extract_mod
 import rct2dat
-from archetypes import build_mesh, write_atlas
-from archetypes.conifer import triangle_count
+from archetypes import build_mesh, triangle_count, write_atlas
 from glb_io import write_glb
 from patch_glb import patch
 
@@ -93,10 +92,6 @@ def export_with_blender(object_id, params_path, atlas_png, atlas_json, out_dir, 
     subprocess.check_call(cmd)
 
 
-def _is_hist_key(key):
-    return key == "hist" or str(key).endswith("_hist")
-
-
 def check_histograms(params, limit=None):
     """Refuse a params.json histogram with more than conventions.MAX_HIST_ENTRIES entries.
 
@@ -111,7 +106,7 @@ def check_histograms(params, limit=None):
         if isinstance(value, dict):
             for key, item in value.items():
                 here = f"{path}.{key}" if path else str(key)
-                if _is_hist_key(key) and isinstance(item, (dict, list)) and len(item) > limit:
+                if C.is_histogram_key(key) and isinstance(item, (dict, list)) and len(item) > limit:
                     raise SystemExit(
                         f"params.json {here} has {len(item)} entries; a histogram may hold at most {limit}"
                     )
@@ -126,7 +121,7 @@ def check_histograms(params, limit=None):
 def strip_histograms(value):
     """Copy of a JSON value with every histogram key removed (they stay in params.json)."""
     if isinstance(value, dict):
-        return {k: strip_histograms(v) for k, v in value.items() if not _is_hist_key(k)}
+        return {k: strip_histograms(v) for k, v in value.items() if not C.is_histogram_key(k)}
     if isinstance(value, list):
         return [strip_histograms(v) for v in value]
     return value
@@ -295,6 +290,32 @@ def _meta_params(spec, params):
     return out
 
 
+def review_png_path(out_dir, object_id):
+    """Where the validator writes the review sheet: next to the GLB in --out.
+
+    The sheet contains the original sprites, so it is named *.review.png
+    (gitignored) and goes wherever the caller sent the build output.
+    """
+    return os.path.join(out_dir, object_id + ".review.png")
+
+
+def validator_command(glb_path, meta_path, review_path, sprites_dir):
+    """The validate.py command line rebuild.py runs after writing the GLB and meta."""
+    cmd = [
+        sys.executable,
+        os.path.join(TOOL_DIR, "validate.py"),
+        "--glb",
+        glb_path,
+        "--meta",
+        meta_path,
+        "--out",
+        review_path,
+    ]
+    if sprites_dir:
+        cmd.extend(["--sprites", sprites_dir, "--require-iou"])
+    return cmd
+
+
 def _refuse_protected_overwrite(path, force):
     """Block silent replacement of a model that already ships in data/object-models."""
     protected = os.path.realpath(os.path.join(REPO_ROOT, "data", "object-models"))
@@ -401,18 +422,7 @@ def main(argv):
 
     if args.skip_validate:
         return 0
-    cmd = [
-        sys.executable,
-        os.path.join(TOOL_DIR, "validate.py"),
-        "--glb",
-        glb_path,
-        "--meta",
-        meta_path,
-        "--out",
-        os.path.join(TOOL_DIR, "out", spec["object_id"] + ".review.png"),
-    ]
-    if args.sprites:
-        cmd.extend(["--sprites", args.sprites, "--require-iou"])
+    cmd = validator_command(glb_path, meta_path, review_png_path(out_dir, spec["object_id"]), args.sprites)
     print("running validator")
     return subprocess.call(cmd)
 

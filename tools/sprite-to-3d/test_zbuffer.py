@@ -9,12 +9,14 @@ order; which pixels are opaque must not depend on the depth test.
 
 from __future__ import annotations
 
+import math
 import unittest
 
 import numpy as np
 
 from projection import camera_depth
-from render_views import rasterize, vertex_depths
+import render_views
+from render_views import DEPTH_EPS, rasterize, vertex_depths
 
 
 def _blender_to_gltf(p):
@@ -90,6 +92,58 @@ class DepthTest(unittest.TestCase):
         positions, _uvs, indices, _atlas = _scene(("far", "near"))
         image = rasterize(positions, None, indices, None, 0)
         self.assertTrue(np.all(image[image[..., 3] > 0][:, :3] == 180))
+
+
+    def test_coplanar_tie_is_order_independent(self):
+        # Two copies of the same card, one red and one blue: every covered pixel
+        # is a depth tie. A strict < keeps the first-drawn colour and a <= the
+        # last-drawn; the tie-break must give one answer for both orders.
+        positions = np.array(_quad(0.0, 0.0, 0.0, 1.0) * 2, np.float64)
+        atlas = np.zeros((4, 4, 4), np.uint8)
+        atlas[:, :2] = (255, 0, 0, 255)
+        atlas[:, 2:] = (0, 0, 255, 255)
+        uvs = np.array([[0.2, 0.5]] * 4 + [[0.8, 0.5]] * 4, np.float64)
+        red_first = np.array([0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7], np.int64)
+        blue_first = np.array([4, 5, 6, 4, 6, 7, 0, 1, 2, 0, 2, 3], np.int64)
+        a = rasterize(positions, uvs, red_first, atlas, 0)
+        b = rasterize(positions, uvs, blue_first, atlas, 0)
+        self.assertTrue(np.array_equal(a, b))
+        opaque = a[..., 3] > 0
+        self.assertGreater(np.count_nonzero(opaque), 0)
+        # One colour wins everywhere, not a per-triangle mix.
+        self.assertEqual(len({tuple(px) for px in a[opaque]}), 1)
+
+    def test_near_coincident_faces_tie_within_epsilon(self):
+        positions = np.array(_quad(0.0, 0.0, 0.0, 1.0) * 2, np.float64)
+        # Nudge the second card toward the camera by much less than DEPTH_EPS.
+        toward = np.array([1.0, 0.0, -1.0]) / math.sqrt(2.0)
+        positions[4:] += toward * DEPTH_EPS * 1e-3
+        atlas = np.zeros((4, 4, 4), np.uint8)
+        atlas[:, :2] = (255, 0, 0, 255)
+        atlas[:, 2:] = (0, 0, 255, 255)
+        uvs = np.array([[0.2, 0.5]] * 4 + [[0.8, 0.5]] * 4, np.float64)
+        order1 = np.array([0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7], np.int64)
+        order2 = np.array([4, 5, 6, 4, 6, 7, 0, 1, 2, 0, 2, 3], np.int64)
+        self.assertTrue(np.array_equal(rasterize(positions, uvs, order1, atlas, 0), rasterize(positions, uvs, order2, atlas, 0)))
+
+    def test_depth_wins_rule(self):
+        z = np.array([[1.0, 1.0, 1.0]])
+        current = np.array([[[10, 10, 10, 255]] * 3], np.uint8)
+        sample = np.array([[[20, 20, 20, 255], [5, 5, 5, 255], [20, 20, 20, 255]]], np.uint8)
+        depth = np.array([[1.0 - 10 * DEPTH_EPS, 1.0, 1.0 + DEPTH_EPS / 2]])
+        # nearer wins; a tie goes to the larger colour (lost by 5, won by 20).
+        self.assertEqual(render_views._depth_wins(depth, z, sample, current).tolist(), [[True, False, True]])
+        far = np.array([[1.0 + 10 * DEPTH_EPS] * 3])
+        self.assertFalse(render_views._depth_wins(far, z, sample, current).any())
+
+    def test_uvs_without_an_image_render_untextured(self):
+        # A GLB with TEXCOORD_0 but no embedded image used to raise
+        # AttributeError (None.shape); it is drawn like a mesh without UVs.
+        positions, uvs, indices, _atlas = _scene(("far", "near"))
+        with_uvs = rasterize(positions, uvs, indices, None, 0)
+        without = rasterize(positions, None, indices, None, 0)
+        self.assertTrue(np.array_equal(with_uvs, without))
+        self.assertGreater(np.count_nonzero(with_uvs[..., 3]), 0)
 
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .conifer_atlas import Canvas
+from .conifer_atlas import Canvas, bark_counts
 
 SIZE = (128, 128)
 
@@ -159,7 +159,7 @@ def paint(params, palette):
     order = np.argsort(noise, axis=None)
     out = np.empty(noise.size, np.int32)
     keys = [int(k) for k in spec.get("bark_key_order") or sorted(bark_hist)]
-    cnt = np.array([bark_hist[k] for k in keys], float)
+    cnt = bark_counts(bark_hist, keys, "tree128")
     cut = np.round(np.cumsum(cnt) / cnt.sum() * noise.size).astype(int)
     s0 = 0
     for key, c in zip(keys, cut):

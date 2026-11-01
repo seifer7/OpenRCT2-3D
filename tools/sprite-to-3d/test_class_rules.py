@@ -1,13 +1,14 @@
 # Copyright (c) 2026 OpenRCT2 developers
 # Licensed under the GNU General Public License version 3.
 
-"""Per-class render floor, footprints, histograms and per-view tips (batch 1 QA decisions 2-4, tips)."""
+"""Per-class render floor, footprints, histograms and per-view tips (batch 1 QA Decisions 2-4 and "Other issues" 3)."""
 
 from __future__ import annotations
 
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -87,6 +88,56 @@ class MinRenderPxTest(unittest.TestCase):
         self.assertFalse(results["prop_tile"])
         self.assertFalse(results["tree_quarter"])
         self.assertTrue(results["tree_1tile"])
+
+
+class MinRenderPxFallbackTest(unittest.TestCase):
+    def test_zero_floor_is_kept(self):
+        # An `or` fallback turned a class floor of 0 into DEFAULT_MIN_RENDER_PX.
+        classes = dict(C.SIZE_CLASSES)
+        classes["zero_floor"] = dict(C.SIZE_CLASSES["prop_tile"], min_render_px=0)
+        with mock.patch.object(C, "SIZE_CLASSES", classes):
+            self.assertEqual(validate.min_render_px({"size_class": "zero_floor"}), 0)
+
+    def test_missing_floor_falls_back(self):
+        classes = dict(C.SIZE_CLASSES)
+        budget = dict(C.SIZE_CLASSES["prop_tile"])
+        budget.pop("min_render_px")
+        classes["no_floor"] = budget
+        with mock.patch.object(C, "SIZE_CLASSES", classes):
+            self.assertEqual(validate.min_render_px({"size_class": "no_floor"}), C.DEFAULT_MIN_RENDER_PX)
+
+    def test_unknown_class_uses_the_default(self):
+        self.assertEqual(validate.min_render_px({"size_class": "nope"}), C.DEFAULT_MIN_RENDER_PX)
+
+
+class OriginRowTest(unittest.TestCase):
+    def test_full_tile_says_tile_centre(self):
+        _report, rows = _rows("prop_tile", _fake_mesh(_box(0.3)))
+        self.assertEqual(rows["origin inside footprint"], ("PASS", "tile centre"))
+
+    def test_quarter_classes_say_quadrant_centre(self):
+        for size_class in ("prop_quarter", "tree_quarter"):
+            with self.subTest(size_class=size_class):
+                _report, rows = _rows(size_class, _fake_mesh(_box(0.2)))
+                self.assertEqual(rows["origin inside footprint"], ("PASS", "quadrant centre"))
+
+
+class HistogramKeyTest(unittest.TestCase):
+    def test_one_definition(self):
+        for key in ("hist", "sprite_hist", "rim_hist", "bark_hist"):
+            self.assertTrue(C.is_histogram_key(key), key)
+        for key in ("history", "hist_size", "tiles", 3):
+            self.assertFalse(C.is_histogram_key(key), key)
+
+    def test_rebuild_and_validate_share_it(self):
+        self.assertFalse(hasattr(rebuild, "_is_hist_key"))
+        value = {"atlas": {"hist": {"1": 2}, "tiles": [{"rim_hist": {}}]}, "x_hist": [1]}
+        paths = [path for path, _item in validate._hist_paths(value)]
+        self.assertEqual(sorted(paths), ["atlas.hist", "atlas.tiles[0].rim_hist", "x_hist"])
+        self.assertEqual(rebuild.strip_histograms(value), {"atlas": {"tiles": [{}]}})
+        with mock.patch.object(C, "is_histogram_key", lambda key: key == "tiles"):
+            self.assertEqual([p for p, _ in validate._hist_paths(value)], ["atlas.tiles"])
+            self.assertNotIn("tiles", rebuild.strip_histograms(value)["atlas"])
 
 
 class FootprintTest(unittest.TestCase):
@@ -190,6 +241,18 @@ class PerViewTipTest(unittest.TestCase):
         self.assertEqual(validate.per_view_tip_status([0, 4, 4, 3])[0], "WARN")  # the pine
         self.assertEqual(validate.per_view_tip_status([0, -4.5, 0, 0])[0], "FAIL")
         self.assertEqual(validate.per_view_tip_status([5, 0, 0, 0])[0], "FAIL")
+
+    def test_fail_limit_is_inclusive(self):
+        # The pine measures +0/+4/+4/+3 and must stay a WARN: exactly
+        # TIP_VIEW_FAIL_SIM is on the limit, not over it. Float noise from a
+        # fractional anchor row does not tip it into FAIL either.
+        limit = C.TIP_VIEW_FAIL_SIM
+        self.assertEqual(validate.per_view_tip_status([0, limit, -limit, 0])[0], "WARN")
+        self.assertEqual(validate.per_view_tip_status([0, limit + 1e-9, 0, 0])[0], "WARN")
+        self.assertEqual(validate.per_view_tip_status([0, limit + 0.01, 0, 0])[0], "FAIL")
+        self.assertEqual(validate.per_view_tip_status([0, limit + 1, 0, 0])[0], "FAIL")
+        self.assertEqual(validate.per_view_tip_status([C.TIP_VIEW_WARN_SIM] * 4)[0], "PASS")
+        self.assertLess(C.TIP_VIEW_EPS, 0.01)
 
     def test_tallest_check_still_runs(self):
         h = 192

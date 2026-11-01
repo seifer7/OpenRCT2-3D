@@ -1,6 +1,11 @@
 {
  "object": "TCRP (Corsican Pine) small scenery, 3D model v2",
  "version": 2,
+ "size_class": "tree_1tile",
+ "alignment": {
+  "sprite_shift": [-2, 0],
+  "sprite_y_nudge": -1
+ },
  "generated": "2026-11-01 (AEST, UTC+10)",
  "previous_version": "v1/ (kept unchanged)",
  "units_and_scale": {

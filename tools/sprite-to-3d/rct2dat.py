@@ -10,6 +10,8 @@ This module does not bundle any game data. Callers pass paths at runtime.
 
 from __future__ import annotations
 
+import os
+import re
 import struct
 
 import numpy as np
@@ -44,6 +46,16 @@ def ror8(value, count):
     return ((value >> count) | (value << (8 - count))) & 0xFF
 
 
+# A scenery object chunk is far smaller than this. The cap stops a corrupt
+# length from growing without bound.
+_MAX_DECODED = 32 * 1024 * 1024
+
+
+def _need(src, index, what):
+    if index < 0 or index >= len(src):
+        raise ValueError(f"truncated {what}: need offset {index}, length {len(src)}")
+
+
 def rle_decode(src):
     out = bytearray()
     i = 0
@@ -53,11 +65,19 @@ def rle_decode(src):
         i += 1
         if b & 0x80:
             count = 257 - b
+            _need(src, i, "RLE run")
+            if len(out) + count > _MAX_DECODED:
+                raise ValueError("RLE output exceeds the size cap")
             out += bytes([src[i]]) * count
             i += 1
         else:
-            out += src[i : i + b + 1]
-            i += b + 1
+            count = b + 1
+            if i + count > n:
+                raise ValueError(f"truncated RLE literal: need {count} bytes at {i}, length {n}")
+            if len(out) + count > _MAX_DECODED:
+                raise ValueError("RLE output exceeds the size cap")
+            out += src[i : i + count]
+            i += count
     return bytes(out)
 
 
@@ -68,12 +88,21 @@ def decompress(src):
         b = src[i]
         i += 1
         if b == 0xFF:
+            _need(src, i, "literal")
+            if len(out) >= _MAX_DECODED:
+                raise ValueError("decompressed output exceeds the size cap")
             out.append(src[i])
             i += 1
         else:
             off = (b >> 3) - 32
             count = (b & 7) + 1
             start = len(out) + off
+            if start < 0 or start + count > len(out):
+                raise ValueError(
+                    f"decompression reference starts at {start} for {count} bytes, output is {len(out)}"
+                )
+            if len(out) + count > _MAX_DECODED:
+                raise ValueError("decompressed output exceeds the size cap")
             for k in range(count):
                 out.append(out[start + k])
     return bytes(out)
@@ -90,8 +119,14 @@ def rotate_bytes(src):
 
 def read_chunk(data, pos):
     """Decode one Sawyer chunk. Encoding byte, then a little-endian length."""
+    if pos < 0 or pos + 5 > len(data):
+        raise ValueError(f"truncated Sawyer chunk header at {pos}, file is {len(data)} bytes")
     encoding = data[pos]
     length = struct.unpack_from("<I", data, pos + 1)[0]
+    if length > _MAX_DECODED or pos + 5 + length > len(data):
+        raise ValueError(
+            f"truncated Sawyer chunk: encoding {encoding}, length {length}, file has {len(data) - (pos + 5)} bytes left"
+        )
     raw = data[pos + 5 : pos + 5 + length]
     if encoding == 0:
         return raw
@@ -149,19 +184,39 @@ def parse_object(path):
     if obj_type in (1, 2, 3, 4, 6):
         pos += 16  # scenery group entry
     if obj_type == 1:
+        if len(chunk) < 10:
+            raise ValueError("truncated small-scenery header")
         sflags = struct.unpack_from("<I", chunk, 6)[0]
         if sflags & (1 << 15):  # hasFrameOffsets
-            while chunk[pos] != 0xFF:
+            while True:
+                if pos >= len(chunk):
+                    raise ValueError("truncated frame-offset list")
+                if chunk[pos] == 0xFF:
+                    break
                 pos += 1
             pos += 1
     elif obj_type == 2:
+        if len(chunk) < 8:
+            raise ValueError("truncated large-scenery header")
         if chunk[7] & (1 << 2):  # is3DText
             pos += 0x40E
-        while struct.unpack_from("<H", chunk, pos)[0] != 0xFFFF:
+        while True:
+            if pos + 2 > len(chunk):
+                raise ValueError("truncated large-scenery tile list")
+            if struct.unpack_from("<H", chunk, pos)[0] == 0xFFFF:
+                break
+            if pos + 9 > len(chunk):
+                raise ValueError("truncated large-scenery tile")
             pos += 9
         pos += 2
     elif obj_type == 7:
-        while chunk[pos] != 0xFF:
+        while True:
+            if pos >= len(chunk):
+                raise ValueError("truncated scenery-group list")
+            if chunk[pos] == 0xFF:
+                break
+            if pos + 16 > len(chunk):
+                raise ValueError("truncated scenery-group entry")
             pos += 16
         pos += 1
     entries, image_bytes = read_image_table(chunk, pos)
@@ -180,21 +235,30 @@ def decode_image(entry, image_bytes, palette, want_indexed=False):
     indices = np.zeros((height, width), np.uint8)
     alpha = np.zeros((height, width), np.uint8)
     if flags & 4:
+        if offset < 0 or offset + 2 * height > len(image_bytes):
+            raise ValueError("truncated RLE row table")
         for y in range(height):
             q = struct.unpack_from("<H", image_bytes, offset + 2 * y)[0] + offset
             while True:
+                if q + 2 > len(image_bytes):
+                    raise ValueError("truncated RLE scan element")
                 b1 = image_bytes[q]
                 x = image_bytes[q + 1]
                 q += 2
                 run = b1 & 0x7F
                 if run:
+                    if x + run > width or q + run > len(image_bytes):
+                        raise ValueError("RLE run leaves the sprite")
                     indices[y, x : x + run] = np.frombuffer(image_bytes, np.uint8, run, q)
                     alpha[y, x : x + run] = 255
                 q += run
                 if b1 & 0x80:
                     break
     else:
-        indices[:] = np.frombuffer(image_bytes, np.uint8, width * height, offset).reshape(height, width)
+        nbytes = width * height
+        if offset < 0 or offset + nbytes > len(image_bytes):
+            raise ValueError("truncated raw bitmap")
+        indices[:] = np.frombuffer(image_bytes, np.uint8, nbytes, offset).reshape(height, width)
         alpha[indices != 0] = 255
     rgba = np.zeros((height, width, 4), np.uint8)
     rgba[..., :3] = palette[indices]
@@ -231,6 +295,29 @@ def load_palette(g1_path):
         b, g, r = data[base + offset + 3 * i : base + offset + 3 * i + 3]
         palette[x_off + i] = (r, g, b)
     palette[243:255] = palette[10:22]
+    return palette
+
+
+def load_standard_palette(header_path=None):
+    """RGB triples from ImageImporter.h StandardPalette (stored there as B, G, R, A).
+
+    That table is the game palette already in this repository. It is the same
+    palette Data/g1.dat carries, so an atlas painted with it matches a g1.dat build.
+    """
+    if header_path is None:
+        here = os.path.dirname(os.path.abspath(__file__))
+        header_path = os.path.join(here, "..", "..", "src", "openrct2", "drawing", "ImageImporter.h")
+    text = open(header_path, encoding="utf-8").read()
+    marker = text.find("StandardPalette")
+    if marker < 0:
+        raise ValueError(f"StandardPalette not found in {header_path}")
+    body = text[marker : text.find("};", marker)]
+    found = re.findall(r"\{\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*\d+\s*\}", body)
+    if len(found) < 256:
+        raise ValueError(f"StandardPalette has {len(found)} colours, expected 256")
+    palette = np.zeros((256, 3), np.uint8)
+    for i, (b, g, r) in enumerate(found[:256]):
+        palette[i] = (int(r), int(g), int(b))
     return palette
 
 

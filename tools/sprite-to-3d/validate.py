@@ -4,7 +4,7 @@
 """Check a GLB against the sprite-to-3D authoring conventions.
 
   python3 validate.py --self-test
-  python3 validate.py data/object-models/rct2.scenery_small.tcrp --sprites /path/to/extracted/TCRP --out tools/sprite-to-3d/out
+  python3 validate.py data/object-models/rct2.scenery_small.tcrp.glb --sprites /path/to/extracted/TCRP --out tools/sprite-to-3d/out
 
 Exit status is 0 when every check passes, 1 when a check fails, 2 on usage errors.
 Sprites are read from a local path at runtime and are not stored in the repository.
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 
@@ -27,20 +28,34 @@ from render_views import load_sprite_folder, place_sprite, rasterize, silhouette
 
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(TOOL_DIR))
-PINE_DIR = os.path.join(REPO_ROOT, "data", "object-models", "rct2.scenery_small.tcrp")
-PINE_ID = "rct2.scenery_small.tcrp"
+PINE_ID = C.PINE_OBJECT_ID
+FLAT_GLB = os.path.join(REPO_ROOT, "data", "object-models", PINE_ID + ".glb")
+FLAT_META = os.path.join(REPO_ROOT, "data", "object-models", PINE_ID + ".meta.json")
+_PALETTE = None
 
 
 class Report:
     def __init__(self):
         self.errors = []
+        self.warnings = []
         self.notes = []
+        self.rows = []
 
     def error(self, message):
         self.errors.append(message)
 
+    def warn(self, message):
+        self.warnings.append(message)
+
     def note(self, message):
         self.notes.append(message)
+
+    def row(self, name, status, detail=""):
+        self.rows.append((name, status, detail))
+        if status == "FAIL":
+            self.error(f"{name}: {detail}" if detail else name)
+        elif status == "WARN":
+            self.warn(f"{name}: {detail}" if detail else name)
 
     def ok(self):
         return not self.errors
@@ -79,6 +94,136 @@ def _blender_bounds(positions):
     return blender.min(axis=0), blender.max(axis=0), blender
 
 
+def _palette():
+    global _PALETTE
+    if _PALETTE is None:
+        import rct2dat
+
+        colours = rct2dat.load_standard_palette()
+        _PALETTE = {tuple(int(c) for c in row) for row in colours}
+    return _PALETTE
+
+
+def _object_id(meta, glb_path):
+    if meta.get("object_id"):
+        return meta["object_id"]
+    name = os.path.basename(glb_path)
+    return name[:-4] if name.endswith(".glb") else name
+
+
+def _size_class_budget(meta):
+    """Return (name, budget) or (None, None). Canopy comes only from the class table."""
+    name = meta.get("size_class")
+    if name not in C.SIZE_CLASSES:
+        return None, None
+    return name, C.SIZE_CLASSES[name]
+
+
+def alignment_of(meta):
+    """Return (shift_xy, y_nudge) or None when the meta does not declare alignment.
+
+    There is no default. A missing block used to paste sprites at shift (0, 0)
+    and the pine's IoU fell from 0.725 to about 0.67.
+    """
+    alignment = meta.get("alignment")
+    if not isinstance(alignment, dict):
+        return None
+    shift = alignment.get("sprite_shift")
+    nudge = alignment.get("sprite_y_nudge")
+    if not isinstance(shift, (list, tuple)) or len(shift) != 2 or nudge is None:
+        return None
+    return [float(shift[0]), float(shift[1])], float(nudge)
+
+
+def tip_height_sim(mask, anchor_y):
+    """Sim height of the top opaque row above the z=0 anchor row.
+
+    The comparison rasteriser applies the render-only Z squash, so one pixel
+    in this image is already one sim Z unit. Do not scale by 1/sqrt(2/3) again.
+    The mask bottom is ignored: a trunk sunk below z=0 must not add to the tip.
+    """
+    image = np.asarray(mask)
+    opaque = image[..., 3] > 0 if image.ndim == 3 else image.astype(bool)
+    rows = np.nonzero(opaque.any(axis=1))[0]
+    if len(rows) == 0:
+        return None
+    return float(anchor_y) - float(rows[0])
+
+
+def sprite_anchor_y(shift, nudge):
+    """Row where the sprite's draw anchor lands after the fitted paste."""
+    return C.ORIGIN_PIXEL[1] + float(nudge) - float(shift[1])
+
+
+def compare_tip_heights(render_masks, sprite_masks, shift, nudge):
+    """Model tip against the tallest sprite tip, both above their anchor rows.
+
+    Returns ok, model_tip, tallest_sprite_tip, per-view (sprite_tip, render_tip, delta).
+    delta is render tip minus sprite tip, in sim units.
+    """
+    render_y = C.ORIGIN_PIXEL[1]
+    sprite_y = sprite_anchor_y(shift, nudge)
+    rows = []
+    for view in range(4):
+        sprite_tip = tip_height_sim(sprite_masks[view], sprite_y)
+        render_tip = tip_height_sim(render_masks[view], render_y)
+        if sprite_tip is None or render_tip is None:
+            return False, None, None, rows
+        rows.append((sprite_tip, render_tip, render_tip - sprite_tip))
+    model_tip = max(item[1] for item in rows)
+    tallest_sprite = max(item[0] for item in rows)
+    ok = abs(model_tip - tallest_sprite) <= C.HEIGHT_TOLERANCE_SIM
+    return ok, model_tip, tallest_sprite, rows
+
+
+def _height_sim(meta):
+    if meta.get("height_sim") is not None:
+        return float(meta["height_sim"])
+    box = (meta.get("units_and_scale") or {}).get("bbox_sim") or {}
+    if box.get("max"):
+        return float(box["max"][2])
+    return None
+
+
+def _justification(meta):
+    texture = meta.get("texture") or {}
+    for value in (texture.get("justification"), texture.get("atlas_justification"), meta.get("texture_justification")):
+        if value and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def _identifier_safe(name):
+    if not name or any(token in name for token in ("/", "\\", ":", "..")):
+        return False
+    reserved = {"CON", "PRN", "AUX", "NUL"}
+    reserved.update(f"COM{i}" for i in range(1, 10))
+    reserved.update(f"LPT{i}" for i in range(1, 10))
+    return name.upper() not in reserved
+
+
+def _texel_density(positions, uvs, indices, width, height):
+    """10th percentile of edges at least 0.2 units long, in texels per unit.
+
+    Foliage cards are denser than the trunk. The lower tail of the long edges
+    is the trunk and the branches, which are authored near 1 texel per sim unit
+    (32 per Blender unit). The Corsican Pine lands inside the ±25% band.
+    """
+    samples = []
+    for offset in range(0, len(indices), 3):
+        tri = indices[offset : offset + 3]
+        for a, b in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])):
+            world = float(np.linalg.norm(positions[a] - positions[b]))
+            if world < 0.2:
+                continue
+            du = (uvs[a, 0] - uvs[b, 0]) * width
+            dv = (uvs[a, 1] - uvs[b, 1]) * height
+            samples.append(math.hypot(float(du), float(dv)) / world)
+    if len(samples) < 8:
+        return None
+    return float(np.percentile(samples, 10))
+
+
 def _texture_of(gltf, material):
     pbr = material.get("pbrMetallicRoughness") or {}
     tex = pbr.get("baseColorTexture")
@@ -107,7 +252,8 @@ def check_materials(gltf, report):
         if material.get("doubleSided") is not True:
             report.error(f"material {name} is not doubleSided")
         pbr = material.get("pbrMetallicRoughness") or {}
-        if abs(float(pbr.get("roughnessFactor", -1)) - 1.0) > 1e-6:
+        # glTF's default roughnessFactor is 1. The Blender exporter omits it.
+        if abs(float(pbr.get("roughnessFactor", 1.0)) - 1.0) > 1e-6:
             report.error(f"material {name} roughnessFactor is {pbr.get('roughnessFactor')}; expected 1")
         if abs(float(pbr.get("metallicFactor", -1)) - 0.0) > 1e-6:
             report.error(f"material {name} metallicFactor is {pbr.get('metallicFactor')}; expected 0")
@@ -252,8 +398,19 @@ def render_and_score(mesh, meta, sprites_dir, out_path, report, require_iou):
     placed = None
     ious = None
     if sprites_dir:
-        shift = meta.get("alignment", {}).get("sprite_shift", [0, 0])
-        nudge = meta.get("alignment", {}).get("sprite_y_nudge", -1)
+        alignment = alignment_of(meta)
+        if alignment is None:
+            report.row(
+                "alignment",
+                "FAIL",
+                "meta.alignment.sprite_shift and sprite_y_nudge are required when --sprites is set; "
+                "there is no default paste",
+            )
+            if out_path:
+                write_review(out_path, renders, None)
+                report.note(f"wrote {out_path}")
+            return None
+        shift, nudge = alignment
         loaded = load_sprite_folder(sprites_dir)
         placed = [place_sprite(s, shift, nudge) for s in loaded]
         ious = []
@@ -261,23 +418,39 @@ def render_and_score(mesh, meta, sprites_dir, out_path, report, require_iou):
             score, sprite_px, render_px = silhouette_iou(placed[view], renders[view])
             ious.append(score)
             report.note(f"view {view} IoU {score:.3f} (sprite {sprite_px}px, render {render_px}px)")
-            span_s = _span(placed[view][..., 3] > 0)
-            span_r = _span(renders[view][..., 3] > 0)
-            if span_s[1] == 0 or span_r[1] == 0:
-                report.error(f"view {view} has an empty silhouette")
-            else:
-                ratio = span_r[1] / span_s[1]
-                if ratio < 0.7 or ratio > 1.35:
-                    report.error(
-                        f"view {view} height ratio render/sprite is {ratio:.2f}; "
-                        "the model scale does not match the sprite"
-                    )
         mean = float(np.mean(ious))
         report.note(f"mean IoU {mean:.3f}")
-        if any(s < C.IOU_MIN_PER_VIEW for s in ious) or mean < C.IOU_MIN_MEAN:
-            report.error(
-                f"IoU below the definition of done (each view >= {C.IOU_MIN_PER_VIEW}, "
-                f"mean >= {C.IOU_MIN_MEAN})"
+        iou_ok = all(s >= C.IOU_MIN_PER_VIEW for s in ious) and mean >= C.IOU_MIN_MEAN
+        report.row(
+            "silhouette IoU",
+            "PASS" if iou_ok else "FAIL",
+            f"views {[round(s, 3) for s in ious]} mean {mean:.3f}",
+        )
+        ratios = []
+        for view in range(4):
+            sprite_px = int(np.count_nonzero(placed[view][..., 3] > 0))
+            render_px = int(np.count_nonzero(renders[view][..., 3] > 0))
+            ratios.append(render_px / sprite_px if sprite_px else 0)
+        ratio_ok = all(C.AREA_RATIO[0] <= r <= C.AREA_RATIO[1] for r in ratios)
+        report.row(
+            "area ratio",
+            "PASS" if ratio_ok else "FAIL",
+            ", ".join(f"{r:.2f}" for r in ratios),
+        )
+        ok, model_tip, tallest, rows = compare_tip_heights(renders, placed, shift, nudge)
+        for view, (sprite_tip, render_tip, delta) in enumerate(rows):
+            report.note(
+                f"view {view} tip above anchor: sprite {sprite_tip:.1f} sim, "
+                f"render {render_tip:.1f} sim, delta {delta:+.1f}"
+            )
+        if model_tip is None:
+            report.row("height vs sprite", "FAIL", "a view has an empty silhouette")
+        else:
+            report.row(
+                "height vs sprite",
+                "PASS" if ok else "FAIL",
+                f"model tip {model_tip:.1f} sim vs tallest sprite tip {tallest:.1f} sim "
+                f"(±{C.HEIGHT_TOLERANCE_SIM:.0f}; squash already in the render)",
             )
         declared = (meta.get("iou") or {}).get("views")
         if declared and len(declared) == 4:
@@ -303,97 +476,243 @@ def _span(mask):
     return (int(xs[-1] - xs[0] + 1), int(ys[-1] - ys[0] + 1))
 
 
+def apply_checklist(report, glb_path, meta, mesh):
+    """Enforce the model-style checklist. Numbers come from conventions.py."""
+    gltf = mesh["gltf"]
+    object_id = _object_id(meta, glb_path)
+    size_name, budget = _size_class_budget(meta)
+    if budget is None:
+        known = ", ".join(sorted(C.SIZE_CLASSES))
+        report.row("size_class", "FAIL", f"{meta.get('size_class')!r} is missing or not one of: {known}")
+        budget = {"hard_tris": C.MAX_TRIANGLES, "max_texture": C.MAX_TEXTURE, "tree_warn_below": None}
+        canopy = False
+    else:
+        report.row("size_class", "PASS", size_name)
+        canopy = bool(budget["canopy"])
+
+    def mark(name, ok, detail, warn=False):
+        if ok:
+            report.row(name, "PASS", detail)
+        elif warn:
+            report.row(name, "WARN", detail)
+        else:
+            report.row(name, "FAIL", detail)
+
+    safe = _identifier_safe(object_id)
+    named = os.path.basename(glb_path) == f"{object_id}.glb"
+    mark("file name", safe and named, object_id if safe and named else f"{os.path.basename(glb_path)} as {object_id}")
+
+    nodes = gltf.get("nodes") or []
+    meshes = gltf.get("meshes") or []
+    materials = gltf.get("materials") or []
+    primitives = meshes[0].get("primitives") if len(meshes) == 1 else []
+    mark("one node", len(nodes) == 1, f"{len(nodes)} nodes")
+    mark("one mesh", len(meshes) == 1, f"{len(meshes)} meshes")
+    mark("one primitive", len(primitives) == 1, f"{len(primitives)} primitives")
+    mark("one material", len(materials) == 1, f"{len(materials)} materials")
+    for key in ("animations", "skins", "cameras", "lights"):
+        if gltf.get(key):
+            report.row(key, "FAIL", "not allowed on a scenery model")
+    if len(nodes) == 1:
+        before = len(report.errors)
+        _node_is_identity(nodes[0], report, nodes[0].get("name", "node"))
+        mark("identity transform", len(report.errors) == before, "node TRS is identity" if len(report.errors) == before else "see FAIL above")
+    extras = (gltf.get("extras") or {}).get("openrct2_3d") or {}
+    mark("no baked Z squash", extras.get("z_squash") is not True, "render squash stays out of the file")
+
+    prim = primitives[0] if len(primitives) == 1 else {}
+    attrs = set((prim.get("attributes") or {}))
+    mark(
+        "attributes",
+        attrs == {"POSITION", "NORMAL", "TEXCOORD_0"},
+        "POSITION NORMAL TEXCOORD_0" if attrs == {"POSITION", "NORMAL", "TEXCOORD_0"} else str(sorted(attrs)),
+    )
+    index_acc = None
+    if prim.get("indices") is not None and gltf.get("accessors"):
+        index_acc = gltf["accessors"][prim["indices"]]
+    index_type = None if index_acc is None else index_acc.get("componentType")
+    mark("u16 indices", index_type == 5123, f"componentType {index_type}")
+    mode = prim.get("mode", 4)
+    mark("triangles", mode == 4, f"mode {mode}")
+
+    vertices = len(mesh["positions"])
+    mark("vertices <= 2500", vertices <= C.MAX_VERTICES, str(vertices))
+    triangles = mesh["triangles"]
+    mark("triangles <= hard cap", triangles <= budget["hard_tris"] and triangles <= C.MAX_TRIANGLES, f"{triangles} / {budget['hard_tris']}")
+    floor = budget.get("tree_warn_below")
+    if floor and triangles < floor:
+        mark("triangle target", False, f"{triangles} is under {floor} for {size_name}", warn=True)
+    else:
+        detail = f"{triangles}"
+        if floor:
+            detail += f" (tree target {C.TREE_TRIANGLE_TARGET[0]}-{C.TREE_TRIANGLE_TARGET[1]})"
+        mark("triangle target", True, detail)
+
+    image = mesh["image"]
+    image_def = (gltf.get("images") or [None])[0] or {}
+    embedded = bool(image_def.get("bufferView") is not None and not image_def.get("uri"))
+    mark("embedded image", embedded and image is not None, "bufferView PNG" if embedded else "external or missing")
+    if image is not None:
+        height, width = image.shape[:2]
+        pot = width > 0 and height > 0 and width & (width - 1) == 0 and height & (height - 1) == 0
+        mark("atlas <= 256 and power of two", pot and max(width, height) <= min(C.MAX_TEXTURE, budget["max_texture"]), f"{width}x{height}")
+        justified = bool(_justification(meta)) or object_id == C.PINE_OBJECT_ID
+        if max(width, height) > C.PREFERRED_TEXTURE:
+            mark(
+                "atlas above 128",
+                justified,
+                "reference exception" if object_id == C.PINE_OBJECT_ID else (_justification(meta) or "needs a written justification in the meta"),
+                warn=not justified,
+            )
+        else:
+            mark("atlas above 128", True, f"{width}x{height}")
+        alpha = image[..., 3]
+        weird = int(np.count_nonzero((alpha != 0) & (alpha != 255)))
+        mark("alpha 0 or 255", weird == 0, "cut-out" if weird == 0 else f"{weird} partial texels")
+        opaque = alpha == 255
+        colours = {tuple(int(c) for c in px) for px in image[opaque][:, :3]}
+        palette = _palette()
+        foreign = colours - palette
+        mark("RCT2 palette colours", not foreign, f"{len(colours)} colours" if not foreign else f"{len(foreign)} colours are not in StandardPalette")
+        if mesh["uvs"] is not None:
+            density = _texel_density(mesh["positions"], mesh["uvs"], mesh["indices"], width, height)
+            if density is None:
+                mark("texel density", True, "too few long edges to score")
+            else:
+                low = C.TEXEL_DENSITY * (1 - C.TEXEL_DENSITY_TOLERANCE)
+                high = C.TEXEL_DENSITY * (1 + C.TEXEL_DENSITY_TOLERANCE)
+                mark("texel density", low <= density <= high, f"{density:.1f} texels/unit (target {C.TEXEL_DENSITY:.0f} ±25%)")
+
+    if len(materials) == 1:
+        before = len(report.errors)
+        check_materials(gltf, report)
+        # check_materials appends errors directly. Fold the outcome into one row
+        # without double-counting: drop the ones it just added and record a row.
+        added = report.errors[before:]
+        del report.errors[before:]
+        mark("material MASK 0.5 / nearest / clamp / double-sided", not added, "ok" if not added else "; ".join(added))
+
+    bmin, bmax, _blender = _blender_bounds(mesh["positions"])
+    limit = C.TREE_FOOTPRINT if canopy else C.PROP_FOOTPRINT
+    horizontal = max(abs(float(bmin[0])), abs(float(bmax[0])), abs(float(bmin[1])), abs(float(bmax[1])))
+    mark("footprint", horizontal <= limit + 1e-3, f"{horizontal:.3f} within ±{limit} ({'canopy' if canopy else 'prop'})")
+    mark("origin inside footprint", bool(bmin[0] < 0 < bmax[0] and bmin[1] < 0 < bmax[1]), "tile centre")
+    sink = -float(bmin[2])
+    mark("base sink <= 0.1", sink <= C.BASE_SINK_MAX + 1e-4 and float(bmin[2]) <= 0.02, f"z min {bmin[2]:.4f}")
+    declared = _height_sim(meta)
+    tip = float(bmax[2]) * C.SIM_PER_UNIT
+    if declared is None:
+        mark("height vs meta", False, "meta has no height")
+    else:
+        mark("height vs meta", abs(tip - declared) <= C.HEIGHT_TOLERANCE_SIM, f"tip {tip:.2f} sim, meta {declared:.2f}")
+
+    size_bytes = os.path.getsize(glb_path)
+    mark("GLB <= 128 KB", size_bytes <= C.MAX_GLB_BYTES, f"{size_bytes} bytes")
+    if size_bytes <= C.MAX_GLB_BYTES and size_bytes > C.TARGET_GLB_BYTES:
+        mark("GLB <= 100 KB target", False, f"{size_bytes} bytes", warn=True)
+    else:
+        mark("GLB <= 100 KB target", size_bytes <= C.TARGET_GLB_BYTES, f"{size_bytes} bytes")
+    report.note(
+        f"bounds min [{bmin[0]:.4f}, {bmin[1]:.4f}, {bmin[2]:.4f}] "
+        f"max [{bmax[0]:.4f}, {bmax[1]:.4f}, {bmax[2]:.4f}]  class {size_name}"
+    )
+
+
 def validate_files(glb_path, meta_path, sprites_dir, out_path, require_iou):
     report = Report()
-    if os.path.basename(glb_path).endswith(".review.png"):
-        report.error("refusing to treat a review image as a model")
+    if not os.path.isfile(glb_path):
+        report.error(f"GLB not found: {glb_path}")
+        return report
+    if not os.path.isfile(meta_path):
+        report.error(f"meta not found: {meta_path}")
+        return report
     meta = _load_json(meta_path)
-    check_meta_schema(meta, report)
-    object_id = meta.get("object_id")
-    if os.path.basename(glb_path) != f"{object_id}.glb":
-        report.error(f"GLB file name should be {object_id}.glb")
-    if os.path.basename(meta_path) != f"{object_id}.meta.json":
-        report.error(f"meta file name should be {object_id}.meta.json")
-    extras = {}
     try:
         mesh = load_mesh(glb_path)
     except Exception as exc:
         report.error(f"could not read GLB: {exc}")
         return report
-    gltf = mesh["gltf"]
-    extras = (gltf.get("extras") or {}).get("openrct2_3d") or {}
-    if extras.get("z_squash") is True:
-        report.error("GLB extras say the render-only Z squash is in the file")
-    if gltf.get("asset", {}).get("version") != "2.0":
-        report.error("glTF asset version is not 2.0")
-    for node in gltf.get("nodes") or []:
-        _node_is_identity(node, report, node.get("name", "node"))
-    check_materials(gltf, report)
-    if meta.get("size_class") in C.SIZE_CLASSES:
-        check_triangles(mesh["triangles"], meta, report)
-        check_texture(mesh["image"], meta, report)
-        check_bounds(meta, mesh["positions"], report)
+    if mesh["gltf"].get("asset", {}).get("version") != "2.0":
+        report.row("glTF 2.0", "FAIL", str(mesh["gltf"].get("asset")))
+    apply_checklist(report, glb_path, meta, mesh)
     render_and_score(mesh, meta, sprites_dir, out_path, report, require_iou)
     return report
 
 
-def _print_report(report):
+def _print_report(report, title=None):
+    if title:
+        print(title)
+    if report.rows:
+        width = max(len(name) for name, _status, _detail in report.rows)
+        for name, status, detail in report.rows:
+            extra = f"  {detail}" if detail else ""
+            print(f"  {status:<4}  {name:<{width}}{extra}")
     for line in report.notes:
-        print(f"  {line}")
-    for line in report.errors:
-        print(f"  FAIL {line}")
+        print(f"  note  {line}")
     if report.ok():
-        print("validator: pass")
+        print(f"validator: pass ({len(report.warnings)} warnings)")
     else:
-        print(f"validator: fail ({len(report.errors)})")
+        print(f"validator: fail ({len(report.errors)} errors, {len(report.warnings)} warnings)")
+
+
+def _approved_pair():
+    """The flat pine on this checkout. Nothing is fetched from another branch."""
+    if os.path.isfile(FLAT_GLB) and os.path.isfile(FLAT_META):
+        return FLAT_GLB, FLAT_META
+    return None
 
 
 def self_test():
-    """Structural check of the committed pine, plus the projection identity."""
-    report = Report()
+    """Build the pine with this pipeline and validate it, then the approved GLB."""
     error = pixels_match_rct()
-    report.note(f"squashed camera vs RCT formula, max error {error:.3e} px")
     if error > 0.05:
-        report.error("the render camera does not match the RCT projection")
-    glb_path = os.path.join(PINE_DIR, PINE_ID + ".glb")
-    meta_path = os.path.join(PINE_DIR, PINE_ID + ".meta.json")
-    if not os.path.isfile(glb_path) or not os.path.isfile(meta_path):
-        report.error("committed pine GLB or meta is missing")
-        _print_report(report)
-        return report
-    # The scripts must still build the same triangle count as the committed mesh.
-    sys.path.insert(0, TOOL_DIR)
-    from archetypes.conifer import build, triangle_count
+        print(f"FAIL  projection  camera vs RCT formula error {error}")
+        return Report()
+    print(f"PASS  projection  max error {error:.3e} px")
+    from rebuild import main as rebuild_main
 
-    meta = _load_json(meta_path)
-    tiles = (meta.get("texture") or {}).get("tiles")
-    if not tiles:
-        report.error("meta has no texture.tiles, so the mesh cannot be rebuilt")
+    out_dir = os.path.join(TOOL_DIR, "out")
+    code = rebuild_main(
+        [
+            "--object",
+            PINE_ID,
+            "--no-blender",
+            "--palette-header",
+            "--out",
+            out_dir,
+            "--skip-validate",
+        ]
+    )
+    if code:
+        print("FAIL  pipeline build")
+        failed = Report()
+        failed.error("rebuild failed")
+        return failed
+    pipeline = validate_files(
+        os.path.join(out_dir, PINE_ID + ".glb"),
+        os.path.join(out_dir, PINE_ID + ".meta.json"),
+        None,
+        os.path.join(out_dir, PINE_ID + ".review.png"),
+        require_iou=False,
+    )
+    _print_report(pipeline, "\npipeline pine (Python writer, gitignored out/)")
+    approved = _approved_pair()
+    if approved is None:
+        print(
+            "\nSKIP  approved GLB  data/object-models/"
+            + PINE_ID
+            + ".glb is not in this checkout (it lands with PR #6)"
+        )
+        approved_report = Report()
     else:
-        mesh = build(meta["params"], tiles)
-        count = triangle_count(mesh)
-        if count != int(meta["triangles"]):
-            report.error(f"rebuilt mesh has {count} triangles, meta says {meta['triangles']}")
-        else:
-            report.note(f"rebuilt mesh matches meta triangle count ({count})")
-        pts = np.array(mesh.V, np.float64) / C.SIM_PER_UNIT
-        built_min, built_max = pts.min(axis=0), pts.max(axis=0)
-        want_min = np.array(meta["bounds_blender"]["min"], np.float64)
-        want_max = np.array(meta["bounds_blender"]["max"], np.float64)
-        if not np.allclose(built_min, want_min, atol=1e-4) or not np.allclose(built_max, want_max, atol=1e-4):
-            report.error(
-                "rebuilt bounds "
-                f"{built_min.tolist()} .. {built_max.tolist()} "
-                f"do not match meta {want_min.tolist()} .. {want_max.tolist()}"
-            )
-        else:
-            report.note("rebuilt bounds match the meta")
-    out = os.path.join(TOOL_DIR, "out", PINE_ID + ".review.png")
-    file_report = validate_files(glb_path, meta_path, None, out, require_iou=False)
-    report.notes.extend(file_report.notes)
-    report.errors.extend(file_report.errors)
-    _print_report(report)
-    return report
+        approved_report = validate_files(approved[0], approved[1], None, None, require_iou=False)
+        _print_report(approved_report, "\nPR #6 approved GLB (Blender 4.2 export)")
+    if pipeline.ok() and approved_report.ok():
+        return pipeline
+    failed = Report()
+    failed.errors.extend(pipeline.errors)
+    failed.errors.extend(approved_report.errors)
+    return failed
 
 
 def main(argv):
@@ -410,14 +729,18 @@ def main(argv):
         report = self_test()
         return 0 if report.ok() else 1
     if args.model_dir and not args.glb:
-        # The directory name is not the object id (that can contain dots). Read the meta.
-        metas = [n for n in os.listdir(args.model_dir) if n.endswith(".meta.json")]
-        if len(metas) != 1:
-            print("expected exactly one *.meta.json in the model directory", file=sys.stderr)
-            return 2
-        args.meta = os.path.join(args.model_dir, metas[0])
-        object_id = metas[0][: -len(".meta.json")]
-        args.glb = os.path.join(args.model_dir, object_id + ".glb")
+        if args.model_dir.endswith(".glb"):
+            args.glb = args.model_dir
+            args.meta = args.model_dir[: -len(".glb")] + ".meta.json"
+        elif os.path.isdir(args.model_dir):
+            # Flat directory: object-models/<id>.glb beside <id>.meta.json. Not recursive.
+            metas = [n for n in os.listdir(args.model_dir) if n.endswith(".meta.json")]
+            if len(metas) != 1:
+                print("pass a .glb path, or a directory with exactly one .meta.json", file=sys.stderr)
+                return 2
+            args.meta = os.path.join(args.model_dir, metas[0])
+            object_id = metas[0][: -len(".meta.json")]
+            args.glb = os.path.join(args.model_dir, object_id + ".glb")
     if not args.glb or not args.meta:
         parser.error("pass a model directory, or --glb and --meta, or --self-test")
     if args.out is None and args.sprites:

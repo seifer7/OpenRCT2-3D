@@ -23,7 +23,8 @@ GLB_MAGIC = 0x46546C67
 GLB_JSON = 0x4E4F534A
 GLB_BIN = 0x004E4942
 FLOAT = 5126
-UINT = 5125
+UINT16 = 5123
+UINT32 = 5125
 ARRAY = 34962
 ELEMENT = 34963
 
@@ -43,43 +44,82 @@ def gltf_to_blender(point):
     return (x, -z, y)
 
 
+def triangle_corners_of(face):
+    """Split one face. Quads split as (0, 1, 2) + (0, 2, 3)."""
+    if len(face) == 3:
+        yield face
+    elif len(face) == 4:
+        yield (face[0], face[1], face[2])
+        yield (face[0], face[2], face[3])
+    else:
+        for i in range(1, len(face) - 1):
+            yield (face[0], face[i], face[i + 1])
+
+
 def triangle_corners(mesh):
-    """Expand faces to triangles. Quads split as (0, 1, 2) + (0, 2, 3)."""
     for face in mesh.F:
-        if len(face) == 3:
-            yield face
-        elif len(face) == 4:
-            yield (face[0], face[1], face[2])
-            yield (face[0], face[2], face[3])
-        else:
-            for i in range(1, len(face) - 1):
-                yield (face[0], face[i], face[i + 1])
+        yield from triangle_corners_of(face)
+
+
+def _clean(array):
+    """Float32 with negative zero folded to zero, so equal corners weld."""
+    out = np.array(array, np.float32)
+    out[out == 0] = np.float32(0)
+    return out
+
+
+def _face_normal(points):
+    p0 = np.array(points[0], np.float64)
+    p1 = np.array(points[1], np.float64)
+    p2 = np.array(points[2], np.float64)
+    normal = np.cross(p1 - p0, p2 - p0)
+    length = float(np.linalg.norm(normal))
+    if length < 1e-12:
+        return _clean((0.0, 1.0, 0.0))
+    return _clean(normal / length)
 
 
 def write_glb(path, mesh, png_bytes, object_id, atlas_size):
-    """Write one double-sided MASK material, nearest, no mipmaps, roughness 1."""
+    """Write one double-sided MASK material, nearest, no mipmaps, roughness 1.
+
+    Corners that share a position, a face normal and a UV are welded, which is
+    what Blender's glTF exporter does for flat-shaded meshes. Indices are
+    unsigned 16-bit when the welded vertex count fits.
+    """
     width, height = atlas_size
+    index_of = {}
     positions = []
     normals = []
     uvs = []
     indices = []
-    for a, b, c in triangle_corners(mesh):
-        pa, pb, pc = (sim_to_gltf(mesh.V[i]) for i in (a, b, c))
-        base = len(positions)
-        positions.extend((pa, pb, pc))
-        n = np.cross(np.subtract(pb, pa), np.subtract(pc, pa))
-        length = float(np.linalg.norm(n))
-        n = (0.0, 1.0, 0.0) if length < 1e-12 else tuple(float(v) / length for v in n)
-        normals.extend((n, n, n))
-        for i in (a, b, c):
-            u, v = mesh.UV[i]
-            uvs.append((u / width, v / height))
-        indices.extend((base, base + 1, base + 2))
+    for face in mesh.F:
+        normal = _face_normal([sim_to_gltf(mesh.V[i]) for i in face])
+        for tri in triangle_corners_of(face):
+            for corner in tri:
+                pos = _clean(sim_to_gltf(mesh.V[corner]))
+                u, v = mesh.UV[corner]
+                uv = _clean((u / width, v / height))
+                key = (pos.tobytes(), normal.tobytes(), uv.tobytes())
+                slot = index_of.get(key)
+                if slot is None:
+                    slot = len(positions)
+                    index_of[key] = slot
+                    positions.append(pos)
+                    normals.append(normal)
+                    uvs.append(uv)
+                indices.append(slot)
 
-    pos = np.array(positions, np.float32)
-    nrm = np.array(normals, np.float32)
-    uv = np.array(uvs, np.float32)
-    idx = np.array(indices, np.uint32)
+    pos = np.stack(positions).astype(np.float32)
+    nrm = np.stack(normals).astype(np.float32)
+    uv = np.stack(uvs).astype(np.float32)
+    if len(pos) <= 65535:
+        idx = np.array(indices, np.uint16)
+        index_type = UINT16
+    else:
+        idx = np.array(indices, np.uint32)
+        index_type = UINT32
+    # bufferView offsets are 4-byte aligned, including the u16 index view.
+    index_align = 4
 
     parts = [pos.tobytes(), nrm.tobytes(), uv.tobytes(), idx.tobytes(), png_bytes]
     views = []
@@ -88,7 +128,7 @@ def write_glb(path, mesh, png_bytes, object_id, atlas_size):
         (ARRAY, 12),
         (ARRAY, 12),
         (ARRAY, 8),
-        (ELEMENT, 4),
+        (ELEMENT, index_align),
         (ARRAY, 1),
     )
     for data, (target, align) in zip(parts, targets):
@@ -138,7 +178,7 @@ def write_glb(path, mesh, png_bytes, object_id, atlas_size):
             accessor(0, len(pos), "VEC3", FLOAT, vec_min(pos), vec_max(pos)),
             accessor(1, len(nrm), "VEC3", FLOAT),
             accessor(2, len(uv), "VEC2", FLOAT),
-            accessor(3, len(idx), "SCALAR", UINT),
+            accessor(3, len(idx), "SCALAR", index_type),
         ],
         "bufferViews": views,
         "buffers": [{"byteLength": len(blob)}],
@@ -247,7 +287,7 @@ def load_mesh(path):
     uvs = accessor_array(gltf, blob, attrs["TEXCOORD_0"]).astype(np.float64) if "TEXCOORD_0" in attrs else None
     indices = accessor_array(gltf, blob, prim["indices"]).reshape(-1).astype(np.int64)
     image = None
-    if gltf.get("images"):
+    if gltf.get("images") and "bufferView" in gltf["images"][0]:
         png = _view_bytes(gltf, blob, gltf["images"][0]["bufferView"])
         image = np.array(Image.open(__import__("io").BytesIO(png)).convert("RGBA"))
     return {

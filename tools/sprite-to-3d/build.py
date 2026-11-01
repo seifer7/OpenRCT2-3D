@@ -6,9 +6,9 @@
   blender -b -P tools/sprite-to-3d/build.py -- \\
       --object-id rct2.scenery_small.tcrp \\
       --params tools/sprite-to-3d/examples/rct2.scenery_small.tcrp/params.json \\
-      --atlas data/object-models/rct2.scenery_small.tcrp/rct2.scenery_small.tcrp.atlas.png \\
-      --atlas-json data/object-models/rct2.scenery_small.tcrp/rct2.scenery_small.tcrp.atlas.json \\
-      --out data/object-models/rct2.scenery_small.tcrp
+      --atlas tools/sprite-to-3d/out/build/rct2.scenery_small.tcrp.atlas.png \\
+      --atlas-json tools/sprite-to-3d/out/build/rct2.scenery_small.tcrp.atlas.json \\
+      --out tools/sprite-to-3d/out
 
 Scale: 1 Blender unit = 1 tile = 32 sim units on every axis.
 Origin: tile centre, z = 0 at the element base. Blender +Z up.

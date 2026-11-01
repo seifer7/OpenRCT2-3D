@@ -137,6 +137,7 @@
     </ClCompile>
     <ClCompile Include="..\..\src\openrct2-3d\third_party\stb_image_impl.cpp">
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
       <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\third_party\bimg\3rdparty\stb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <ClCompile Include="..\..\src\openrct2-3d\third_party\cgltf\cgltf.cpp">

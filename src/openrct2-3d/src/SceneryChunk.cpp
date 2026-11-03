@@ -168,13 +168,56 @@ namespace OpenRCT2::View3D
         return dx * dx + dy * dy > maxDistanceTiles * maxDistanceTiles;
     }
 
+    static bool groundCorner(const float clip[16], float ndcX, float ndcY, float& x, float& y)
+    {
+        const float a00 = clip[0] - ndcX * clip[3];
+        const float a01 = clip[4] - ndcX * clip[7];
+        const float a10 = clip[1] - ndcY * clip[3];
+        const float a11 = clip[5] - ndcY * clip[7];
+        const float det = a00 * a11 - a01 * a10;
+        if (std::fabs(det) < 1.0e-6f)
+        {
+            return false;
+        }
+        const float b0 = ndcX * clip[15] - clip[12];
+        const float b1 = ndcY * clip[15] - clip[13];
+        x = (b0 * a11 - a01 * b1) / det;
+        y = (a00 * b1 - b0 * a10) / det;
+        const float clipW = clip[3] * x + clip[7] * y + clip[15];
+        return clipW > 0.0f;
+    }
+
+    float groundFootprintRadius(const float clip[16], float focusX, float focusY)
+    {
+        const float corners[4][2] = { { -1.0f, -1.0f }, { 1.0f, -1.0f }, { 1.0f, 1.0f }, { -1.0f, 1.0f } };
+        float farthest = 0.0f;
+        int32_t hits = 0;
+        for (const float* corner : corners)
+        {
+            float x = 0.0f;
+            float y = 0.0f;
+            if (!groundCorner(clip, corner[0], corner[1], x, y))
+            {
+                continue;
+            }
+            const float dx = x - focusX;
+            const float dy = y - focusY;
+            farthest = std::max(farthest, std::sqrt(dx * dx + dy * dy));
+            hits++;
+        }
+        if (hits == 0)
+        {
+            return sceneryViewDistanceTiles();
+        }
+        constexpr float kFootprintMarginTiles = 4.0f;
+        return std::max(sceneryViewDistanceTiles(), farthest + kFootprintMarginTiles);
+    }
+
     float sceneryCullRadius(float eyeX, float eyeY, float focusX, float focusY)
     {
         const float dx = eyeX - focusX;
         const float dy = eyeY - focusY;
-        const float zoomDistance = std::sqrt(dx * dx + dy * dy);
-        const float span = std::min(zoomDistance * 0.5f, kMaxCullTiles);
-        return std::max(sceneryViewDistanceTiles(), span);
+        return std::max(sceneryViewDistanceTiles(), std::sqrt(dx * dx + dy * dy));
     }
 
     int32_t cullSyntheticPlacements(int32_t count, float eyeX, float eyeY, float eyeZ, float maxDistance, int64_t& microseconds)

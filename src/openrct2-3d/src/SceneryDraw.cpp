@@ -105,6 +105,7 @@ namespace OpenRCT2::View3D::Park
             float eyeZ = 0.0f;
             float focusX = 0.0f;
             float focusY = 0.0f;
+            float radius = kDefaultViewDistanceTiles;
             float planes[6][4] = {};
         };
 
@@ -490,8 +491,7 @@ namespace OpenRCT2::View3D::Park
             {
                 return true;
             }
-            const float radius = sceneryCullRadius(cull.eyeX, cull.eyeY, cull.focusX, cull.focusY);
-            return !boxOutsideGroundDistance(chunk.box, cull.focusX, cull.focusY, radius)
+            return !boxOutsideGroundDistance(chunk.box, cull.focusX, cull.focusY, cull.radius)
                 && !boxOutsideFrustum(chunk.box, cull.planes);
         }
 
@@ -507,6 +507,7 @@ namespace OpenRCT2::View3D::Park
             if (cull.haveCamera)
             {
                 extractFrustumPlanes(viewProj, cull.planes);
+                cull.radius = groundFootprintRadius(viewProj, cull.focusX, cull.focusY);
             }
         }
 
@@ -705,7 +706,6 @@ namespace OpenRCT2::View3D::Park
                 }
                 notePermanent(typeKeyFor(*failed), *failed);
             }
-            if (_spaceFreed)
             {
                 std::vector<uint32_t> keys;
                 keys.reserve(_held.size());
@@ -728,7 +728,8 @@ namespace OpenRCT2::View3D::Park
                         continue;
                     }
                     const auto when = _retryAt.find(key);
-                    if (when != _retryAt.end() && _frame < when->second)
+                    const bool due = when == _retryAt.end() || _frame >= when->second;
+                    if (!due && !_spaceFreed)
                     {
                         continue;
                     }
@@ -740,7 +741,7 @@ namespace OpenRCT2::View3D::Park
                     CpuMesh mesh = std::move(held->second);
                     _held.erase(held);
                     const std::string identifier = key < _typeIds.size() ? _typeIds[key] : std::string();
-                    uploadOne(key, identifier, std::move(mesh), false);
+                    uploadOne(key, identifier, std::move(mesh), true);
                 }
                 _spaceFreed = false;
             }

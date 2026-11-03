@@ -12,6 +12,11 @@ Project notes, memories, decisions, surveys, and other working documents live in
 - `sprite-to-3d-style-guide.md` — how to build scenery GLBs in the Corsican Pine style
 - [`qa/`](qa/README.md) — QA Officer: review process, model style checklist, and PR reviews
 
+## Standing rules
+
+- Keep the work and the report short. Do the change in one pass.
+- The 3D view does not keep compatibility with its own earlier formats or behaviour. A cache from another version is reconverted.
+
 ## CI
 
 `ci.yml` and `clang-tidy.yml` run on a pull request only when it carries the `CI Request` label. King Grok applies that label to pull requests that change game code. Docs, tools, and model-only pull requests skip CI.

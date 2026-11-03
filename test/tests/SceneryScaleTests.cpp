@@ -393,23 +393,44 @@ TEST(SceneryScale, ViewDistanceIsConfigurable)
     setSceneryViewDistanceTiles(saved);
 }
 
-TEST(SceneryScale, ZoomedOutGroundDistanceStaysVisible)
+TEST(SceneryScale, FootprintKeepsCornerAndEdge)
 {
-    ChunkBox atFocus;
-    atFocus.maxX = 16.0f;
-    atFocus.maxY = 16.0f;
-    atFocus.maxZ = 4.0f;
-    // Zoom 3 puts the eye about 164 tiles from the focus. A 3D test from that eye culls the focus.
-    EXPECT_TRUE(boxOutsideDistance(atFocus, 0.0f, -164.0f, 80.0f, kDefaultViewDistanceTiles));
-    const float radius = sceneryCullRadius(0.0f, -164.0f, 0.0f, 0.0f);
-    EXPECT_LT(radius, 164.0f);
-    EXPECT_LE(radius, kMaxCullTiles);
-    EXPECT_FALSE(boxOutsideGroundDistance(atFocus, 0.0f, 0.0f, radius));
-    ChunkBox far;
-    far.minX = 400.0f;
-    far.maxX = 416.0f;
-    far.maxY = 16.0f;
-    EXPECT_TRUE(boxOutsideGroundDistance(far, 0.0f, 0.0f, radius));
+    // ndc = world / 136, so the four screen corners sit 136 tiles from the origin on each axis.
+    float clip[16] = {};
+    clip[0] = 1.0f;
+    clip[5] = 1.0f;
+    clip[15] = 136.0f;
+    const float radius = groundFootprintRadius(clip, 0.0f, 0.0f);
+    EXPECT_GT(radius, 136.0f * std::sqrt(2.0f));
+
+    ChunkBox centre;
+    centre.maxX = 16.0f;
+    centre.maxY = 16.0f;
+    centre.maxZ = 4.0f;
+    EXPECT_FALSE(boxOutsideGroundDistance(centre, 0.0f, 0.0f, radius));
+
+    ChunkBox edge;
+    edge.minX = 120.0f;
+    edge.maxX = 136.0f;
+    edge.minY = -8.0f;
+    edge.maxY = 8.0f;
+    edge.maxZ = 4.0f;
+    EXPECT_FALSE(boxOutsideGroundDistance(edge, 0.0f, 0.0f, radius));
+
+    ChunkBox corner;
+    corner.minX = 120.0f;
+    corner.maxX = 136.0f;
+    corner.minY = 120.0f;
+    corner.maxY = 136.0f;
+    corner.maxZ = 4.0f;
+    EXPECT_FALSE(boxOutsideGroundDistance(corner, 0.0f, 0.0f, radius));
+
+    ChunkBox beyond;
+    beyond.minX = 400.0f;
+    beyond.maxX = 416.0f;
+    beyond.minY = 400.0f;
+    beyond.maxY = 416.0f;
+    EXPECT_TRUE(boxOutsideGroundDistance(beyond, 0.0f, 0.0f, radius));
 }
 
 TEST(SceneryScale, TenThousandModelsCycleThroughTheArena)

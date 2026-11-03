@@ -10,6 +10,7 @@
 #include "CheatSetAction.h"
 
 #include "../../Cheats.h"
+#include "../../Context.h"
 #include "../../Diagnostic.h"
 #include "../../GameState.h"
 #include "../../actions/GameActionRunner.h"
@@ -473,6 +474,7 @@ namespace OpenRCT2::GameActions
             }
         } while (TileElementIteratorNext(&it));
 
+        NotifyMapChanged(-1, -1);
         Drawing::GfxInvalidateScreen();
     }
 

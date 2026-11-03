@@ -753,6 +753,40 @@ TEST(SceneryScale, DefaultCameraDrawsParkScenery)
     const std::string dataRoot = OpenRCT2::Path::Combine(root, "o3d-default-camera-data");
     const std::string source = OpenRCT2::Path::Combine(root, "o3d-default-camera-src");
     const std::string cache = OpenRCT2::Path::Combine(root, "o3d-default-camera-cache");
+    // Windows runs every test in one process. Put the globals and bgfx back before the next test.
+    struct Cleanup
+    {
+        bool headless = gOpenRCT2Headless;
+        bool noGraphics = gOpenRCT2NoGraphics;
+        u8string dataPath = gCustomOpenRCT2DataPath;
+        bool device = false;
+        std::string dataRoot;
+        std::string source;
+        std::string cache;
+
+        Cleanup(std::string dataRoot_, std::string source_, std::string cache_)
+            : dataRoot(std::move(dataRoot_))
+            , source(std::move(source_))
+            , cache(std::move(cache_))
+        {
+        }
+
+        ~Cleanup()
+        {
+            if (device)
+            {
+                Park::setScenerySpriteOverride(nullptr);
+                Park::releaseScenery();
+                Park::shutdownSceneryTestDevice();
+            }
+            gOpenRCT2Headless = headless;
+            gOpenRCT2NoGraphics = noGraphics;
+            gCustomOpenRCT2DataPath = dataPath;
+            OpenRCT2::Path::DeleteDirectory(dataRoot);
+            OpenRCT2::Path::DeleteDirectory(source);
+            OpenRCT2::Path::DeleteDirectory(cache);
+        }
+    } cleanup(dataRoot, source, cache);
     OpenRCT2::Path::DeleteDirectory(dataRoot);
     OpenRCT2::Path::DeleteDirectory(source);
     OpenRCT2::Path::DeleteDirectory(cache);
@@ -798,6 +832,7 @@ TEST(SceneryScale, DefaultCameraDrawsParkScenery)
     EXPECT_FALSE(modelIsValidated(spriteId));
 
     ASSERT_TRUE(Park::initSceneryTestDevice(kBackWidth, kBackHeight));
+    cleanup.device = true;
     Park::releaseScenery();
     Park::setScenerySpriteOverride(&solidSprite);
     Park::resetSceneryFrameStats();
@@ -849,11 +884,4 @@ TEST(SceneryScale, DefaultCameraDrawsParkScenery)
     EXPECT_GT(drawn.modelSubmits, 0);
     EXPECT_GT(drawn.spriteInstances, 0);
     EXPECT_GT(drawn.spriteSubmits, 0);
-
-    Park::setScenerySpriteOverride(nullptr);
-    Park::releaseScenery();
-    Park::shutdownSceneryTestDevice();
-    OpenRCT2::Path::DeleteDirectory(dataRoot);
-    OpenRCT2::Path::DeleteDirectory(source);
-    OpenRCT2::Path::DeleteDirectory(cache);
 }

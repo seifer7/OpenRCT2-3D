@@ -8,8 +8,8 @@ The first milestone (one GLB, one sprite cross, a startup cache) is `scenery-3d-
 
 1. Drain tile edits into the chunk grid. A 16×16 tile chunk (`kSceneryChunkTiles`) is rebuilt only when it is dirty. The first 3D frame, a map-size change, and `NotifyMapChanged(-1, -1)` mark every chunk.
 2. Ask the load queue for models that are in view and not on the GPU yet. The queue's worker reads a validated `.o3d`. It does not touch `GameState` and it does not convert a GLB.
-3. Upload at most `kUploadsPerFrame` (2) models or `kUploadBytesPerFrame` (1 MB) of mesh bytes, whichever comes first. While a model is loading, and when it cannot be uploaded, the object is the X-sprite. A broken model is recorded and not requested again. A model that does not fit is retried only after an eviction frees space, with a backoff. The ready queue is not drained in one frame.
-4. Build one instanced batch per model type, and one per sprite image, from the chunks that pass the view-distance and frustum tests.
+3. Upload at most `kUploadsPerFrame` (2) models or `kUploadBytesPerFrame` (1 MB) of mesh bytes, whichever comes first. While a model is loading, and when it cannot be uploaded, the object is the X-sprite. A broken model is recorded and not requested again. A model that does not fit is held and retried with a backoff. At most one held model retries in a frame, and which one rotates (`selectHeldRetry`), so the same pair cannot take both slots. The other slot stays free for a model that just finished loading. Freed space lets that one retry early. The ready queue is not drained in one frame.
+4. Build one instanced batch per model type, and one per sprite image, from the chunks inside the 3D radius and the frustum. Chunks past that radius, still on the visible ground and inside the sprite far cap, add one camera-facing G1 sprite per object to those sprite batches.
 5. Evict GPU meshes that do not fit `kDefaultVramBudgetBytes` (256 MB). Visible types are pinned for that frame. A dropped type is loaded again the next time it is in view.
 
 Sprite blits (`GfxDrawSpriteSoftware`) stay on the thread that rebuilds the chunk. That is the existing 2D image decode, not a GLB load.
@@ -63,7 +63,11 @@ The mesh origin is the pivot. The instance shader rotates about that origin and 
 
 ## View
 
-`sceneryViewDistanceTiles()` starts at 48 (`kDefaultViewDistanceTiles`). `setSceneryViewDistanceTiles` changes it. A chunk whose centre is farther than that is not drawn. There is no shader fade. The frustum is the six planes of the camera's projection-view matrix, extracted once per frame and reused for the upload pin set and the draw list. Both tests are a hard cutoff.
+`sceneryViewDistanceTiles()` starts at 48 (`kDefaultViewDistanceTiles`). `setSceneryViewDistanceTiles` changes it. A chunk whose centre is farther than that is not drawn as a mesh. There is no shader fade. The frustum is the six planes of the camera's projection-view matrix, extracted once per frame and reused for the upload pin set and the draw list. Both tests are a hard cutoff.
+
+The 3D radius is the ground footprint of the screen, and the far side (the top corners) is capped at the eye-to-focus distance. That cap is the whole point of `groundFootprintRadius`. Without it the top of a zoomed-out frame meets the ground near the horizon and the mesh set grows without a bound: about 75 tiles at 1080p zoom 2, 146 at 1080p zoom 3, and 288 at 4K zoom 3, and several times that if the cap is removed. Do not raise the 3D radius to fill the top of the screen.
+
+The top is a sprite layer. A chunk outside the 3D radius, inside the uncapped ground reach, inside the frustum, and inside `min(map corner, sceneryDistantSpriteTiles())` draws one original G1 sprite. The image, direction, and colour remap are the X-sprite's for the direction that faces the camera (`spriteFaceForView`): one quad, not the crossed pair. The art is already drawn for that view, and one instance is a quarter of the fallback's overdraw. Runs are grouped by image when the chunk is rebuilt, on the same dirty flag as the placements. A frame copies the chosen face into the sprite batches. Those vectors keep their capacity, so a steady camera does not allocate per placement. Uploads still share `kSpriteUploadsPerFrame` and the sprite LRU. The far cap defaults to 1280 tiles, which covers the top of a 1080p zoom-3 frame, and the map corner cuts it further so a park never walks past its own edge. Measured on a 256×256 park with one object on every tile and 48 sprite images, 1080p zoom 3, focus near the south edge: the 3D radius stayed at 146 tiles (178 chunks). The sprite layer was 78 chunks, 19968 instances, 48 draws, and about 50 µs to gather once the batches were warm.
 
 A frame rebuilds at most `kChunkRebuildsPerFrame` (8) dirty chunks. The rest stay dirty. A chunk's Z span is the placement base plus the scenery entry's declared height, in viewer units.
 
@@ -79,6 +83,7 @@ The constants live in `src/openrct2-3d/src/SceneryScale.hpp`.
 | --- | --- | --- |
 | `kSceneryChunkTiles` | 16 | Smaller chunks rebuild less map and test more boxes. |
 | `kDefaultViewDistanceTiles` | 48 | Starting view distance. `setSceneryViewDistanceTiles` changes the live value. |
+| `kDefaultDistantSpriteTiles` | 1280 | Far cap of the sprite layer, in tiles. The map corner cuts it further. `setSceneryDistantSpriteTiles` changes the live value. |
 | `kChunkRebuildsPerFrame` | 8 | Dirty chunks rebuilt on one frame. |
 | `kAtlasGutter` | 2 | Empty pixels around an atlas image, outside the UV rect. |
 | `kDefaultVramBudgetBytes` | 256 MB | When unused models leave the GPU. |

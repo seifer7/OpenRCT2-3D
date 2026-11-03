@@ -44,12 +44,36 @@ namespace OpenRCT2::View3D
         float maxZ = 0.0f;
     };
 
+    // One scenery anchor. Distant draws copy these; they are not rebuilt per frame.
+    struct ChunkSpritePoint
+    {
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+    };
+
+    // A run of the same sprite image inside one direction face. `begin` indexes
+    // `spriteOrder[face]`, which indexes `spriteInstances`.
+    struct ChunkSpriteRun
+    {
+        ImageId image;
+        uint64_t key = 0;
+        uint32_t begin = 0;
+        uint32_t count = 0;
+        bool vegetation = false;
+    };
+
     struct SceneryChunk
     {
         bool dirty = true;
         bool built = false;
         ChunkBox box;
         std::vector<ChunkPlacement> placements;
+        // Filled with the placements when the chunk is rebuilt. Four faces, one
+        // chosen at draw from the camera. The instance positions are shared.
+        std::vector<ChunkSpritePoint> spriteInstances;
+        std::vector<uint32_t> spriteOrder[4];
+        std::vector<ChunkSpriteRun> spriteRuns[4];
     };
 
     class SceneryChunkGrid
@@ -93,10 +117,40 @@ namespace OpenRCT2::View3D
     bool boxOutsideDistance(const ChunkBox& box, float eyeX, float eyeY, float eyeZ, float maxDistanceTiles);
     // Horizontal distance from the view focus. The eye's height is not part of it.
     bool boxOutsideGroundDistance(const ChunkBox& box, float focusX, float focusY, float maxDistanceTiles);
+    // Where an NDC point on the ground plane (z = 0) lands. False when the ray misses
+    // the ground in front of the camera.
+    bool groundPlanePoint(const float clip[16], float ndcX, float ndcY, float& x, float& y);
     // Near screen corners and the width at the focus, on z = 0. The top corners are
     // capped at the eye-to-focus distance: they meet the ground a few degrees under the horizon.
+    // That cap is the 3D radius. Do not drop it: an uncapped top corner is the horizon.
     float groundFootprintRadius(const float clip[16], float eyeX, float eyeY, float focusX, float focusY);
+    // The same samples with the far side left uncapped. The sprite layer starts from this.
+    float groundReachRadius(const float clip[16], float focusX, float focusY);
+    // min(ground reach, farLimit). A non-positive limit uses sceneryDistantSpriteTiles().
+    float distantSpriteRadius(const float clip[16], float focusX, float focusY, float farLimitTiles);
+    // Distance from the focus to the farthest corner of the map rectangle.
+    float mapCornerDistance(float focusX, float focusY, float tilesX, float tilesY);
     float sceneryCullRadius(float eyeX, float eyeY, float focusX, float focusY);
+    // Outside the 3D radius, inside the sprite radius, and inside the frustum.
+    bool chunkInDistantSprites(
+        const ChunkBox& box, float focusX, float focusY, float meshRadius, float spriteRadius, const float planes[6][4]);
+    // Group placements into per-face sprite runs. Called when a chunk is rebuilt.
+    void buildChunkSpriteRuns(SceneryChunk& chunk);
+
+    struct DistantSpriteFrame
+    {
+        int32_t meshChunks = 0;
+        int32_t spriteChunks = 0;
+        int32_t instances = 0;
+        int32_t draws = 0;
+        int64_t microseconds = 0;
+    };
+
+    // Steady-state gather of one camera face. The timed pass reuses batch storage,
+    // so the microseconds are the copy, not the first allocation.
+    DistantSpriteFrame countDistantSpriteFrame(
+        const SceneryChunkGrid& grid, const float planes[6][4], float focusX, float focusY, float meshRadius,
+        float spriteRadius, int face);
 
     // Builds `count` placements across a square of chunks and returns how many survive a cull.
     // `microseconds` is the cull time. Used as the 10k-instance check.

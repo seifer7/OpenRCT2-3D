@@ -12,11 +12,51 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstring>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
 
 namespace
 {
     float _viewDistanceTiles = OpenRCT2::View3D::kDefaultViewDistanceTiles;
-}
+    float _distantSpriteTiles = OpenRCT2::View3D::kDefaultDistantSpriteTiles;
+
+    constexpr float kFootprintMarginTiles = 4.0f;
+
+    float footprintFromSamples(const float clip[16], float focusX, float focusY, bool capFar, float farCap)
+    {
+        // Bottom corners and the left/right edge through the focus. Top corners are the far side.
+        const float samples[6][2] = {
+            { -1.0f, -1.0f }, { 1.0f, -1.0f }, { -1.0f, 0.0f }, { 1.0f, 0.0f }, { -1.0f, 1.0f }, { 1.0f, 1.0f },
+        };
+        float farthest = 0.0f;
+        int32_t hits = 0;
+        for (const float* sample : samples)
+        {
+            float x = 0.0f;
+            float y = 0.0f;
+            if (!OpenRCT2::View3D::groundPlanePoint(clip, sample[0], sample[1], x, y))
+            {
+                continue;
+            }
+            const float dx = x - focusX;
+            const float dy = y - focusY;
+            float distance = std::sqrt(dx * dx + dy * dy);
+            if (capFar && sample[1] > 0.5f)
+            {
+                distance = std::min(distance, farCap);
+            }
+            farthest = std::max(farthest, distance);
+            hits++;
+        }
+        if (hits == 0)
+        {
+            return OpenRCT2::View3D::sceneryViewDistanceTiles();
+        }
+        return std::max(OpenRCT2::View3D::sceneryViewDistanceTiles(), farthest + kFootprintMarginTiles);
+    }
+} // namespace
 
 namespace OpenRCT2::View3D
 {
@@ -28,6 +68,16 @@ namespace OpenRCT2::View3D
     void setSceneryViewDistanceTiles(float tiles)
     {
         _viewDistanceTiles = tiles > 0.0f ? tiles : kDefaultViewDistanceTiles;
+    }
+
+    float sceneryDistantSpriteTiles()
+    {
+        return _distantSpriteTiles;
+    }
+
+    void setSceneryDistantSpriteTiles(float tiles)
+    {
+        _distantSpriteTiles = tiles > 0.0f ? tiles : kDefaultDistantSpriteTiles;
     }
 
     void SceneryChunkGrid::reset(int32_t tilesX, int32_t tilesY)
@@ -168,7 +218,7 @@ namespace OpenRCT2::View3D
         return dx * dx + dy * dy > maxDistanceTiles * maxDistanceTiles;
     }
 
-    static bool groundCorner(const float clip[16], float ndcX, float ndcY, float& x, float& y)
+    bool groundPlanePoint(const float clip[16], float ndcX, float ndcY, float& x, float& y)
     {
         const float a00 = clip[0] - ndcX * clip[3];
         const float a01 = clip[4] - ndcX * clip[7];
@@ -189,37 +239,186 @@ namespace OpenRCT2::View3D
 
     float groundFootprintRadius(const float clip[16], float eyeX, float eyeY, float focusX, float focusY)
     {
-        // Bottom corners and the left/right edge through the focus. Top corners are the far side.
-        const float samples[6][2] = {
-            { -1.0f, -1.0f }, { 1.0f, -1.0f }, { -1.0f, 0.0f }, { 1.0f, 0.0f }, { -1.0f, 1.0f }, { 1.0f, 1.0f },
-        };
-        const float farCap = sceneryCullRadius(eyeX, eyeY, focusX, focusY);
+        // Far side capped at the eye-to-focus distance. Uncapped, the top of a zoom-3
+        // frame meets the ground hundreds of tiles out and the 3D set explodes.
+        return footprintFromSamples(clip, focusX, focusY, true, sceneryCullRadius(eyeX, eyeY, focusX, focusY));
+    }
+
+    float groundReachRadius(const float clip[16], float focusX, float focusY)
+    {
+        return footprintFromSamples(clip, focusX, focusY, false, 0.0f);
+    }
+
+    float distantSpriteRadius(const float clip[16], float focusX, float focusY, float farLimitTiles)
+    {
+        const float reach = groundReachRadius(clip, focusX, focusY);
+        const float limit = farLimitTiles > 0.0f ? farLimitTiles : sceneryDistantSpriteTiles();
+        return std::min(reach, limit);
+    }
+
+    float mapCornerDistance(float focusX, float focusY, float tilesX, float tilesY)
+    {
+        const float xs[2] = { 0.0f, std::max(tilesX, 0.0f) };
+        const float ys[2] = { 0.0f, std::max(tilesY, 0.0f) };
         float farthest = 0.0f;
-        int32_t hits = 0;
-        for (const float* sample : samples)
+        for (float x : xs)
         {
-            float x = 0.0f;
-            float y = 0.0f;
-            if (!groundCorner(clip, sample[0], sample[1], x, y))
+            for (float y : ys)
             {
-                continue;
+                const float dx = x - focusX;
+                const float dy = y - focusY;
+                farthest = std::max(farthest, std::sqrt(dx * dx + dy * dy));
             }
-            const float dx = x - focusX;
-            const float dy = y - focusY;
-            float distance = std::sqrt(dx * dx + dy * dy);
-            if (sample[1] > 0.5f)
-            {
-                distance = std::min(distance, farCap);
-            }
-            farthest = std::max(farthest, distance);
-            hits++;
         }
-        if (hits == 0)
+        return farthest;
+    }
+
+    bool chunkInDistantSprites(
+        const ChunkBox& box, float focusX, float focusY, float meshRadius, float spriteRadius, const float planes[6][4])
+    {
+        if (!boxOutsideGroundDistance(box, focusX, focusY, meshRadius))
         {
-            return sceneryViewDistanceTiles();
+            return false;
         }
-        constexpr float kFootprintMarginTiles = 4.0f;
-        return std::max(sceneryViewDistanceTiles(), farthest + kFootprintMarginTiles);
+        if (boxOutsideGroundDistance(box, focusX, focusY, spriteRadius))
+        {
+            return false;
+        }
+        return !boxOutsideFrustum(box, planes);
+    }
+
+    static uint64_t imageBits(const ImageId& image)
+    {
+        static_assert(std::is_trivially_copyable_v<ImageId>);
+        static_assert(sizeof(ImageId) == 8);
+        uint64_t bits = 0;
+        std::memcpy(&bits, &image, sizeof(bits));
+        return bits;
+    }
+
+    void buildChunkSpriteRuns(SceneryChunk& chunk)
+    {
+        chunk.spriteInstances.clear();
+        chunk.spriteInstances.reserve(chunk.placements.size());
+        for (const ChunkPlacement& placement : chunk.placements)
+        {
+            chunk.spriteInstances.push_back(ChunkSpritePoint{ placement.x, placement.y, placement.z });
+        }
+        for (int face = 0; face < 4; face++)
+        {
+            std::vector<uint32_t>& order = chunk.spriteOrder[face];
+            std::vector<ChunkSpriteRun>& runs = chunk.spriteRuns[face];
+            order.clear();
+            runs.clear();
+            std::vector<std::pair<uint64_t, uint32_t>> keys;
+            keys.reserve(chunk.placements.size());
+            for (uint32_t i = 0; i < static_cast<uint32_t>(chunk.placements.size()); i++)
+            {
+                if (!chunk.placements[i].spriteFace[face])
+                {
+                    continue;
+                }
+                keys.emplace_back(imageBits(chunk.placements[i].spriteImage[face]), i);
+            }
+            std::sort(
+                keys.begin(), keys.end(), [](const std::pair<uint64_t, uint32_t>& a, const std::pair<uint64_t, uint32_t>& b) {
+                    if (a.first != b.first)
+                    {
+                        return a.first < b.first;
+                    }
+                    return a.second < b.second;
+                });
+            for (const std::pair<uint64_t, uint32_t>& item : keys)
+            {
+                order.push_back(item.second);
+                const uint32_t slot = static_cast<uint32_t>(order.size() - 1);
+                if (runs.empty() || runs.back().key != item.first)
+                {
+                    ChunkSpriteRun run;
+                    run.key = item.first;
+                    run.image = chunk.placements[item.second].spriteImage[face];
+                    run.begin = slot;
+                    run.count = 1;
+                    run.vegetation = chunk.placements[item.second].vegetation;
+                    runs.push_back(run);
+                }
+                else
+                {
+                    runs.back().count++;
+                    if (!chunk.placements[item.second].vegetation)
+                    {
+                        runs.back().vegetation = false;
+                    }
+                }
+            }
+        }
+    }
+
+    DistantSpriteFrame countDistantSpriteFrame(
+        const SceneryChunkGrid& grid, const float planes[6][4], float focusX, float focusY, float meshRadius,
+        float spriteRadius, int face)
+    {
+        const int indexFace = face & 3;
+        std::unordered_map<uint64_t, std::vector<ChunkSpritePoint>> batches;
+        auto gather = [&](DistantSpriteFrame& stats) {
+            stats = {};
+            for (auto& item : batches)
+            {
+                item.second.clear();
+            }
+            for (int32_t y = 0; y < grid.chunksY(); y++)
+            {
+                for (int32_t x = 0; x < grid.chunksX(); x++)
+                {
+                    const SceneryChunk* chunk = grid.at(x, y);
+                    if (chunk == nullptr || !chunk->built)
+                    {
+                        continue;
+                    }
+                    if (!boxOutsideGroundDistance(chunk->box, focusX, focusY, meshRadius)
+                        && !boxOutsideFrustum(chunk->box, planes))
+                    {
+                        stats.meshChunks++;
+                        continue;
+                    }
+                    if (!chunkInDistantSprites(chunk->box, focusX, focusY, meshRadius, spriteRadius, planes))
+                    {
+                        continue;
+                    }
+                    stats.spriteChunks++;
+                    for (const ChunkSpriteRun& run : chunk->spriteRuns[indexFace])
+                    {
+                        if (run.count == 0)
+                        {
+                            continue;
+                        }
+                        std::vector<ChunkSpritePoint>& batch = batches[run.key];
+                        batch.reserve(batch.size() + static_cast<size_t>(run.count));
+                        const std::vector<uint32_t>& order = chunk->spriteOrder[indexFace];
+                        for (uint32_t n = 0; n < run.count; n++)
+                        {
+                            batch.push_back(chunk->spriteInstances[order[run.begin + n]]);
+                        }
+                        stats.instances += static_cast<int32_t>(run.count);
+                    }
+                }
+            }
+            stats.draws = 0;
+            for (const auto& item : batches)
+            {
+                if (!item.second.empty())
+                {
+                    stats.draws++;
+                }
+            }
+        };
+        DistantSpriteFrame stats;
+        gather(stats);
+        const auto start = std::chrono::steady_clock::now();
+        gather(stats);
+        stats.microseconds = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start)
+                                 .count();
+        return stats;
     }
 
     float sceneryCullRadius(float eyeX, float eyeY, float focusX, float focusY)

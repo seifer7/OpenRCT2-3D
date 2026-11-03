@@ -105,8 +105,13 @@ namespace OpenRCT2::View3D::Park
             float eyeZ = 0.0f;
             float focusX = 0.0f;
             float focusY = 0.0f;
+            // 3D radius. Far side capped at the eye-to-focus distance.
             float radius = kDefaultViewDistanceTiles;
+            // Uncapped ground footprint. The sprite layer is clipped to the map and the far limit.
+            float reach = kDefaultViewDistanceTiles;
+            float spriteRadius = kDefaultViewDistanceTiles;
             float planes[6][4] = {};
+            float viewProj[16] = {};
         };
 
         bool _dropSprites = false;
@@ -114,6 +119,7 @@ namespace OpenRCT2::View3D::Park
         std::unordered_map<SpriteKey, int32_t, SpriteKeyHash> _spriteHandles;
         std::unordered_set<std::string> _loggedUploadFail;
         std::vector<Batch> _batches;
+        size_t _batchCount = 0;
         std::unordered_map<uint32_t, size_t> _modelBatches;
         std::unordered_map<int32_t, size_t> _spriteBatches;
         bool _loggedShader = false;
@@ -127,6 +133,8 @@ namespace OpenRCT2::View3D::Park
         std::unordered_map<uint32_t, CpuMesh> _held;
         std::unordered_map<uint32_t, uint64_t> _retryAt;
         std::unordered_map<uint32_t, uint32_t> _backoff;
+        // Last held key that took a retry slot. The next frame starts after it.
+        uint32_t _heldCursor = 0;
         bool _spaceFreed = false;
         std::unordered_set<uint32_t> _pinned;
         std::unordered_set<uint32_t> _loadKeys;
@@ -483,6 +491,83 @@ namespace OpenRCT2::View3D::Park
             }
             chunk->dirty = false;
             chunk->built = true;
+            buildChunkSpriteRuns(*chunk);
+        }
+
+        void beginFrameBatches()
+        {
+            _modelBatches.clear();
+            _spriteBatches.clear();
+            _batchCount = 0;
+        }
+
+        size_t takeBatch()
+        {
+            if (_batchCount >= _batches.size())
+            {
+                _batches.emplace_back();
+            }
+            Batch& batch = _batches[_batchCount];
+            batch.instances.clear();
+            batch.handle = -1;
+            batch.model = false;
+            batch.vegetation = false;
+            return _batchCount++;
+        }
+
+        void capSpriteRadius(FrameCull& cull)
+        {
+            float limit = sceneryDistantSpriteTiles();
+            if (cull.haveCamera)
+            {
+                const float mapFar = mapCornerDistance(
+                    cull.focusX, cull.focusY, static_cast<float>(_grid.tilesX()), static_cast<float>(_grid.tilesY()));
+                limit = std::min(limit, mapFar);
+            }
+            cull.spriteRadius = std::min(cull.reach, limit);
+        }
+
+        void appendDistant(const SceneryChunk& chunk, int face)
+        {
+            const int indexFace = face & 3;
+            for (const ChunkSpriteRun& run : chunk.spriteRuns[indexFace])
+            {
+                if (run.count == 0)
+                {
+                    continue;
+                }
+                const int32_t handle = spriteHandleForFace(run.image, indexFace);
+                if (handle < 0)
+                {
+                    continue;
+                }
+                const auto found = _spriteBatches.find(handle);
+                size_t batchIndex;
+                if (found == _spriteBatches.end())
+                {
+                    batchIndex = takeBatch();
+                    _spriteBatches.emplace(handle, batchIndex);
+                    _batches[batchIndex].handle = handle;
+                    _batches[batchIndex].model = false;
+                    _batches[batchIndex].vegetation = run.vegetation;
+                }
+                else
+                {
+                    batchIndex = found->second;
+                    if (!run.vegetation)
+                    {
+                        _batches[batchIndex].vegetation = false;
+                    }
+                }
+                Batch& batch = _batches[batchIndex];
+                batch.instances.reserve(batch.instances.size() + static_cast<size_t>(run.count));
+                const std::vector<uint32_t>& order = chunk.spriteOrder[indexFace];
+                for (uint32_t n = 0; n < run.count; n++)
+                {
+                    const ChunkSpritePoint& point = chunk.spriteInstances[order[run.begin + n]];
+                    batch.instances.push_back(MeshInstance{ point.x, point.y, point.z, 0.0f });
+                }
+            }
         }
 
         bool chunkVisible(const SceneryChunk& chunk, const FrameCull& cull)
@@ -497,8 +582,7 @@ namespace OpenRCT2::View3D::Park
 
         void readCamera(FrameCull& cull)
         {
-            float viewProj[16] = {};
-            cull.haveCamera = copyCamera(cull.eyeX, cull.eyeY, cull.eyeZ, viewProj);
+            cull.haveCamera = copyCamera(cull.eyeX, cull.eyeY, cull.eyeZ, cull.viewProj);
             if (!cull.haveCamera || !copyViewFocus(cull.focusX, cull.focusY))
             {
                 cull.focusX = cull.eyeX;
@@ -506,8 +590,9 @@ namespace OpenRCT2::View3D::Park
             }
             if (cull.haveCamera)
             {
-                extractFrustumPlanes(viewProj, cull.planes);
-                cull.radius = groundFootprintRadius(viewProj, cull.eyeX, cull.eyeY, cull.focusX, cull.focusY);
+                extractFrustumPlanes(cull.viewProj, cull.planes);
+                cull.radius = groundFootprintRadius(cull.viewProj, cull.eyeX, cull.eyeY, cull.focusX, cull.focusY);
+                cull.reach = groundReachRadius(cull.viewProj, cull.focusX, cull.focusY);
             }
         }
 
@@ -715,12 +800,13 @@ namespace OpenRCT2::View3D::Park
                 {
                     keys.push_back(item.first);
                 }
+                std::sort(keys.begin(), keys.end());
+                std::vector<uint32_t> pinnedKeys;
+                std::vector<uint8_t> due;
+                pinnedKeys.reserve(keys.size());
+                due.reserve(keys.size());
                 for (uint32_t key : keys)
                 {
-                    if (uploaded >= kUploadsPerFrame || bytes >= kUploadBytesPerFrame)
-                    {
-                        break;
-                    }
                     if (_pinned.find(key) == _pinned.end())
                     {
                         _held.erase(key);
@@ -734,23 +820,30 @@ namespace OpenRCT2::View3D::Park
                         continue;
                     }
                     const auto when = _retryAt.find(key);
-                    const bool due = when == _retryAt.end() || _frame >= when->second;
-                    if (!due && !_spaceFreed)
+                    const bool isDue = when == _retryAt.end() || _frame >= when->second;
+                    pinnedKeys.push_back(key);
+                    due.push_back(static_cast<uint8_t>(isDue ? 1 : 0));
+                }
+                // One retry. The remaining slots stay free for models that just finished loading.
+                if (!pinnedKeys.empty() && uploaded < kUploadsPerFrame && bytes < kUploadBytesPerFrame)
+                {
+                    const int32_t index = selectHeldRetry(
+                        pinnedKeys.data(), due.data(), static_cast<int32_t>(pinnedKeys.size()), _spaceFreed, _heldCursor);
+                    if (index >= 0)
                     {
-                        continue;
+                        const uint32_t key = pinnedKeys[static_cast<size_t>(index)];
+                        const auto held = _held.find(key);
+                        if (held != _held.end())
+                        {
+                            CpuMesh mesh = std::move(held->second);
+                            _held.erase(held);
+                            const std::string identifier = key < _typeIds.size() ? _typeIds[key] : std::string();
+                            const uint32_t meshBytes = meshBytesOf(mesh);
+                            uploadOne(key, identifier, std::move(mesh), true);
+                            uploaded++;
+                            bytes += meshBytes;
+                        }
                     }
-                    const auto held = _held.find(key);
-                    if (held == _held.end())
-                    {
-                        continue;
-                    }
-                    CpuMesh mesh = std::move(held->second);
-                    _held.erase(held);
-                    const std::string identifier = key < _typeIds.size() ? _typeIds[key] : std::string();
-                    const uint32_t meshBytes = meshBytesOf(mesh);
-                    uploadOne(key, identifier, std::move(mesh), true);
-                    uploaded++;
-                    bytes += meshBytes;
                 }
                 _spaceFreed = false;
             }
@@ -776,9 +869,8 @@ namespace OpenRCT2::View3D::Park
 
         void composeVisible(const FrameCull& cull)
         {
-            _batches.clear();
-            _modelBatches.clear();
-            _spriteBatches.clear();
+            beginFrameBatches();
+            const int distantFace = spriteFaceForView(cull.eyeX - cull.focusX, cull.eyeY - cull.focusY);
             for (int32_t y = 0; y < _grid.chunksY(); y++)
             {
                 for (int32_t x = 0; x < _grid.chunksX(); x++)
@@ -790,6 +882,12 @@ namespace OpenRCT2::View3D::Park
                     }
                     if (!chunkVisible(*chunk, cull))
                     {
+                        if (cull.haveCamera
+                            && chunkInDistantSprites(
+                                chunk->box, cull.focusX, cull.focusY, cull.radius, cull.spriteRadius, cull.planes))
+                        {
+                            appendDistant(*chunk, distantFace);
+                        }
                         continue;
                     }
                     for (const ChunkPlacement& placement : chunk->placements)
@@ -828,13 +926,11 @@ namespace OpenRCT2::View3D::Park
                             size_t index;
                             if (found == _modelBatches.end())
                             {
-                                index = _batches.size();
+                                index = takeBatch();
                                 _modelBatches.emplace(placement.typeKey, index);
-                                Batch batch;
-                                batch.handle = modelHandle;
-                                batch.model = true;
-                                batch.vegetation = placement.vegetation;
-                                _batches.push_back(std::move(batch));
+                                _batches[index].handle = modelHandle;
+                                _batches[index].model = true;
+                                _batches[index].vegetation = placement.vegetation;
                             }
                             else
                             {
@@ -859,13 +955,11 @@ namespace OpenRCT2::View3D::Park
                             size_t index;
                             if (found == _spriteBatches.end())
                             {
-                                index = _batches.size();
+                                index = takeBatch();
                                 _spriteBatches.emplace(handle, index);
-                                Batch batch;
-                                batch.handle = handle;
-                                batch.model = false;
-                                batch.vegetation = placement.vegetation;
-                                _batches.push_back(std::move(batch));
+                                _batches[index].handle = handle;
+                                _batches[index].model = false;
+                                _batches[index].vegetation = placement.vegetation;
                             }
                             else
                             {
@@ -901,6 +995,7 @@ namespace OpenRCT2::View3D::Park
         _spriteHandles.clear();
         _loggedUploadFail.clear();
         _batches.clear();
+        _batchCount = 0;
         _modelBatches.clear();
         _spriteBatches.clear();
         _loggedShader = false;
@@ -914,6 +1009,7 @@ namespace OpenRCT2::View3D::Park
         _held.clear();
         _retryAt.clear();
         _backoff.clear();
+        _heldCursor = 0;
         _spaceFreed = false;
         _pinned.clear();
         _loadKeys.clear();
@@ -955,6 +1051,7 @@ namespace OpenRCT2::View3D::Park
         FrameCull cull;
         readCamera(cull);
         syncChunks(cull.focusX, cull.focusY);
+        capSpriteRadius(cull);
         _pinned.clear();
         _loadKeys.clear();
         composeVisible(cull);
@@ -973,8 +1070,9 @@ namespace OpenRCT2::View3D::Park
             _loads->requestAbsent(ids);
         }
         uploadReadyModels();
-        for (const Batch& batch : _batches)
+        for (size_t i = 0; i < _batchCount; i++)
         {
+            const Batch& batch = _batches[i];
             if (batch.instances.empty() || hideBatch(batch))
             {
                 continue;

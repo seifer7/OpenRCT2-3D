@@ -39,7 +39,13 @@ namespace OpenRCT2::View3D
     constexpr uint32_t kHandleHeadroom = 256u;
     // On-screen ground span. The eye-to-focus distance at high zoom is larger than the view.
     constexpr float kMaxCullTiles = 96.0f;
+    // Sprite layer past the 3D radius. The map's far corner cuts this further, so a
+    // normal park never walks the horizon. 1280 covers the top of a 1080p zoom-3
+    // frame (about 1060 tiles) and stops short of a 4K zoom-3 horizon.
+    constexpr float kDefaultDistantSpriteTiles = 1280.0f;
 
     float sceneryViewDistanceTiles();
     void setSceneryViewDistanceTiles(float tiles);
+    float sceneryDistantSpriteTiles();
+    void setSceneryDistantSpriteTiles(float tiles);
 } // namespace OpenRCT2::View3D

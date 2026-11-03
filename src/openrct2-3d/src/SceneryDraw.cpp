@@ -68,7 +68,28 @@ namespace OpenRCT2::View3D::Park
             int32_t handle = -1;
             bool model = false;
             bool vegetation = false;
+            bool distant = false;
+            int32_t page = -1;
+            int face = 0;
             std::vector<MeshInstance> instances;
+            std::vector<DistantSpriteInstance> distantInstances;
+        };
+
+        struct SpriteResident
+        {
+            int32_t handle = -1;
+            int32_t page = -1;
+            uint32_t texels = 0;
+            uint64_t lastUsed = 0;
+            bool dedicated = false;
+            float uvScaleX = 1.0f;
+            float uvScaleY = 1.0f;
+            float uvOffX = 0.0f;
+            float uvOffY = 0.0f;
+            float left = 0.0f;
+            float right = 0.0f;
+            float bottom = 0.0f;
+            float top = 0.0f;
         };
 
         struct SpriteKey
@@ -106,17 +127,26 @@ namespace OpenRCT2::View3D::Park
             float eyeZ = 0.0f;
             float focusX = 0.0f;
             float focusY = 0.0f;
+            // 3D radius. Far side capped at the eye-to-focus distance.
             float radius = kDefaultViewDistanceTiles;
+            // Uncapped ground footprint. The sprite layer is clipped to the map and the far limit.
+            float reach = kDefaultViewDistanceTiles;
+            float spriteRadius = kDefaultViewDistanceTiles;
             float planes[6][4] = {};
+            float viewProj[16] = {};
         };
 
         bool _dropSprites = false;
 
-        std::unordered_map<SpriteKey, int32_t, SpriteKeyHash> _spriteHandles;
+        std::unordered_map<SpriteKey, SpriteResident, SpriteKeyHash> _spriteResidents;
+        // Near faces this frame. Eviction will not drop these to admit a distant sprite.
+        std::unordered_set<SpriteKey, SpriteKeyHash> _nearFaces;
         std::unordered_set<std::string> _loggedUploadFail;
         std::vector<Batch> _batches;
+        size_t _batchCount = 0;
         std::unordered_map<uint32_t, size_t> _modelBatches;
         std::unordered_map<int32_t, size_t> _spriteBatches;
+        std::unordered_map<int32_t, size_t> _distantPages;
         bool _loggedShader = false;
         std::vector<Drawing::PaletteIndex> _blit;
         std::vector<uint8_t> _rgba;
@@ -128,10 +158,15 @@ namespace OpenRCT2::View3D::Park
         std::unordered_map<uint32_t, CpuMesh> _held;
         std::unordered_map<uint32_t, uint64_t> _retryAt;
         std::unordered_map<uint32_t, uint32_t> _backoff;
+        // Last held key that took a retry slot. The next frame starts after it.
+        uint32_t _heldCursor = 0;
         bool _spaceFreed = false;
         std::unordered_set<uint32_t> _pinned;
         std::unordered_set<uint32_t> _loadKeys;
         int32_t _spriteUploads = 0;
+        uint32_t _spriteCount = 0;
+        uint32_t _spriteTexels = 0;
+        uint32_t _spriteDedicated = 0;
         std::list<SpriteKey> _spriteLru;
         std::unordered_map<SpriteKey, std::list<SpriteKey>::iterator, SpriteKeyHash> _spriteLruPos;
         // Upload failed after eviction. Draw the X-sprite and try the model again.
@@ -310,42 +345,103 @@ namespace OpenRCT2::View3D::Park
             _spriteLru.splice(_spriteLru.begin(), _spriteLru, found->second);
         }
 
-        bool evictSprite()
+        void forgetSpriteKey(const SpriteKey& key)
         {
-            if (_spriteLru.empty())
+            const auto listed = _spriteLruPos.find(key);
+            if (listed == _spriteLruPos.end())
+            {
+                return;
+            }
+            _spriteLru.erase(listed->second);
+            _spriteLruPos.erase(listed);
+        }
+
+        void releaseSprite(const SpriteKey& key)
+        {
+            const auto found = _spriteResidents.find(key);
+            if (found == _spriteResidents.end())
+            {
+                forgetSpriteKey(key);
+                return;
+            }
+            if (found->second.handle >= 0)
+            {
+                meshDrawReleaseSprite(found->second.handle);
+                if (found->second.dedicated)
+                {
+                    if (_spriteDedicated > 0)
+                    {
+                        _spriteDedicated--;
+                    }
+                }
+                else if (_spriteTexels >= found->second.texels)
+                {
+                    _spriteTexels -= found->second.texels;
+                }
+                if (_spriteCount > 0)
+                {
+                    _spriteCount--;
+                }
+                _spaceFreed = true;
+            }
+            _spriteResidents.erase(found);
+            forgetSpriteKey(key);
+        }
+
+        bool evictColdSprite(bool requireStale, bool protectNear = false)
+        {
+            std::vector<SpriteKey> keys;
+            std::vector<uint64_t> lastUsed;
+            std::vector<uint8_t> used;
+            keys.reserve(_spriteLru.size());
+            for (const SpriteKey& key : _spriteLru)
+            {
+                const auto found = _spriteResidents.find(key);
+                if (found == _spriteResidents.end() || found->second.handle < 0)
+                {
+                    continue;
+                }
+                if (protectNear && _nearFaces.find(key) != _nearFaces.end())
+                {
+                    continue;
+                }
+                keys.push_back(key);
+                lastUsed.push_back(found->second.lastUsed);
+                used.push_back(static_cast<uint8_t>(found->second.lastUsed == _frame ? 1 : 0));
+            }
+            const int32_t index = pickSpriteToDrop(
+                lastUsed.data(), used.data(), static_cast<int32_t>(keys.size()), _frame, kSpriteStaleFrames, requireStale);
+            if (index < 0)
             {
                 return false;
             }
-            const SpriteKey key = _spriteLru.back();
-            _spriteLru.pop_back();
-            _spriteLruPos.erase(key);
-            const auto found = _spriteHandles.find(key);
-            if (found == _spriteHandles.end())
-            {
-                return false;
-            }
-            if (found->second >= 0)
-            {
-                meshDrawReleaseSprite(found->second);
-            }
-            _spriteHandles.erase(found);
-            _spaceFreed = true;
+            releaseSprite(keys[static_cast<size_t>(index)]);
             return true;
         }
 
-        int32_t spriteHandleForFace(const ImageId& image, int face)
+        void dropStaleSprites()
+        {
+            while (evictColdSprite(true))
+            {
+            }
+        }
+
+        // `near` is an X-sprite inside the 3D radius. It is not refused by the image cap or the
+        // per-frame upload budget, and it can take a slot from a sprite only the distant layer uses.
+        int32_t spriteHandleForFace(const ImageId& image, int face, bool near)
         {
             const SpriteKey key{ image, face };
-            const auto found = _spriteHandles.find(key);
-            if (found != _spriteHandles.end())
+            const auto found = _spriteResidents.find(key);
+            if (found != _spriteResidents.end())
             {
-                if (found->second >= 0)
+                if (found->second.handle >= 0)
                 {
+                    found->second.lastUsed = _frame;
                     touchSprite(key);
                 }
-                return found->second;
+                return found->second.handle;
             }
-            if (_spriteUploads >= static_cast<int32_t>(kSpriteUploadsPerFrame))
+            if (!near && _spriteUploads >= static_cast<int32_t>(kSpriteUploadsPerFrame))
             {
                 return -1;
             }
@@ -362,71 +458,122 @@ namespace OpenRCT2::View3D::Park
                 && (g1 == nullptr || g1->width <= 0 || g1->height <= 0 || g1->width > kMaxSpriteEdge
                     || g1->height > kMaxSpriteEdge))
             {
-                _spriteHandles.emplace(key, -1);
+                SpriteResident failed;
+                failed.lastUsed = _frame;
+                _spriteResidents.emplace(key, failed);
                 return -1;
             }
+            const int32_t width = useOverride ? overrideWidth : g1->width;
+            const int32_t height = useOverride ? overrideHeight : g1->height;
+            const uint32_t texels = static_cast<uint32_t>(width) * static_cast<uint32_t>(height);
+            const auto room = [&](bool dedicated) {
+                // A count of 0 skips the image cap. Near faces may pass kMaxSpriteImages.
+                const uint32_t count = near ? 0u : _spriteCount + 1u;
+                return !spriteOverShare(
+                    count, kMaxSpriteImages, _spriteTexels + (dedicated ? 0u : texels), kMaxSpriteAtlasTexels,
+                    _spriteDedicated + (dedicated ? 1u : 0u), kMaxSpriteDedicated);
+            };
+            if (near)
+            {
+                while (_spriteCount >= kMaxSpriteImages && evictColdSprite(false, true))
+                {
+                }
+            }
+            while (!room(false) && evictColdSprite(false, true))
+            {
+            }
+            if (!room(false))
+            {
+                return -1;
+            }
+            const uint8_t* rgba = nullptr;
+            int16_t xOffset = 0;
+            int16_t yOffset = 0;
             if (useOverride)
             {
-                const SpriteQuad quad = makeDirectionSpriteQuad(face, overrideWidth, overrideHeight, 0, 0);
-                int32_t handle = meshDrawUploadSprite(quad, overrideRgba, overrideWidth, overrideHeight);
-                if (handle < 0 && evictSprite())
-                {
-                    handle = meshDrawUploadSprite(quad, overrideRgba, overrideWidth, overrideHeight);
-                }
-                if (handle < 0)
-                {
-                    return -1;
-                }
-                _spriteUploads++;
-                _spriteHandles.emplace(key, handle);
-                touchSprite(key);
-                return handle;
+                rgba = overrideRgba;
             }
-            const int32_t width = g1->width;
-            const int32_t height = g1->height;
-            _blit.assign(static_cast<size_t>(width) * static_cast<size_t>(height), Drawing::PaletteIndex::transparent);
-            Drawing::RenderTarget rt;
-            rt.bits = _blit.data();
-            rt.width = width;
-            rt.height = height;
-            rt.pitch = 0;
-            rt.zoom_level = ZoomLevel{ 0 };
-            GfxDrawSpriteSoftware(rt, image, { -g1->xOffset, -g1->yOffset });
+            else
+            {
+                xOffset = g1->xOffset;
+                yOffset = g1->yOffset;
+                _blit.assign(static_cast<size_t>(width) * static_cast<size_t>(height), Drawing::PaletteIndex::transparent);
+                Drawing::RenderTarget rt;
+                rt.bits = _blit.data();
+                rt.width = width;
+                rt.height = height;
+                rt.pitch = 0;
+                rt.zoom_level = ZoomLevel{ 0 };
+                GfxDrawSpriteSoftware(rt, image, { -g1->xOffset, -g1->yOffset });
 
-            _rgba.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
-            const Drawing::GamePalette& palette = texturePalette();
-            for (size_t i = 0; i < _blit.size(); i++)
-            {
-                uint8_t* dst = _rgba.data() + i * 4;
-                const Drawing::PaletteIndex index = _blit[i];
-                if (index == Drawing::PaletteIndex::transparent)
+                _rgba.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
+                const Drawing::GamePalette& palette = texturePalette();
+                for (size_t i = 0; i < _blit.size(); i++)
                 {
-                    dst[0] = 0;
-                    dst[1] = 0;
-                    dst[2] = 0;
-                    dst[3] = 0;
-                    continue;
+                    uint8_t* dst = _rgba.data() + i * 4;
+                    const Drawing::PaletteIndex index = _blit[i];
+                    if (index == Drawing::PaletteIndex::transparent)
+                    {
+                        dst[0] = 0;
+                        dst[1] = 0;
+                        dst[2] = 0;
+                        dst[3] = 0;
+                        continue;
+                    }
+                    const Drawing::BGRAColour colour = palette[static_cast<uint8_t>(index)];
+                    dst[0] = colour.red;
+                    dst[1] = colour.green;
+                    dst[2] = colour.blue;
+                    dst[3] = 255;
                 }
-                const Drawing::BGRAColour colour = palette[static_cast<uint8_t>(index)];
-                dst[0] = colour.red;
-                dst[1] = colour.green;
-                dst[2] = colour.blue;
-                dst[3] = 255;
+                rgba = _rgba.data();
             }
-            const SpriteQuad quad = makeDirectionSpriteQuad(face, g1->width, g1->height, g1->xOffset, g1->yOffset);
-            int32_t handle = meshDrawUploadSprite(quad, _rgba.data(), width, height);
-            if (handle < 0 && evictSprite())
+            const SpriteQuad quad = makeDirectionSpriteQuad(face, width, height, xOffset, yOffset);
+            const bool allowDedicated = _spriteDedicated < kMaxSpriteDedicated;
+            SpritePlace place = meshDrawUploadSprite(quad, rgba, width, height, allowDedicated);
+            if (place.id < 0 && evictColdSprite(false, true))
             {
-                handle = meshDrawUploadSprite(quad, _rgba.data(), width, height);
+                place = meshDrawUploadSprite(quad, rgba, width, height, _spriteDedicated < kMaxSpriteDedicated);
             }
-            if (handle < 0)
+            if (place.id < 0)
             {
                 return -1;
             }
-            _spriteUploads++;
-            _spriteHandles.emplace(key, handle);
+            if (place.page < 0 && !room(true))
+            {
+                meshDrawReleaseSprite(place.id);
+                return -1;
+            }
+            SpriteResident resident;
+            resident.handle = place.id;
+            resident.page = place.page;
+            resident.texels = place.page >= 0 ? texels : 0u;
+            resident.lastUsed = _frame;
+            resident.dedicated = place.page < 0;
+            resident.uvScaleX = place.uvScaleX;
+            resident.uvScaleY = place.uvScaleY;
+            resident.uvOffX = place.uvOffX;
+            resident.uvOffY = place.uvOffY;
+            resident.left = static_cast<float>(xOffset) * kSpritePixelAcross;
+            resident.right = static_cast<float>(xOffset + width) * kSpritePixelAcross;
+            resident.top = -static_cast<float>(yOffset) * kViewerZPerSimUnit;
+            resident.bottom = -static_cast<float>(yOffset + height) * kViewerZPerSimUnit;
+            _spriteCount++;
+            if (resident.dedicated)
+            {
+                _spriteDedicated++;
+            }
+            else
+            {
+                _spriteTexels += resident.texels;
+            }
+            if (!near)
+            {
+                _spriteUploads++;
+            }
+            _spriteResidents.emplace(key, resident);
             touchSprite(key);
-            return handle;
+            return place.id;
         }
 
         void appendElement(SceneryChunk& chunk, const TileCoordsXY& tile, const SmallSceneryElement& element)
@@ -513,6 +660,134 @@ namespace OpenRCT2::View3D::Park
             }
             chunk->dirty = false;
             chunk->built = true;
+            buildChunkSpriteRuns(*chunk);
+        }
+
+        void beginFrameBatches()
+        {
+            _modelBatches.clear();
+            _spriteBatches.clear();
+            _distantPages.clear();
+            _batchCount = 0;
+        }
+
+        size_t takeBatch()
+        {
+            if (_batchCount >= _batches.size())
+            {
+                _batches.emplace_back();
+            }
+            Batch& batch = _batches[_batchCount];
+            batch.instances.clear();
+            batch.distantInstances.clear();
+            batch.handle = -1;
+            batch.model = false;
+            batch.vegetation = false;
+            batch.distant = false;
+            batch.page = -1;
+            batch.face = 0;
+            return _batchCount++;
+        }
+
+        void capSpriteRadius(FrameCull& cull)
+        {
+            float limit = sceneryDistantSpriteTiles();
+            if (cull.haveCamera)
+            {
+                const float mapFar = mapCornerDistance(
+                    cull.focusX, cull.focusY, static_cast<float>(_grid.tilesX()), static_cast<float>(_grid.tilesY()));
+                limit = std::min(limit, mapFar);
+            }
+            cull.spriteRadius = std::min(cull.reach, limit);
+        }
+
+        void appendDistant(const SceneryChunkGrid& grid, const FrameCull& cull, int face)
+        {
+            appendDistantPlacements(
+                grid, cull.planes, cull.focusX, cull.focusY, cull.radius, cull.spriteRadius, face,
+                [&](const SceneryChunk& chunk, const ChunkSpriteRun& run) {
+                    const int32_t handle = spriteHandleForFace(run.image, face & 3, false);
+                    if (handle < 0)
+                    {
+                        return;
+                    }
+                    const auto resident = _spriteResidents.find(SpriteKey{ run.image, face & 3 });
+                    if (resident == _spriteResidents.end() || resident->second.handle < 0)
+                    {
+                        return;
+                    }
+                    if (resident->second.page < 0)
+                    {
+                        const int32_t dedicatedHandle = resident->second.handle;
+                        const auto spriteBatch = _spriteBatches.find(dedicatedHandle);
+                        size_t index;
+                        if (spriteBatch == _spriteBatches.end())
+                        {
+                            index = takeBatch();
+                            _spriteBatches.emplace(dedicatedHandle, index);
+                            _batches[index].handle = dedicatedHandle;
+                            _batches[index].vegetation = run.vegetation;
+                        }
+                        else
+                        {
+                            index = spriteBatch->second;
+                            if (!run.vegetation)
+                            {
+                                _batches[index].vegetation = false;
+                            }
+                        }
+                        Batch& fallback = _batches[index];
+                        fallback.instances.reserve(fallback.instances.size() + static_cast<size_t>(run.count));
+                        const std::vector<uint32_t>& order = chunk.spriteOrder[face & 3];
+                        for (uint32_t n = 0; n < run.count; n++)
+                        {
+                            const ChunkSpritePoint& point = chunk.spriteInstances[order[run.begin + n]];
+                            fallback.instances.push_back(MeshInstance{ point.x, point.y, point.z, 0.0f });
+                        }
+                        return;
+                    }
+                    const int32_t page = resident->second.page;
+                    const auto found = _distantPages.find(page);
+                    size_t batchIndex;
+                    if (found == _distantPages.end())
+                    {
+                        batchIndex = takeBatch();
+                        _distantPages.emplace(page, batchIndex);
+                        _batches[batchIndex].distant = true;
+                        _batches[batchIndex].page = page;
+                        _batches[batchIndex].face = face & 3;
+                        _batches[batchIndex].vegetation = run.vegetation;
+                    }
+                    else
+                    {
+                        batchIndex = found->second;
+                        if (!run.vegetation)
+                        {
+                            _batches[batchIndex].vegetation = false;
+                        }
+                    }
+                    Batch& batch = _batches[batchIndex];
+                    batch.distantInstances.reserve(batch.distantInstances.size() + static_cast<size_t>(run.count));
+                    const std::vector<uint32_t>& order = chunk.spriteOrder[face & 3];
+                    const SpriteResident& sprite = resident->second;
+                    for (uint32_t n = 0; n < run.count; n++)
+                    {
+                        const ChunkSpritePoint& point = chunk.spriteInstances[order[run.begin + n]];
+                        DistantSpriteInstance instance;
+                        instance.x = point.x;
+                        instance.y = point.y;
+                        instance.z = point.z;
+                        instance.left = sprite.left;
+                        instance.right = sprite.right;
+                        instance.bottom = sprite.bottom;
+                        instance.top = sprite.top;
+                        instance.uvScaleX = sprite.uvScaleX;
+                        instance.uvScaleY = sprite.uvScaleY;
+                        instance.uvOffX = sprite.uvOffX;
+                        instance.uvOffY = sprite.uvOffY;
+                        batch.distantInstances.push_back(instance);
+                    }
+                });
         }
 
         bool chunkVisible(const SceneryChunk& chunk, const FrameCull& cull)
@@ -527,8 +802,7 @@ namespace OpenRCT2::View3D::Park
 
         void readCamera(FrameCull& cull)
         {
-            float viewProj[16] = {};
-            cull.haveCamera = copyCamera(cull.eyeX, cull.eyeY, cull.eyeZ, viewProj);
+            cull.haveCamera = copyCamera(cull.eyeX, cull.eyeY, cull.eyeZ, cull.viewProj);
             if (!cull.haveCamera || !copyViewFocus(cull.focusX, cull.focusY))
             {
                 cull.focusX = cull.eyeX;
@@ -536,8 +810,9 @@ namespace OpenRCT2::View3D::Park
             }
             if (cull.haveCamera)
             {
-                extractFrustumPlanes(viewProj, cull.planes);
-                cull.radius = groundFootprintRadius(viewProj, cull.eyeX, cull.eyeY, cull.focusX, cull.focusY);
+                extractFrustumPlanes(cull.viewProj, cull.planes);
+                cull.radius = groundFootprintRadius(cull.viewProj, cull.eyeX, cull.eyeY, cull.focusX, cull.focusY);
+                cull.reach = groundReachRadius(cull.viewProj, cull.focusX, cull.focusY);
             }
         }
 
@@ -703,6 +978,15 @@ namespace OpenRCT2::View3D::Park
                         releaseResident(*dropped);
                         uploaded = meshDrawUploadModel(mesh);
                     }
+                    // Models inside the radius outrank sprites. Free a cold sprite and retry.
+                    for (int32_t attempt = 0; attempt < 8 && uploaded.status == MeshUploadStatus::capacity; attempt++)
+                    {
+                        if (!evictColdSprite(false))
+                        {
+                            break;
+                        }
+                        uploaded = meshDrawUploadModel(mesh);
+                    }
                 }
             }
             if (uploaded.status == MeshUploadStatus::ready)
@@ -745,12 +1029,13 @@ namespace OpenRCT2::View3D::Park
                 {
                     keys.push_back(item.first);
                 }
+                std::sort(keys.begin(), keys.end());
+                std::vector<uint32_t> pinnedKeys;
+                std::vector<uint8_t> due;
+                pinnedKeys.reserve(keys.size());
+                due.reserve(keys.size());
                 for (uint32_t key : keys)
                 {
-                    if (uploaded >= kUploadsPerFrame || bytes >= kUploadBytesPerFrame)
-                    {
-                        break;
-                    }
                     if (_pinned.find(key) == _pinned.end())
                     {
                         _held.erase(key);
@@ -764,23 +1049,30 @@ namespace OpenRCT2::View3D::Park
                         continue;
                     }
                     const auto when = _retryAt.find(key);
-                    const bool due = when == _retryAt.end() || _frame >= when->second;
-                    if (!due && !_spaceFreed)
+                    const bool isDue = when == _retryAt.end() || _frame >= when->second;
+                    pinnedKeys.push_back(key);
+                    due.push_back(static_cast<uint8_t>(isDue ? 1 : 0));
+                }
+                // One retry. The remaining slots stay free for models that just finished loading.
+                if (!pinnedKeys.empty() && uploaded < kUploadsPerFrame && bytes < kUploadBytesPerFrame)
+                {
+                    const int32_t index = selectHeldRetry(
+                        pinnedKeys.data(), due.data(), static_cast<int32_t>(pinnedKeys.size()), _spaceFreed, _heldCursor);
+                    if (index >= 0)
                     {
-                        continue;
+                        const uint32_t key = pinnedKeys[static_cast<size_t>(index)];
+                        const auto held = _held.find(key);
+                        if (held != _held.end())
+                        {
+                            CpuMesh mesh = std::move(held->second);
+                            _held.erase(held);
+                            const std::string identifier = key < _typeIds.size() ? _typeIds[key] : std::string();
+                            const uint32_t meshBytes = meshBytesOf(mesh);
+                            uploadOne(key, identifier, std::move(mesh), true);
+                            uploaded++;
+                            bytes += meshBytes;
+                        }
                     }
-                    const auto held = _held.find(key);
-                    if (held == _held.end())
-                    {
-                        continue;
-                    }
-                    CpuMesh mesh = std::move(held->second);
-                    _held.erase(held);
-                    const std::string identifier = key < _typeIds.size() ? _typeIds[key] : std::string();
-                    const uint32_t meshBytes = meshBytesOf(mesh);
-                    uploadOne(key, identifier, std::move(mesh), true);
-                    uploaded++;
-                    bytes += meshBytes;
                 }
                 _spaceFreed = false;
             }
@@ -804,11 +1096,48 @@ namespace OpenRCT2::View3D::Park
             }
         }
 
+        void markNearFaces(const FrameCull& cull)
+        {
+            _nearFaces.clear();
+            for (int32_t y = 0; y < _grid.chunksY(); y++)
+            {
+                for (int32_t x = 0; x < _grid.chunksX(); x++)
+                {
+                    const SceneryChunk* chunk = _grid.at(x, y);
+                    if (chunk == nullptr || !chunk->built || !chunkVisible(*chunk, cull))
+                    {
+                        continue;
+                    }
+                    for (const ChunkPlacement& placement : chunk->placements)
+                    {
+                        bool resident = false;
+                        if (placement.modelCandidate)
+                        {
+                            const auto gpu = _gpu.find(placement.typeKey);
+                            resident = gpu != _gpu.end() && gpu->second >= 0;
+                        }
+                        if (placementDraw(placement.modelCandidate, resident, false) != PlacementDraw::sprite)
+                        {
+                            continue;
+                        }
+                        for (int face = 0; face < 4; face++)
+                        {
+                            if (!placement.spriteFace[face])
+                            {
+                                continue;
+                            }
+                            _nearFaces.insert(SpriteKey{ placement.spriteImage[face], face });
+                        }
+                    }
+                }
+            }
+        }
+
         void composeVisible(const FrameCull& cull)
         {
-            _batches.clear();
-            _modelBatches.clear();
-            _spriteBatches.clear();
+            beginFrameBatches();
+            // Near faces first. The distant layer then keeps only the slots they left.
+            markNearFaces(cull);
             for (int32_t y = 0; y < _grid.chunksY(); y++)
             {
                 for (int32_t x = 0; x < _grid.chunksX(); x++)
@@ -858,13 +1187,11 @@ namespace OpenRCT2::View3D::Park
                             size_t index;
                             if (found == _modelBatches.end())
                             {
-                                index = _batches.size();
+                                index = takeBatch();
                                 _modelBatches.emplace(placement.typeKey, index);
-                                Batch batch;
-                                batch.handle = modelHandle;
-                                batch.model = true;
-                                batch.vegetation = placement.vegetation;
-                                _batches.push_back(std::move(batch));
+                                _batches[index].handle = modelHandle;
+                                _batches[index].model = true;
+                                _batches[index].vegetation = placement.vegetation;
                             }
                             else
                             {
@@ -880,7 +1207,7 @@ namespace OpenRCT2::View3D::Park
                             {
                                 continue;
                             }
-                            const int32_t handle = spriteHandleForFace(placement.spriteImage[face], face);
+                            const int32_t handle = spriteHandleForFace(placement.spriteImage[face], face, true);
                             if (handle < 0)
                             {
                                 continue;
@@ -889,13 +1216,11 @@ namespace OpenRCT2::View3D::Park
                             size_t index;
                             if (found == _spriteBatches.end())
                             {
-                                index = _batches.size();
+                                index = takeBatch();
                                 _spriteBatches.emplace(handle, index);
-                                Batch batch;
-                                batch.handle = handle;
-                                batch.model = false;
-                                batch.vegetation = placement.vegetation;
-                                _batches.push_back(std::move(batch));
+                                _batches[index].handle = handle;
+                                _batches[index].model = false;
+                                _batches[index].vegetation = placement.vegetation;
                             }
                             else
                             {
@@ -905,6 +1230,11 @@ namespace OpenRCT2::View3D::Park
                         }
                     }
                 }
+            }
+            if (cull.haveCamera)
+            {
+                const int distantFace = spriteFaceForView(cull.eyeX - cull.focusX, cull.eyeY - cull.focusY);
+                appendDistant(_grid, cull, distantFace);
             }
         }
 
@@ -928,11 +1258,17 @@ namespace OpenRCT2::View3D::Park
     {
         _loads.reset();
         meshDrawShutdown();
-        _spriteHandles.clear();
+        _spriteResidents.clear();
+        _nearFaces.clear();
+        _spriteCount = 0;
+        _spriteTexels = 0;
+        _spriteDedicated = 0;
         _loggedUploadFail.clear();
         _batches.clear();
+        _batchCount = 0;
         _modelBatches.clear();
         _spriteBatches.clear();
+        _distantPages.clear();
         _loggedShader = false;
         _blit.clear();
         _rgba.clear();
@@ -944,11 +1280,13 @@ namespace OpenRCT2::View3D::Park
         _held.clear();
         _retryAt.clear();
         _backoff.clear();
+        _heldCursor = 0;
         _spaceFreed = false;
         _pinned.clear();
         _loadKeys.clear();
         _spriteLru.clear();
         _spriteLruPos.clear();
+        _distantPages.clear();
         _vram = LruBudget(kDefaultVramBudgetBytes);
         _frame = 0;
         _stats = {};
@@ -1011,7 +1349,9 @@ namespace OpenRCT2::View3D::Park
             return;
         }
         _frame++;
+        meshDrawBeginFrame();
         _spriteUploads = 0;
+        dropStaleSprites();
         bool dropSprites = false;
         {
             std::lock_guard<std::mutex> guard(_dirtyMutex);
@@ -1020,7 +1360,10 @@ namespace OpenRCT2::View3D::Park
         }
         if (dropSprites)
         {
-            _spriteHandles.clear();
+            _spriteResidents.clear();
+            _spriteCount = 0;
+            _spriteTexels = 0;
+            _spriteDedicated = 0;
             _spriteLru.clear();
             _spriteLruPos.clear();
             meshDrawClearSprites();
@@ -1028,6 +1371,7 @@ namespace OpenRCT2::View3D::Park
         FrameCull cull;
         readCamera(cull);
         syncChunks(cull.focusX, cull.focusY);
+        capSpriteRadius(cull);
         int32_t placements = 0;
         for (int32_t y = 0; y < _grid.chunksY(); y++)
         {
@@ -1059,13 +1403,23 @@ namespace OpenRCT2::View3D::Park
             _loads->requestAbsent(ids);
         }
         uploadReadyModels();
-        for (const Batch& batch : _batches)
+        for (size_t i = 0; i < _batchCount; i++)
         {
-            if (batch.instances.empty() || hideBatch(batch))
+            const Batch& batch = _batches[i];
+            const bool empty = batch.distant ? batch.distantInstances.empty() : batch.instances.empty();
+            if (empty || hideBatch(batch))
             {
                 continue;
             }
-            if (batch.model)
+            if (batch.distant)
+            {
+                meshDrawDistantSprites(
+                    batch.page, batch.face, batch.distantInstances.data(),
+                    static_cast<uint32_t>(batch.distantInstances.size()));
+                _stats.distantSpriteSubmits++;
+                _stats.distantSpriteInstances += static_cast<int32_t>(batch.distantInstances.size());
+            }
+            else if (batch.model)
             {
                 meshDrawModel(batch.handle, batch.instances.data(), static_cast<uint32_t>(batch.instances.size()));
                 _stats.modelSubmits++;

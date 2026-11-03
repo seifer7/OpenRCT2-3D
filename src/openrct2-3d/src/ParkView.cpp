@@ -1641,6 +1641,16 @@ namespace OpenRCT2::View3D::Park
         commitView(backWidth, backHeight, view, projection);
     }
 
+    void poseIsoCamera(uint16_t backWidth, uint16_t backHeight, float tilePixels, float targetX, float targetY)
+    {
+        _frameHeight = backHeight;
+        _fly.live = false;
+        applyIsoPose(targetX, targetY, worldZ(32), 0, tilePixels);
+        float view[16];
+        float projection[16];
+        commitView(backWidth, backHeight, view, projection);
+    }
+
     void sceneryClipForFrame(
         float frameHeight, float tilePixels, float aspect, float viewProj[16], float& eyeX, float& eyeY, float& eyeZ,
         float& focusX, float& focusY)

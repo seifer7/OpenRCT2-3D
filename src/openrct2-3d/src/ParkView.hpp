@@ -43,6 +43,10 @@ namespace OpenRCT2::View3D::Park
     // Does not submit the view. copyCamera is valid afterwards.
     void poseDefaultCamera(uint16_t backWidth, uint16_t backHeight);
 
+    // Same commit as the in-game view, aimed at targetX/targetY, with tilePixels as the 2D zoom
+    // (64 at zoom 0, 8 at zoom 3). copyCamera is valid afterwards.
+    void poseIsoCamera(uint16_t backWidth, uint16_t backHeight, float tilePixels, float targetX, float targetY);
+
     // Same matrices as the in-game view for a frame of this height and a zoom expressed as pixels per tile.
     // The target is the origin. Restores the live camera when it returns.
     void sceneryClipForFrame(

@@ -24,19 +24,39 @@ namespace OpenRCT2::View3D
         Vec3 normal;
     };
 
+    // Unnormalised eye offsets. Each pair is a unit direction times sqrt(2).
+    // Face 0 is north-east, then north-west, south-west, south-east.
+    constexpr float kSpriteEyeX[4] = { 1.0f, -1.0f, -1.0f, 1.0f };
+    constexpr float kSpriteEyeY[4] = { 1.0f, 1.0f, -1.0f, -1.0f };
+
+    // The direction sprite whose authored camera sits nearest `fromX, fromY`
+    // (eye minus the focus, or eye minus the object). One face for the distant layer.
+    inline int spriteFaceForView(float fromX, float fromY)
+    {
+        int best = 0;
+        float bestDot = fromX * kSpriteEyeX[0] + fromY * kSpriteEyeY[0];
+        for (int face = 1; face < 4; face++)
+        {
+            const float dot = fromX * kSpriteEyeX[face] + fromY * kSpriteEyeY[face];
+            if (dot > bestDot)
+            {
+                bestDot = dot;
+                best = face;
+            }
+        }
+        return best;
+    }
+
     // Face 0 faces the rotation-0 camera (north-east of the object, the same
     // corner ParkView::seedFlyCamera uses before it mirrors X). Faces 1..3 step
     // with CoordsXY{ 1, 1 }.rotate(-rotation).
     inline SpriteQuad makeDirectionSpriteQuad(int face, int16_t width, int16_t height, int16_t xOffset, int16_t yOffset)
     {
-        // Unnormalised eye offsets. Each pair is a unit direction times sqrt(2).
-        constexpr float kEyeX[4] = { 1.0f, -1.0f, -1.0f, 1.0f };
-        constexpr float kEyeY[4] = { 1.0f, 1.0f, -1.0f, -1.0f };
         constexpr float kInvSqrt2 = 0.7071067811865476f;
 
         const int index = face & 3;
         SpriteQuad quad;
-        quad.normal = { kEyeX[index] * kInvSqrt2, kEyeY[index] * kInvSqrt2, 0.0f };
+        quad.normal = { kSpriteEyeX[index] * kInvSqrt2, kSpriteEyeY[index] * kInvSqrt2, 0.0f };
 
         // look × up, with look = -normal and up = +Z. That is screen-right when
         // the camera sits on this normal and looks at the origin.

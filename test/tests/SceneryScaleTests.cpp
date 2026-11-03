@@ -17,11 +17,13 @@
 #include "openrct2-3d/src/SceneryChunk.hpp"
 #include "openrct2-3d/src/SceneryDraw.hpp"
 #include "openrct2-3d/src/SceneryScale.hpp"
+#include "openrct2-3d/src/SpriteQuad.hpp"
 #include "openrct2-3d/src/ViewerScale.hpp"
 
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <gtest/gtest.h>
 #include <openrct2/Context.h>
@@ -466,7 +468,92 @@ TEST(SceneryScale, FootprintKeepsCornerAndEdge)
 
 namespace
 {
-    // ParkView::commitView, including bx::mtxMul's argument order.
+    struct IsoPose
+    {
+        float clip[16] = {};
+        float eyeX = 0.0f;
+        float eyeY = 0.0f;
+        float eyeZ = 0.0f;
+        float focusX = 0.0f;
+        float focusY = 0.0f;
+        float planes[6][4] = {};
+    };
+
+    void mulClip(float out[16], const float proj[16], const float view[16])
+    {
+        for (int32_t col = 0; col < 4; col++)
+        {
+            for (int32_t row = 0; row < 4; row++)
+            {
+                float sum = 0.0f;
+                for (int32_t k = 0; k < 4; k++)
+                {
+                    sum += proj[row + k * 4] * view[k + col * 4];
+                }
+                out[row + col * 4] = sum;
+            }
+        }
+    }
+
+    // Hand-built pose for the radius geometry tests. The in-game clip, including
+    // bx::mtxMul's argument order, is Park::sceneryClipForFrame.
+    IsoPose makeIsoPose(float frameHeight, float tilePixels, float aspect, float focusX, float focusY)
+    {
+        const float cotHalf = 1.0f / std::tan(50.0f * 0.5f * 3.14159265f / 180.0f);
+        const float distance = cotHalf * 1.41421356f * frameHeight / (2.0f * tilePixels) * 0.8f;
+        const float pitch = 0.52359878f;
+        const float eyeSouth = -distance * std::cos(pitch);
+        const float eyeZ = distance * std::sin(pitch);
+        const float eyeX = focusX;
+        const float eyeY = focusY + eyeSouth;
+        const float fx = 0.0f;
+        const float fy = -eyeSouth;
+        const float fz = -eyeZ;
+        const float fl = std::sqrt(fx * fx + fy * fy + fz * fz);
+        const float fwx = fx / fl;
+        const float fwy = fy / fl;
+        const float fwz = fz / fl;
+        const float rx = fwy;
+        const float ry = -fwx;
+        const float rl = std::sqrt(rx * rx + ry * ry);
+        const float rnx = rx / rl;
+        const float rny = ry / rl;
+        const float ux = rny * fwz;
+        const float uy = -rnx * fwz;
+        const float uz = rnx * fwy - rny * fwx;
+        float view[16] = {};
+        view[0] = rnx;
+        view[4] = rny;
+        view[12] = -(rnx * eyeX + rny * eyeY);
+        view[1] = ux;
+        view[5] = uy;
+        view[9] = uz;
+        view[13] = -(ux * eyeX + uy * eyeY + uz * eyeZ);
+        view[2] = -fwx;
+        view[6] = -fwy;
+        view[10] = -fwz;
+        view[14] = fwx * eyeX + fwy * eyeY + fwz * eyeZ;
+        view[15] = 1.0f;
+        const float f = cotHalf;
+        const float n = 0.2f;
+        const float farPlane = 8000.0f;
+        float proj[16] = {};
+        proj[0] = f / aspect;
+        proj[5] = f;
+        proj[10] = (farPlane + n) / (n - farPlane);
+        proj[11] = -1.0f;
+        proj[14] = (2.0f * farPlane * n) / (n - farPlane);
+        IsoPose pose;
+        mulClip(pose.clip, proj, view);
+        pose.eyeX = eyeX;
+        pose.eyeY = eyeY;
+        pose.eyeZ = eyeZ;
+        pose.focusX = focusX;
+        pose.focusY = focusY;
+        extractFrustumPlanes(pose.clip, pose.planes);
+        return pose;
+    }
+
     float zoomRadius(float frameHeight, float tilePixels, float aspect)
     {
         float clip[16];
@@ -478,6 +565,18 @@ namespace
         Park::sceneryClipForFrame(frameHeight, tilePixels, aspect, clip, eyeX, eyeY, eyeZ, focusX, focusY);
         return groundFootprintRadius(clip, eyeX, eyeY, focusX, focusY);
     }
+
+    ChunkBox boxAround(float x, float y)
+    {
+        ChunkBox box;
+        box.minX = x - 1.0f;
+        box.maxX = x + 1.0f;
+        box.minY = y - 1.0f;
+        box.maxY = y + 1.0f;
+        box.minZ = 0.0f;
+        box.maxZ = 4.0f;
+        return box;
+    }
 } // namespace
 
 TEST(SceneryScale, ZoomedOutRadiusStaysBounded)
@@ -486,11 +585,12 @@ TEST(SceneryScale, ZoomedOutRadiusStaysBounded)
     const float hdZoom2 = zoomRadius(1080.0f, 16.0f, aspect);
     const float hdZoom3 = zoomRadius(1080.0f, 8.0f, aspect);
     const float uhdZoom3 = zoomRadius(2160.0f, 8.0f, aspect);
-    EXPECT_GT(hdZoom2, 68.0f);
-    EXPECT_LT(hdZoom2, 120.0f);
-    EXPECT_GT(hdZoom3, 136.0f);
-    EXPECT_LT(hdZoom3, 220.0f);
-    EXPECT_GT(uhdZoom3, 270.0f);
+    // N-B4 was the uncapped horizon. These are the capped radii from the real clip.
+    EXPECT_GT(hdZoom2, 40.0f);
+    EXPECT_LT(hdZoom2, 160.0f);
+    EXPECT_GT(hdZoom3, 80.0f);
+    EXPECT_LT(hdZoom3, 260.0f);
+    EXPECT_GT(uhdZoom3, 160.0f);
     EXPECT_LT(uhdZoom3, 500.0f);
 
     float clip[16];
@@ -661,6 +761,456 @@ TEST(SceneryScale, LoaderStopsAndDoesNotResurrectForgottenWork)
     EXPECT_EQ(started.load(), 1);
 }
 
+TEST(SceneryScale, SpriteFaceFollowsTheEye)
+{
+    EXPECT_EQ(spriteFaceForView(1.0f, 1.0f), 0);
+    EXPECT_EQ(spriteFaceForView(-1.0f, 1.0f), 1);
+    EXPECT_EQ(spriteFaceForView(-1.0f, -1.0f), 2);
+    EXPECT_EQ(spriteFaceForView(1.0f, -1.0f), 3);
+}
+
+TEST(SceneryScale, SpriteRunsGroupOneFace)
+{
+    SceneryChunk chunk;
+    const int images[3] = { 4, 4, 9 };
+    for (int i = 0; i < 3; i++)
+    {
+        ChunkPlacement placement;
+        placement.x = static_cast<float>(i);
+        placement.y = 2.0f;
+        placement.z = 1.0f;
+        placement.vegetation = i != 2;
+        for (int face = 0; face < 4; face++)
+        {
+            placement.spriteFace[face] = true;
+            placement.spriteImage[face] = ImageId(static_cast<uint32_t>(images[i]));
+        }
+        chunk.placements.push_back(placement);
+    }
+    buildChunkSpriteRuns(chunk);
+    ASSERT_EQ(chunk.spriteInstances.size(), 3u);
+    ASSERT_EQ(chunk.spriteRuns[0].size(), 2u);
+    const ChunkSpriteRun& first = chunk.spriteRuns[0][0];
+    const ChunkSpriteRun& second = chunk.spriteRuns[0][1];
+    const ChunkSpriteRun& pair = first.count == 2 ? first : second;
+    const ChunkSpriteRun& single = first.count == 2 ? second : first;
+    EXPECT_EQ(pair.count, 2u);
+    EXPECT_EQ(single.count, 1u);
+    EXPECT_TRUE(pair.vegetation);
+    EXPECT_FALSE(single.vegetation);
+    int32_t total = 0;
+    for (const ChunkSpriteRun& run : chunk.spriteRuns[2])
+    {
+        total += static_cast<int32_t>(run.count);
+    }
+    EXPECT_EQ(total, 3);
+}
+
+TEST(SceneryScale, DistantSpritesCoverTheFarSide)
+{
+    const float aspect = 16.0f / 9.0f;
+    const float zooms[2][2] = { { 1080.0f, 16.0f }, { 1080.0f, 8.0f } };
+    const float samples[3][2] = { { 0.0f, 1.0f }, { -1.0f, 1.0f }, { 1.0f, 1.0f } };
+    for (const auto& zoom : zooms)
+    {
+        const IsoPose pose = makeIsoPose(zoom[0], zoom[1], aspect, 0.0f, 0.0f);
+        const float mesh = groundFootprintRadius(pose.clip, pose.eyeX, pose.eyeY, pose.focusX, pose.focusY);
+        const float sprites = distantSpriteRadius(pose.clip, pose.focusX, pose.focusY, kDefaultDistantSpriteTiles);
+        EXPECT_LT(mesh, sprites);
+        EXPECT_GT(groundReachRadius(pose.clip, pose.focusX, pose.focusY), mesh + 100.0f);
+        for (const auto& sample : samples)
+        {
+            float x = 0.0f;
+            float y = 0.0f;
+            ASSERT_TRUE(groundPlanePoint(pose.clip, sample[0], sample[1], x, y));
+            const ChunkBox box = boxAround(x, y);
+            EXPECT_TRUE(boxOutsideGroundDistance(box, pose.focusX, pose.focusY, mesh)) << sample[0] << "," << sample[1];
+            EXPECT_TRUE(chunkInDistantSprites(box, pose.focusX, pose.focusY, mesh, sprites, pose.planes))
+                << sample[0] << "," << sample[1] << " mesh " << mesh << " sprites " << sprites;
+        }
+        float farX = 0.0f;
+        float farY = 0.0f;
+        ASSERT_TRUE(groundPlanePoint(pose.clip, 0.0f, 1.0f, farX, farY));
+        const float farDistance = std::sqrt(farX * farX + farY * farY);
+        const float capped = distantSpriteRadius(pose.clip, pose.focusX, pose.focusY, 200.0f);
+        EXPECT_LE(capped, 200.0f);
+        const float beyond = 280.0f / farDistance;
+        const ChunkBox past = boxAround(farX * beyond, farY * beyond);
+        EXPECT_FALSE(chunkInDistantSprites(past, pose.focusX, pose.focusY, mesh, capped, pose.planes));
+        const float between = 170.0f / farDistance;
+        const ChunkBox ring = boxAround(farX * between, farY * between);
+        if (170.0f > mesh)
+        {
+            EXPECT_TRUE(chunkInDistantSprites(ring, pose.focusX, pose.focusY, mesh, capped, pose.planes));
+        }
+        const ChunkBox close = boxAround(pose.focusX, pose.focusY + 8.0f);
+        EXPECT_FALSE(chunkInDistantSprites(close, pose.focusX, pose.focusY, mesh, sprites, pose.planes));
+    }
+}
+
+TEST(SceneryScale, HeldRetryRotatesAndLeavesASlot)
+{
+    const uint32_t keys[2] = { 10u, 20u };
+    const uint8_t due[2] = { 1, 1 };
+    uint32_t cursor = 0;
+    int32_t retries[2] = {};
+    int32_t newSlots = 0;
+    for (int32_t frame = 0; frame < 8; frame++)
+    {
+        const int32_t chosen = selectHeldRetry(keys, due, 2, false, cursor);
+        ASSERT_GE(chosen, 0);
+        ASSERT_LT(chosen, 2);
+        retries[chosen]++;
+        newSlots += static_cast<int32_t>(kUploadsPerFrame) - 1;
+    }
+    EXPECT_EQ(retries[0], 4);
+    EXPECT_EQ(retries[1], 4);
+    EXPECT_EQ(newSlots, 8);
+
+    const uint32_t three[3] = { 1u, 2u, 3u };
+    const uint8_t allDue[3] = { 1, 1, 1 };
+    cursor = 0;
+    int32_t seen[3] = {};
+    for (int32_t frame = 0; frame < 6; frame++)
+    {
+        const int32_t chosen = selectHeldRetry(three, allDue, 3, false, cursor);
+        ASSERT_GE(chosen, 0);
+        seen[chosen]++;
+    }
+    EXPECT_EQ(seen[0], 2);
+    EXPECT_EQ(seen[1], 2);
+    EXPECT_EQ(seen[2], 2);
+
+    const uint8_t skipMiddle[3] = { 1, 0, 1 };
+    cursor = 0;
+    const int32_t first = selectHeldRetry(three, skipMiddle, 3, false, cursor);
+    const int32_t second = selectHeldRetry(three, skipMiddle, 3, false, cursor);
+    EXPECT_EQ(first, 0);
+    EXPECT_EQ(second, 2);
+
+    const uint8_t none[2] = { 0, 0 };
+    cursor = 0;
+    EXPECT_EQ(selectHeldRetry(keys, none, 2, false, cursor), -1);
+    EXPECT_EQ(cursor, 0u);
+    const int32_t early = selectHeldRetry(keys, none, 2, true, cursor);
+    const int32_t earlyNext = selectHeldRetry(keys, none, 2, true, cursor);
+    EXPECT_EQ(early, 0);
+    EXPECT_EQ(earlyNext, 1);
+}
+
+TEST(SceneryScale, LargeParkZoom3SpriteCost)
+{
+    constexpr int32_t kMap = 256;
+    constexpr int32_t kImages = 48;
+    const float aspect = 16.0f / 9.0f;
+    const float focusX = 128.0f;
+    const float focusY = 40.0f;
+    const IsoPose pose = makeIsoPose(1080.0f, 8.0f, aspect, focusX, focusY);
+    const float mesh = groundFootprintRadius(pose.clip, pose.eyeX, pose.eyeY, pose.focusX, pose.focusY);
+    const float mapFar = mapCornerDistance(focusX, focusY, static_cast<float>(kMap), static_cast<float>(kMap));
+    const float sprites = distantSpriteRadius(pose.clip, focusX, focusY, std::min(kDefaultDistantSpriteTiles, mapFar));
+    EXPECT_NEAR(mesh, 146.0f, 1.5f);
+    EXPECT_GT(sprites, mesh);
+    EXPECT_LE(sprites, mapFar + 0.1f);
+
+    SceneryChunkGrid grid;
+    grid.reset(kMap, kMap);
+    for (int32_t cy = 0; cy < grid.chunksY(); cy++)
+    {
+        for (int32_t cx = 0; cx < grid.chunksX(); cx++)
+        {
+            SceneryChunk* chunk = grid.at(cx, cy);
+            const int32_t x0 = cx * kSceneryChunkTiles;
+            const int32_t y0 = cy * kSceneryChunkTiles;
+            chunk->box.minX = static_cast<float>(x0);
+            chunk->box.minY = static_cast<float>(y0);
+            chunk->box.maxX = static_cast<float>(x0 + kSceneryChunkTiles);
+            chunk->box.maxY = static_cast<float>(y0 + kSceneryChunkTiles);
+            chunk->box.minZ = 0.0f;
+            chunk->box.maxZ = 4.0f;
+            chunk->placements.reserve(static_cast<size_t>(kSceneryChunkTiles * kSceneryChunkTiles));
+            for (int32_t y = y0; y < y0 + kSceneryChunkTiles; y++)
+            {
+                for (int32_t x = x0; x < x0 + kSceneryChunkTiles; x++)
+                {
+                    ChunkPlacement placement;
+                    placement.x = static_cast<float>(x) + 0.5f;
+                    placement.y = static_cast<float>(y) + 0.5f;
+                    placement.z = 0.5f;
+                    const uint32_t image = static_cast<uint32_t>((x * 17 + y) % kImages);
+                    for (int face = 0; face < 4; face++)
+                    {
+                        placement.spriteFace[face] = true;
+                        placement.spriteImage[face] = ImageId(image);
+                    }
+                    chunk->placements.push_back(placement);
+                }
+            }
+            buildChunkSpriteRuns(*chunk);
+            chunk->built = true;
+            chunk->dirty = false;
+        }
+    }
+
+    const int face = spriteFaceForView(pose.eyeX - pose.focusX, pose.eyeY - pose.focusY);
+    std::vector<std::vector<ChunkSpritePoint>> pages(static_cast<size_t>(kSpriteAtlasPageBudget));
+    int32_t spriteChunks = 0;
+    int32_t instances = 0;
+    auto gather = [&]() {
+        spriteChunks = 0;
+        instances = 0;
+        for (auto& page : pages)
+        {
+            page.clear();
+        }
+        int32_t lastChunk = -1;
+        appendDistantPlacements(
+            grid, pose.planes, focusX, focusY, mesh, sprites, face, [&](const SceneryChunk& chunk, const ChunkSpriteRun& run) {
+                const int32_t chunkId = static_cast<int32_t>(&chunk - grid.at(0, 0));
+                if (chunkId != lastChunk)
+                {
+                    lastChunk = chunkId;
+                    spriteChunks++;
+                }
+                const int32_t page = static_cast<int32_t>(run.image.GetIndex() % static_cast<uint32_t>(kSpriteAtlasPageBudget));
+                auto& batch = pages[static_cast<size_t>(page)];
+                batch.reserve(batch.size() + static_cast<size_t>(run.count));
+                const std::vector<uint32_t>& order = chunk.spriteOrder[face];
+                for (uint32_t n = 0; n < run.count; n++)
+                {
+                    batch.push_back(chunk.spriteInstances[order[run.begin + n]]);
+                }
+                instances += static_cast<int32_t>(run.count);
+            });
+    };
+    gather();
+    const auto started = std::chrono::steady_clock::now();
+    gather();
+    const int64_t microseconds = std::chrono::duration_cast<std::chrono::microseconds>(
+                                     std::chrono::steady_clock::now() - started)
+                                     .count();
+    int32_t draws = 0;
+    for (const auto& page : pages)
+    {
+        if (!page.empty())
+        {
+            draws++;
+        }
+    }
+    int32_t meshChunks = 0;
+    for (int32_t cy = 0; cy < grid.chunksY(); cy++)
+    {
+        for (int32_t cx = 0; cx < grid.chunksX(); cx++)
+        {
+            const SceneryChunk* chunk = grid.at(cx, cy);
+            if (!boxOutsideGroundDistance(chunk->box, focusX, focusY, mesh) && !boxOutsideFrustum(chunk->box, pose.planes))
+            {
+                meshChunks++;
+            }
+        }
+    }
+    EXPECT_GT(spriteChunks, 0);
+    EXPECT_EQ(instances, spriteChunks * kSceneryChunkTiles * kSceneryChunkTiles);
+    EXPECT_EQ(draws, static_cast<int32_t>(kSpriteAtlasPageBudget));
+    EXPECT_LT(meshChunks, 256);
+    std::printf(
+        "DISTANT_SPRITE_FRAME map=%d zoom=3 focus=(%.0f,%.0f) meshRadius=%.1f spriteRadius=%.1f meshChunks=%d spriteChunks=%d "
+        "instances=%d draws=%d us=%lld\n",
+        kMap, focusX, focusY, static_cast<double>(mesh), static_cast<double>(sprites), meshChunks, spriteChunks, instances,
+        draws, static_cast<long long>(microseconds));
+}
+
+TEST(SceneryScale, SpriteShareStaysCapped)
+{
+    EXPECT_FALSE(spriteOverShare(10, kMaxSpriteImages, 100, kMaxSpriteAtlasTexels, 0, kMaxSpriteDedicated));
+    EXPECT_TRUE(spriteOverShare(kMaxSpriteImages, kMaxSpriteImages, 0, kMaxSpriteAtlasTexels, 0, kMaxSpriteDedicated));
+    EXPECT_TRUE(
+        spriteOverShare(1, kMaxSpriteImages, kMaxSpriteAtlasTexels + 1u, kMaxSpriteAtlasTexels, 0, kMaxSpriteDedicated));
+    EXPECT_TRUE(spriteOverShare(1, kMaxSpriteImages, 0, kMaxSpriteAtlasTexels, kMaxSpriteDedicated + 1u, kMaxSpriteDedicated));
+}
+
+TEST(SceneryScale, StaleSpriteDropsAndThisFrameStays)
+{
+    const uint64_t lastUsed[3] = { 10, 400, 500 };
+    const uint8_t used[3] = { 0, 0, 1 };
+    EXPECT_EQ(pickSpriteToDrop(lastUsed, used, 3, 500, kSpriteStaleFrames, true), 0);
+    const uint8_t allFresh[3] = { 0, 0, 0 };
+    const uint64_t recent[3] = { 490, 495, 499 };
+    EXPECT_EQ(pickSpriteToDrop(recent, allFresh, 3, 500, kSpriteStaleFrames, true), -1);
+    EXPECT_EQ(pickSpriteToDrop(lastUsed, used, 3, 500, kSpriteStaleFrames, false), 0);
+    const uint8_t allUsed[2] = { 1, 1 };
+    const uint64_t old[2] = { 1, 2 };
+    EXPECT_EQ(pickSpriteToDrop(old, allUsed, 2, 500, kSpriteStaleFrames, false), -1);
+}
+
+TEST(SceneryScale, ModelTakesAColdSpriteBeforeItFails)
+{
+    const uint64_t lastUsed[2] = { 10, 500 };
+    const uint8_t used[2] = { 0, 1 };
+    const int32_t dropped = pickSpriteToDrop(lastUsed, used, 2, 500, kSpriteStaleFrames, false);
+    EXPECT_EQ(dropped, 0);
+    const uint8_t onlyVisible[1] = { 1 };
+    const uint64_t visible[1] = { 1 };
+    EXPECT_EQ(pickSpriteToDrop(visible, onlyVisible, 1, 500, kSpriteStaleFrames, false), -1);
+}
+
+TEST(SceneryScale, FreedSpriteIdWaitsUntilNextFrame)
+{
+    SpriteIdPool pool;
+    pool.release(3);
+    pool.release(7);
+    EXPECT_EQ(pool.acquire(), -1);
+    pool.nextFrame();
+    EXPECT_EQ(pool.acquire(), 7);
+    EXPECT_EQ(pool.acquire(), 3);
+    EXPECT_EQ(pool.acquire(), -1);
+}
+
+namespace
+{
+    void mulClipLocal(float out[16], const float proj[16], const float view[16])
+    {
+        for (int32_t col = 0; col < 4; col++)
+        {
+            for (int32_t row = 0; row < 4; row++)
+            {
+                float sum = 0.0f;
+                for (int32_t k = 0; k < 4; k++)
+                {
+                    sum += proj[row + k * 4] * view[k + col * 4];
+                }
+                out[row + col * 4] = sum;
+            }
+        }
+    }
+
+    // ParkView's camera: bx left-handed lookAt, the X row negated, bx::mtxProj in degrees.
+    void gameClip(
+        float clip[16], float eyeX, float eyeY, float eyeZ, float forwardX, float forwardY, float forwardZ, float aspect)
+    {
+        const float fl = std::sqrt(forwardX * forwardX + forwardY * forwardY + forwardZ * forwardZ);
+        const float vx = forwardX / fl;
+        const float vy = forwardY / fl;
+        const float vz = forwardZ / fl;
+        const float ux = 0.0f;
+        const float uy = 0.0f;
+        const float uz = 1.0f;
+        float rx = uy * vz - uz * vy;
+        float ry = uz * vx - ux * vz;
+        float rz = ux * vy - uy * vx;
+        const float rl = std::sqrt(rx * rx + ry * ry + rz * rz);
+        rx /= rl;
+        ry /= rl;
+        rz /= rl;
+        const float upX = vy * rz - vz * ry;
+        const float upY = vz * rx - vx * rz;
+        const float upZ = vx * ry - vy * rx;
+        float view[16] = {};
+        view[0] = rx;
+        view[1] = upX;
+        view[2] = vx;
+        view[4] = ry;
+        view[5] = upY;
+        view[6] = vy;
+        view[8] = rz;
+        view[9] = upZ;
+        view[10] = vz;
+        view[12] = -(rx * eyeX + ry * eyeY + rz * eyeZ);
+        view[13] = -(upX * eyeX + upY * eyeY + upZ * eyeZ);
+        view[14] = -(vx * eyeX + vy * eyeY + vz * eyeZ);
+        view[15] = 1.0f;
+        view[0] = -view[0];
+        view[4] = -view[4];
+        view[8] = -view[8];
+        view[12] = -view[12];
+        const float height = 1.0f / std::tan(50.0f * 0.5f * 3.14159265f / 180.0f);
+        const float width = height / aspect;
+        const float nearPlane = 0.2f;
+        const float farPlane = 8000.0f;
+        const float diff = farPlane - nearPlane;
+        float proj[16] = {};
+        proj[0] = width;
+        proj[5] = height;
+        proj[10] = (farPlane + nearPlane) / diff;
+        proj[11] = 1.0f;
+        proj[14] = -(2.0f * farPlane * nearPlane) / diff;
+        mulClipLocal(clip, proj, view);
+    }
+} // namespace
+
+TEST(SceneryScale, GameCameraKeepsTheFocusChunk)
+{
+    const float aspect = 16.0f / 9.0f;
+    const float targetX = 128.0f;
+    const float targetY = 96.0f;
+    const float targetZ = 1.0f;
+    const float dir = 0.70710678f;
+    const float distance = (1.0f / std::tan(25.0f * 3.14159265f / 180.0f)) * 1.41421356f * 1080.0f / (2.0f * 32.0f) * 0.8f;
+    const float horizontal = distance * std::cos(0.52359878f);
+    const float vertical = distance * std::sin(0.52359878f);
+    const float eyeX = targetX + dir * horizontal;
+    const float eyeY = targetY + dir * horizontal;
+    const float eyeZ = targetZ + vertical;
+    const float yaw = std::atan2(-dir, -dir);
+    const float pitch = -0.52359878f;
+    const float forwardX = std::cos(yaw) * std::cos(pitch);
+    const float forwardY = std::sin(yaw) * std::cos(pitch);
+    const float forwardZ = std::sin(pitch);
+    float clip[16];
+    gameClip(clip, eyeX, eyeY, eyeZ, forwardX, forwardY, forwardZ, aspect);
+    const float t = -eyeZ / forwardZ;
+    const float focusX = eyeX + forwardX * t;
+    const float focusY = eyeY + forwardY * t;
+    float planes[6][4];
+    extractFrustumPlanes(clip, planes);
+    const float radius = groundFootprintRadius(clip, eyeX, eyeY, focusX, focusY);
+    ChunkBox focus = boxAround(targetX, targetY);
+    focus.minZ = 0.0f;
+    focus.maxZ = targetZ + 4.0f;
+    EXPECT_GT(radius, 40.0f);
+    EXPECT_LT(radius, 160.0f);
+    EXPECT_FALSE(boxOutsideGroundDistance(focus, focusX, focusY, radius));
+    EXPECT_FALSE(boxOutsideFrustum(focus, planes));
+    EXPECT_FALSE(
+        chunkInDistantSprites(focus, focusX, focusY, radius, distantSpriteRadius(clip, focusX, focusY, 1280.0f), planes));
+}
+
+TEST(SceneryScale, HorizonMissFallsBackToTheFarLimit)
+{
+    const float aspect = 16.0f / 9.0f;
+    const float eyeX = 0.0f;
+    const float eyeY = -30.0f;
+    const float eyeZ = 40.0f;
+    const float pitch = -0.05f;
+    const float forwardX = 0.0f;
+    const float forwardY = std::cos(pitch);
+    const float forwardZ = std::sin(pitch);
+    float clip[16];
+    gameClip(clip, eyeX, eyeY, eyeZ, forwardX, forwardY, forwardZ, aspect);
+    float missX = 0.0f;
+    float missY = 0.0f;
+    EXPECT_FALSE(groundPlanePoint(clip, 0.0f, 1.0f, missX, missY));
+    const float t = -eyeZ / forwardZ;
+    const float focusX = eyeX + forwardX * t;
+    const float focusY = eyeY + forwardY * t;
+    const float mesh = groundFootprintRadius(clip, eyeX, eyeY, focusX, focusY);
+    const float reach = groundReachRadius(clip, focusX, focusY);
+    EXPECT_GE(reach, kDefaultDistantSpriteTiles);
+    EXPECT_LT(mesh, reach);
+    float planes[6][4];
+    extractFrustumPlanes(clip, planes);
+    const float sprites = distantSpriteRadius(clip, focusX, focusY, kDefaultDistantSpriteTiles);
+    const float along = std::min(600.0f, sprites - 20.0f);
+    const float nx = forwardX / std::sqrt(forwardX * forwardX + forwardY * forwardY);
+    const float ny = forwardY / std::sqrt(forwardX * forwardX + forwardY * forwardY);
+    ChunkBox farBox = boxAround(focusX + nx * along, focusY + ny * along);
+    if (along > mesh)
+    {
+        EXPECT_TRUE(boxOutsideGroundDistance(farBox, focusX, focusY, mesh));
+        EXPECT_FALSE(boxOutsideGroundDistance(farBox, focusX, focusY, sprites));
+    }
+}
+
 namespace
 {
     bool solidSprite(int32_t& width, int32_t& height, const uint8_t*& rgba)
@@ -672,8 +1222,11 @@ namespace
         return true;
     }
 
-    void writeSceneryObject(const std::string& path, const std::string& id)
+    void writeSceneryObject(const std::string& path, const std::string& id, bool colours = false)
     {
+        const char* colourLines = colours ? "    \"hasPrimaryColour\": true,\n"
+                                            "    \"hasSecondaryColour\": true,\n"
+                                          : "";
         const std::string json = "{\n"
                                  "  \"id\": \""
             + id
@@ -688,7 +1241,8 @@ namespace
               "    \"removalPrice\": 10,\n"
               "    \"cursor\": \"treeDown\",\n"
               "    \"isTree\": true,\n"
-              "    \"shape\": \"4/4\"\n"
+            + colourLines
+            + "    \"shape\": \"4/4\"\n"
               "  }\n"
               "}\n";
         OpenRCT2::File::WriteAllBytes(path, json.data(), json.size());
@@ -711,7 +1265,11 @@ namespace
         return path;
     }
 
-    void placeScenery(OpenRCT2::IObjectManager& objects, std::string_view id, const CoordsXYZD& loc)
+    void placeScenery(
+        OpenRCT2::IObjectManager& objects, std::string_view id, const CoordsXYZD& loc,
+        OpenRCT2::Drawing::Colour primary = OpenRCT2::Drawing::Colour::brightGreen,
+        OpenRCT2::Drawing::Colour secondary = OpenRCT2::Drawing::Colour::brightGreen,
+        OpenRCT2::Drawing::Colour tertiary = OpenRCT2::Drawing::Colour::brightGreen)
     {
         OpenRCT2::Object* object = objects.LoadObject(id);
         if (object == nullptr)
@@ -720,9 +1278,7 @@ namespace
             return;
         }
         const OpenRCT2::ObjectEntryIndex index = objects.GetLoadedObjectEntryIndex(object);
-        OpenRCT2::GameActions::SmallSceneryPlaceAction action(
-            loc, 0, index, OpenRCT2::Drawing::Colour::brightGreen, OpenRCT2::Drawing::Colour::brightGreen,
-            OpenRCT2::Drawing::Colour::brightGreen);
+        OpenRCT2::GameActions::SmallSceneryPlaceAction action(loc, 0, index, primary, secondary, tertiary);
         // Execute queues the action until the game update. Nested runs it now.
         const auto result = OpenRCT2::GameActions::ExecuteNested(&action, OpenRCT2::getGameState());
         if (result.error != OpenRCT2::GameActions::Status::ok)
@@ -881,4 +1437,336 @@ TEST(SceneryScale, DefaultCameraDrawsParkScenery)
     EXPECT_GT(drawn.modelSubmits, 0);
     EXPECT_GT(drawn.spriteInstances, 0);
     EXPECT_GT(drawn.spriteSubmits, 0);
+}
+
+TEST(SceneryScale, DefaultCameraDrawsDistantSprites)
+{
+    // 1280x720, zoom 3 is 8 px per tile. The 3D radius is about 100 tiles, so the map has to
+    // extend past that or the distant layer has nothing to draw.
+    constexpr uint16_t kBackWidth = 1280;
+    constexpr uint16_t kBackHeight = 720;
+    constexpr int32_t kMapTiles = 240;
+    constexpr float kTilePixels = 8.0f;
+    const std::string spriteId = "test.scenery_small.far";
+
+    const std::string root = tempRoot();
+    const std::string dataRoot = OpenRCT2::Path::Combine(root, "o3d-distant-camera-data");
+    const std::string source = OpenRCT2::Path::Combine(root, "o3d-distant-camera-src");
+    const std::string cache = OpenRCT2::Path::Combine(root, "o3d-distant-camera-cache");
+    struct Cleanup
+    {
+        bool headless = gOpenRCT2Headless;
+        bool noGraphics = gOpenRCT2NoGraphics;
+        u8string dataPath = gCustomOpenRCT2DataPath;
+        bool device = false;
+        std::string dataRoot;
+        std::string source;
+        std::string cache;
+
+        Cleanup(std::string dataRoot_, std::string source_, std::string cache_)
+            : dataRoot(std::move(dataRoot_))
+            , source(std::move(source_))
+            , cache(std::move(cache_))
+        {
+        }
+
+        ~Cleanup()
+        {
+            if (device)
+            {
+                Park::setScenerySpriteOverride(nullptr);
+                Park::releaseScenery();
+                Park::shutdownSceneryTestDevice();
+            }
+            gOpenRCT2Headless = headless;
+            gOpenRCT2NoGraphics = noGraphics;
+            gCustomOpenRCT2DataPath = dataPath;
+            OpenRCT2::Path::DeleteDirectory(dataRoot);
+            OpenRCT2::Path::DeleteDirectory(source);
+            OpenRCT2::Path::DeleteDirectory(cache);
+        }
+    } cleanup(dataRoot, source, cache);
+    OpenRCT2::Path::DeleteDirectory(dataRoot);
+    OpenRCT2::Path::DeleteDirectory(source);
+    OpenRCT2::Path::DeleteDirectory(cache);
+    OpenRCT2::Path::CreateDirectory(OpenRCT2::Path::Combine(dataRoot, "object"));
+    OpenRCT2::Path::CreateDirectory(OpenRCT2::Path::Combine(dataRoot, "language"));
+    OpenRCT2::Path::CreateDirectory(source);
+    OpenRCT2::Path::CreateDirectory(cache);
+    std::string language = "../data/language";
+    if (!OpenRCT2::File::Exists(OpenRCT2::Path::Combine(language, "en-US.txt")))
+    {
+        language = "data/language";
+    }
+    for (const char* name : { "en-US.txt", "en-GB.txt" })
+    {
+        const auto bytes = OpenRCT2::File::ReadAllBytes(OpenRCT2::Path::Combine(language, name));
+        OpenRCT2::File::WriteAllBytes(OpenRCT2::Path::Combine(dataRoot, "language", name), bytes.data(), bytes.size());
+    }
+    writeSceneryObject(OpenRCT2::Path::Combine(dataRoot, "object", spriteId + ".json"), spriteId);
+
+    gOpenRCT2Headless = true;
+    gOpenRCT2NoGraphics = true;
+    gCustomOpenRCT2DataPath = dataRoot;
+    auto context = OpenRCT2::CreateContext();
+    ASSERT_NE(context, nullptr);
+    ASSERT_TRUE(context->Initialise());
+    OpenRCT2::gameStateInitAll(OpenRCT2::getGameState(), TileCoordsXY{ kMapTiles, kMapTiles });
+    OpenRCT2::getGameState().cheats.sandboxMode = true;
+    OpenRCT2::getGameState().cheats.disableClearanceChecks = true;
+
+    const float target = static_cast<float>(kMapTiles) * 0.5f;
+    Park::poseIsoCamera(kBackWidth, kBackHeight, kTilePixels, target, target);
+    float eyeX = 0.0f;
+    float eyeY = 0.0f;
+    float eyeZ = 0.0f;
+    float clip[16];
+    ASSERT_TRUE(Park::copyCamera(eyeX, eyeY, eyeZ, clip));
+    float focusX = 0.0f;
+    float focusY = 0.0f;
+    ASSERT_TRUE(Park::copyViewFocus(focusX, focusY));
+    const float meshRadius = groundFootprintRadius(clip, eyeX, eyeY, focusX, focusY);
+    const float mapFar = mapCornerDistance(focusX, focusY, static_cast<float>(kMapTiles), static_cast<float>(kMapTiles));
+    const float spriteRadius = distantSpriteRadius(clip, focusX, focusY, std::min(kDefaultDistantSpriteTiles, mapFar));
+    float planes[6][4];
+    extractFrustumPlanes(clip, planes);
+    const float dx = focusX - eyeX;
+    const float dy = focusY - eyeY;
+    const float length = std::sqrt(dx * dx + dy * dy);
+    ASSERT_GT(length, 1.0f);
+    int32_t tileX = -1;
+    int32_t tileY = -1;
+    for (float distance = meshRadius + 24.0f; distance < spriteRadius - 8.0f; distance += 8.0f)
+    {
+        const float x = focusX + dx / length * distance;
+        const float y = focusY + dy / length * distance;
+        ChunkBox box = boxAround(x, y);
+        if (!boxOutsideGroundDistance(box, focusX, focusY, meshRadius))
+        {
+            continue;
+        }
+        if (boxOutsideGroundDistance(box, focusX, focusY, spriteRadius) || boxOutsideFrustum(box, planes))
+        {
+            continue;
+        }
+        const int32_t ix = static_cast<int32_t>(std::floor(x));
+        const int32_t iy = static_cast<int32_t>(std::floor(y));
+        if (ix > 1 && iy > 1 && ix < kMapTiles - 2 && iy < kMapTiles - 2)
+        {
+            tileX = ix;
+            tileY = iy;
+            break;
+        }
+    }
+    ASSERT_GE(tileX, 0) << meshRadius << " " << spriteRadius;
+    placeScenery(context->GetObjectManager(), spriteId, CoordsXYZD{ tileX * 32, tileY * 32, 0, 0 });
+    gOpenRCT2NoGraphics = false;
+
+    ASSERT_TRUE(Park::initSceneryTestDevice(kBackWidth, kBackHeight));
+    cleanup.device = true;
+    Park::releaseScenery();
+    Park::setScenerySpriteOverride(&solidSprite);
+    Park::poseIsoCamera(kBackWidth, kBackHeight, kTilePixels, target, target);
+    Park::resetSceneryFrameStats();
+    for (int32_t frame = 0; frame < 400 && Park::sceneryFrameStats().distantSpriteSubmits == 0; frame++)
+    {
+        Park::drawScenery();
+        Park::sceneryTestFrame();
+    }
+    const Park::SceneryFrameStats drawn = Park::sceneryFrameStats();
+    EXPECT_GT(drawn.distantSpriteSubmits, 0);
+    EXPECT_GT(drawn.distantSpriteInstances, 0);
+    EXPECT_EQ(drawn.modelSubmits, 0);
+}
+
+TEST(SceneryScale, NearFacesOutrankTheSpriteCap)
+{
+    // 121 unmodelled objects are 484 faces, past the 384 image cap. Each object has its own
+    // remap so the faces do not share a slot. A further object sits in the distant layer.
+    constexpr uint16_t kBackWidth = 1280;
+    constexpr uint16_t kBackHeight = 720;
+    constexpr int32_t kMapTiles = 240;
+    constexpr float kTilePixels = 8.0f;
+    constexpr int32_t kNearObjects = 121;
+    const std::string spriteId = "test.scenery_small.cap";
+
+    const std::string root = tempRoot();
+    const std::string dataRoot = OpenRCT2::Path::Combine(root, "o3d-near-cap-data");
+    const std::string source = OpenRCT2::Path::Combine(root, "o3d-near-cap-src");
+    const std::string cache = OpenRCT2::Path::Combine(root, "o3d-near-cap-cache");
+    struct Cleanup
+    {
+        bool headless = gOpenRCT2Headless;
+        bool noGraphics = gOpenRCT2NoGraphics;
+        u8string dataPath = gCustomOpenRCT2DataPath;
+        bool device = false;
+        std::string dataRoot;
+        std::string source;
+        std::string cache;
+
+        Cleanup(std::string dataRoot_, std::string source_, std::string cache_)
+            : dataRoot(std::move(dataRoot_))
+            , source(std::move(source_))
+            , cache(std::move(cache_))
+        {
+        }
+
+        ~Cleanup()
+        {
+            if (device)
+            {
+                Park::setScenerySpriteOverride(nullptr);
+                Park::releaseScenery();
+                Park::shutdownSceneryTestDevice();
+            }
+            gOpenRCT2Headless = headless;
+            gOpenRCT2NoGraphics = noGraphics;
+            gCustomOpenRCT2DataPath = dataPath;
+            OpenRCT2::Path::DeleteDirectory(dataRoot);
+            OpenRCT2::Path::DeleteDirectory(source);
+            OpenRCT2::Path::DeleteDirectory(cache);
+        }
+    } cleanup(dataRoot, source, cache);
+    OpenRCT2::Path::DeleteDirectory(dataRoot);
+    OpenRCT2::Path::DeleteDirectory(source);
+    OpenRCT2::Path::DeleteDirectory(cache);
+    OpenRCT2::Path::CreateDirectory(OpenRCT2::Path::Combine(dataRoot, "object"));
+    OpenRCT2::Path::CreateDirectory(OpenRCT2::Path::Combine(dataRoot, "language"));
+    OpenRCT2::Path::CreateDirectory(source);
+    OpenRCT2::Path::CreateDirectory(cache);
+    std::string language = "../data/language";
+    if (!OpenRCT2::File::Exists(OpenRCT2::Path::Combine(language, "en-US.txt")))
+    {
+        language = "data/language";
+    }
+    for (const char* name : { "en-US.txt", "en-GB.txt" })
+    {
+        const auto bytes = OpenRCT2::File::ReadAllBytes(OpenRCT2::Path::Combine(language, name));
+        OpenRCT2::File::WriteAllBytes(OpenRCT2::Path::Combine(dataRoot, "language", name), bytes.data(), bytes.size());
+    }
+    writeSceneryObject(OpenRCT2::Path::Combine(dataRoot, "object", spriteId + ".json"), spriteId, true);
+
+    gOpenRCT2Headless = true;
+    gOpenRCT2NoGraphics = true;
+    gCustomOpenRCT2DataPath = dataRoot;
+    auto context = OpenRCT2::CreateContext();
+    ASSERT_NE(context, nullptr);
+    ASSERT_TRUE(context->Initialise());
+    OpenRCT2::gameStateInitAll(OpenRCT2::getGameState(), TileCoordsXY{ kMapTiles, kMapTiles });
+    OpenRCT2::getGameState().cheats.sandboxMode = true;
+    OpenRCT2::getGameState().cheats.disableClearanceChecks = true;
+
+    const float target = static_cast<float>(kMapTiles) * 0.5f;
+    Park::poseIsoCamera(kBackWidth, kBackHeight, kTilePixels, target, target);
+    float eyeX = 0.0f;
+    float eyeY = 0.0f;
+    float eyeZ = 0.0f;
+    float clip[16];
+    ASSERT_TRUE(Park::copyCamera(eyeX, eyeY, eyeZ, clip));
+    float focusX = 0.0f;
+    float focusY = 0.0f;
+    ASSERT_TRUE(Park::copyViewFocus(focusX, focusY));
+    const float meshRadius = groundFootprintRadius(clip, eyeX, eyeY, focusX, focusY);
+    const float mapFar = mapCornerDistance(focusX, focusY, static_cast<float>(kMapTiles), static_cast<float>(kMapTiles));
+    const float spriteRadius = distantSpriteRadius(clip, focusX, focusY, std::min(kDefaultDistantSpriteTiles, mapFar));
+    float planes[6][4];
+    extractFrustumPlanes(clip, planes);
+    ASSERT_GT(spriteRadius, meshRadius);
+
+    int32_t focusTileX = static_cast<int32_t>(std::floor(focusX));
+    int32_t focusTileY = static_cast<int32_t>(std::floor(focusY));
+    if (focusTileX < 6)
+    {
+        focusTileX = 6;
+    }
+    if (focusTileY < 6)
+    {
+        focusTileY = 6;
+    }
+    if (focusTileX > kMapTiles - 7)
+    {
+        focusTileX = kMapTiles - 7;
+    }
+    if (focusTileY > kMapTiles - 7)
+    {
+        focusTileY = kMapTiles - 7;
+    }
+    const int32_t originX = focusTileX - 5;
+    const int32_t originY = focusTileY - 5;
+    ChunkBox nearBox;
+    nearBox.minX = static_cast<float>(originX);
+    nearBox.maxX = static_cast<float>(originX + 11);
+    nearBox.minY = static_cast<float>(originY);
+    nearBox.maxY = static_cast<float>(originY + 11);
+    nearBox.maxZ = 4.0f;
+    ASSERT_FALSE(boxOutsideGroundDistance(nearBox, focusX, focusY, meshRadius));
+    ASSERT_FALSE(boxOutsideFrustum(nearBox, planes));
+
+    auto& objects = context->GetObjectManager();
+    for (int32_t i = 0; i < kNearObjects; i++)
+    {
+        const int32_t tileX = originX + (i % 11);
+        const int32_t tileY = originY + (i / 11);
+        placeScenery(
+            objects, spriteId, CoordsXYZD{ tileX * 32, tileY * 32, 0, 0 }, static_cast<OpenRCT2::Drawing::Colour>(i % 32),
+            static_cast<OpenRCT2::Drawing::Colour>(i / 32), OpenRCT2::Drawing::Colour::black);
+    }
+
+    const float dx = focusX - eyeX;
+    const float dy = focusY - eyeY;
+    const float length = std::sqrt(dx * dx + dy * dy);
+    ASSERT_GT(length, 1.0f);
+    int32_t farTileX = -1;
+    int32_t farTileY = -1;
+    for (float distance = meshRadius + 24.0f; distance < spriteRadius - 8.0f; distance += 8.0f)
+    {
+        const float x = focusX + dx / length * distance;
+        const float y = focusY + dy / length * distance;
+        ChunkBox box = boxAround(x, y);
+        if (!boxOutsideGroundDistance(box, focusX, focusY, meshRadius))
+        {
+            continue;
+        }
+        if (boxOutsideGroundDistance(box, focusX, focusY, spriteRadius) || boxOutsideFrustum(box, planes))
+        {
+            continue;
+        }
+        const int32_t ix = static_cast<int32_t>(std::floor(x));
+        const int32_t iy = static_cast<int32_t>(std::floor(y));
+        if (ix > 1 && iy > 1 && ix < kMapTiles - 2 && iy < kMapTiles - 2)
+        {
+            farTileX = ix;
+            farTileY = iy;
+            break;
+        }
+    }
+    ASSERT_GE(farTileX, 0) << meshRadius << " " << spriteRadius;
+    // A remap the near grid does not use, so this face needs its own slot.
+    placeScenery(
+        objects, spriteId, CoordsXYZD{ farTileX * 32, farTileY * 32, 0, 0 }, OpenRCT2::Drawing::Colour::black,
+        static_cast<OpenRCT2::Drawing::Colour>(8), OpenRCT2::Drawing::Colour::black);
+    gOpenRCT2NoGraphics = false;
+
+    ASSERT_TRUE(Park::initSceneryTestDevice(kBackWidth, kBackHeight));
+    cleanup.device = true;
+    Park::releaseScenery();
+    Park::setScenerySpriteOverride(&solidSprite);
+    Park::poseIsoCamera(kBackWidth, kBackHeight, kTilePixels, target, target);
+    Park::resetSceneryFrameStats();
+    for (int32_t frame = 0; frame < 80 && Park::sceneryFrameStats().placements < kNearObjects + 1; frame++)
+    {
+        Park::drawScenery();
+        Park::sceneryTestFrame();
+    }
+    ASSERT_GE(Park::sceneryFrameStats().placements, kNearObjects + 1);
+
+    Park::resetSceneryFrameStats();
+    Park::drawScenery();
+    Park::sceneryTestFrame();
+    const Park::SceneryFrameStats drawn = Park::sceneryFrameStats();
+    EXPECT_EQ(drawn.spriteInstances, kNearObjects * 4);
+    EXPECT_GT(drawn.spriteInstances, static_cast<int32_t>(kMaxSpriteImages));
+    EXPECT_EQ(drawn.modelInstances, 0);
+    const int32_t slotsLeft = static_cast<int32_t>(kMaxSpriteImages) - kNearObjects * 4;
+    EXPECT_LE(drawn.distantSpriteInstances, std::max(0, slotsLeft));
 }

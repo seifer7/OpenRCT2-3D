@@ -126,8 +126,31 @@ namespace OpenRCT2::View3D
         std::vector<DrawModel> _models;
         std::vector<int32_t> _freeModelIds;
         std::vector<DrawPrimitive> _sprites;
-        std::vector<int32_t> _freeSpriteIds;
+        SpriteIdPool _spriteIds;
+        DrawPrimitive _faceQuad[4];
+        bool _faceQuadReady[4] = {};
+        bgfx::ProgramHandle _distantProgram = BGFX_INVALID_HANDLE;
         uint32_t _ownedTextures = 0;
+
+        constexpr const char kDistantVertexShader[] = "uniform mat4 u_modelViewProj;\n"
+                                                      "in vec3 a_position;\n"
+                                                      "in vec3 a_normal;\n"
+                                                      "in vec2 a_texcoord0;\n"
+                                                      "in vec4 i_data0;\n"
+                                                      "in vec4 i_data1;\n"
+                                                      "in vec4 i_data2;\n"
+                                                      "out vec3 v_normal;\n"
+                                                      "out vec2 v_uv;\n"
+                                                      "void main()\n"
+                                                      "{\n"
+                                                      "    float across = mix(i_data1.x, i_data1.y, a_position.x);\n"
+                                                      "    float up = mix(i_data1.z, i_data1.w, a_position.y);\n"
+                                                      "    vec3 side = vec3(-a_normal.y, a_normal.x, 0.0);\n"
+                                                      "    vec3 world = i_data0.xyz + side * across + vec3(0.0, 0.0, up);\n"
+                                                      "    v_normal = a_normal;\n"
+                                                      "    v_uv = a_texcoord0 * i_data2.xy + i_data2.zw;\n"
+                                                      "    gl_Position = u_modelViewProj * vec4(world, 1.0);\n"
+                                                      "}\n";
         bool _ready = false;
 
         uint32_t estimatedHandles()
@@ -419,7 +442,7 @@ namespace OpenRCT2::View3D
     {
         if (_ready)
         {
-            return bgfx::isValid(_program);
+            return bgfx::isValid(_program) && bgfx::isValid(_distantProgram);
         }
         _ready = true;
         _sampler = bgfx::createUniform(kSamplerName, bgfx::UniformType::Sampler);
@@ -428,6 +451,9 @@ namespace OpenRCT2::View3D
         const bgfx::ShaderHandle vertex = createShader('V', 0, kVaryingHash, false, kVertexShader);
         const bgfx::ShaderHandle fragment = createShader('F', kVaryingHash, 0, true, kFragmentShader);
         _program = bgfx::createProgram(vertex, fragment, true);
+        const bgfx::ShaderHandle distantVertex = createShader('V', 0, kVaryingHash, false, kDistantVertexShader);
+        const bgfx::ShaderHandle distantFragment = createShader('F', kVaryingHash, 0, true, kFragmentShader);
+        _distantProgram = bgfx::createProgram(distantVertex, distantFragment, true);
         _layout.begin(bgfx::RendererType::OpenGL)
             .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
             .add(bgfx::Attrib::Normal, 3, bgfx::AttribType::Float)
@@ -435,7 +461,8 @@ namespace OpenRCT2::View3D
             .end();
         const uint8_t white[4] = { 255, 255, 255, 255 };
         _white = uploadRgba(white, 1, 1, true, true);
-        return bgfx::isValid(_program) && bgfx::isValid(_sampler) && bgfx::isValid(_params) && bgfx::isValid(_white);
+        return bgfx::isValid(_program) && bgfx::isValid(_distantProgram) && bgfx::isValid(_sampler) && bgfx::isValid(_params)
+            && bgfx::isValid(_white);
     }
 
     void meshDrawShutdown()
@@ -453,8 +480,16 @@ namespace OpenRCT2::View3D
         {
             destroyPrimitive(sprite);
         }
-        _freeSpriteIds.clear();
+        _spriteIds.clear();
         _sprites.clear();
+        for (int face = 0; face < 4; face++)
+        {
+            if (_faceQuadReady[face])
+            {
+                destroyPrimitive(_faceQuad[face]);
+            }
+            _faceQuadReady[face] = false;
+        }
         if (bgfx::isValid(_white))
         {
             bgfx::destroy(_white);
@@ -465,6 +500,11 @@ namespace OpenRCT2::View3D
             bgfx::destroy(_program);
         }
         _program = BGFX_INVALID_HANDLE;
+        if (bgfx::isValid(_distantProgram))
+        {
+            bgfx::destroy(_distantProgram);
+        }
+        _distantProgram = BGFX_INVALID_HANDLE;
         if (bgfx::isValid(_sampler))
         {
             bgfx::destroy(_sampler);
@@ -527,7 +567,12 @@ namespace OpenRCT2::View3D
             destroyPrimitive(sprite);
         }
         _sprites.clear();
-        _freeSpriteIds.clear();
+        _spriteIds.clear();
+    }
+
+    void meshDrawBeginFrame()
+    {
+        _spriteIds.nextFrame();
     }
 
     void meshDrawReleaseSprite(int32_t id)
@@ -537,7 +582,7 @@ namespace OpenRCT2::View3D
             return;
         }
         destroyPrimitive(_sprites[static_cast<size_t>(id)]);
-        _freeSpriteIds.push_back(id);
+        _spriteIds.release(id);
     }
 
     MeshUpload meshDrawUploadModel(const CpuMesh& mesh)
@@ -681,11 +726,13 @@ namespace OpenRCT2::View3D
         return { MeshUploadStatus::ready, id };
     }
 
-    int32_t meshDrawUploadSprite(const SpriteQuad& quad, const uint8_t* rgba, int32_t width, int32_t height)
+    SpritePlace meshDrawUploadSprite(
+        const SpriteQuad& quad, const uint8_t* rgba, int32_t width, int32_t height, bool allowDedicated)
     {
+        SpritePlace place;
         if (!meshDrawInit() || rgba == nullptr || width <= 0 || height <= 0 || width > 65535 || height > 65535)
         {
-            return -1;
+            return place;
         }
         bgfx::TextureHandle texture = BGFX_INVALID_HANDLE;
         bool sharedTexture = false;
@@ -715,15 +762,15 @@ namespace OpenRCT2::View3D
         }
         if (!sharedTexture)
         {
-            if (estimatedHandles() + 1u >= kHandleCap)
+            if (!allowDedicated || estimatedHandles() + 1u >= kHandleCap)
             {
-                return -1;
+                return place;
             }
             texture = uploadRgba(rgba, static_cast<uint16_t>(width), static_cast<uint16_t>(height), true, true);
         }
         if (!bgfx::isValid(texture))
         {
-            return -1;
+            return place;
         }
         std::vector<MeshVertex> vertices(4);
         const float uvs[4][2] = {
@@ -755,7 +802,7 @@ namespace OpenRCT2::View3D
             {
                 bgfx::destroy(texture);
             }
-            return -1;
+            return place;
         }
         gpu.inAtlas = sharedTexture;
         gpu.atlasSlot = slot;
@@ -769,15 +816,107 @@ namespace OpenRCT2::View3D
         gpu.uvScaleY = uvScaleY;
         gpu.uvOffX = uvOffX;
         gpu.uvOffY = uvOffY;
-        if (!_freeSpriteIds.empty())
+        const int32_t recycled = _spriteIds.acquire();
+        int32_t id;
+        if (recycled >= 0)
         {
-            const int32_t id = _freeSpriteIds.back();
-            _freeSpriteIds.pop_back();
+            id = recycled;
             _sprites[static_cast<size_t>(id)] = gpu;
-            return id;
         }
-        _sprites.push_back(gpu);
-        return static_cast<int32_t>(_sprites.size() - 1);
+        else
+        {
+            _sprites.push_back(gpu);
+            id = static_cast<int32_t>(_sprites.size() - 1);
+        }
+        place.id = id;
+        place.page = sharedTexture ? static_cast<int32_t>(slot.page) : -1;
+        place.uvScaleX = uvScaleX;
+        place.uvScaleY = uvScaleY;
+        place.uvOffX = uvOffX;
+        place.uvOffY = uvOffY;
+        return place;
+    }
+
+    static void ensureFaceQuad(int face)
+    {
+        const int index = face & 3;
+        if (_faceQuadReady[index])
+        {
+            return;
+        }
+        constexpr float kInvSqrt2 = 0.7071067811865476f;
+        const float nx = kSpriteEyeX[index] * kInvSqrt2;
+        const float ny = kSpriteEyeY[index] * kInvSqrt2;
+        std::vector<MeshVertex> vertices(4);
+        const float corner[4][2] = { { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 1.0f, 1.0f }, { 0.0f, 1.0f } };
+        const float uv[4][2] = { { 0.0f, 1.0f }, { 1.0f, 1.0f }, { 1.0f, 0.0f }, { 0.0f, 0.0f } };
+        for (int i = 0; i < 4; i++)
+        {
+            vertices[static_cast<size_t>(i)].x = corner[i][0];
+            vertices[static_cast<size_t>(i)].y = corner[i][1];
+            vertices[static_cast<size_t>(i)].z = 0.0f;
+            vertices[static_cast<size_t>(i)].nx = nx;
+            vertices[static_cast<size_t>(i)].ny = ny;
+            vertices[static_cast<size_t>(i)].nz = 0.0f;
+            vertices[static_cast<size_t>(i)].u = uv[i][0];
+            vertices[static_cast<size_t>(i)].v = uv[i][1];
+        }
+        const std::vector<uint32_t> indices = { 0, 1, 2, 0, 2, 3 };
+        DrawPrimitive gpu;
+        if (!uploadPrimitive(vertices, indices, _white, 0.5f, 0.0f, false, false, gpu))
+        {
+            return;
+        }
+        gpu.clampUv = false;
+        _faceQuad[index] = gpu;
+        _faceQuadReady[index] = true;
+    }
+
+    void meshDrawDistantSprites(int32_t page, int face, const DistantSpriteInstance* instances, uint32_t count)
+    {
+        if (instances == nullptr || count == 0 || page < 0 || !meshDrawInit() || !bgfx::isValid(_distantProgram))
+        {
+            return;
+        }
+        ensureFaceQuad(face);
+        const int index = face & 3;
+        if (!_faceQuadReady[index])
+        {
+            return;
+        }
+        const bgfx::TextureHandle texture = atlasTexture(static_cast<uint32_t>(page));
+        if (!bgfx::isValid(texture))
+        {
+            return;
+        }
+        DrawPrimitive& primitive = _faceQuad[index];
+        constexpr uint16_t kStride = static_cast<uint16_t>(sizeof(DistantSpriteInstance));
+        static_assert(sizeof(DistantSpriteInstance) == 48);
+        uint32_t drawn = 0;
+        while (drawn < count)
+        {
+            const uint32_t avail = bgfx::getAvailInstanceDataBuffer(count - drawn, kStride);
+            if (avail == 0)
+            {
+                break;
+            }
+            bgfx::InstanceDataBuffer buffer;
+            bgfx::allocInstanceDataBuffer(&buffer, avail, kStride);
+            std::memcpy(buffer.data, instances + drawn, static_cast<size_t>(avail) * kStride);
+            uint64_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS
+                | BGFX_STATE_CULL_CW;
+            const float params[4] = { 0.5f, 0.0f, 0.0f, 0.0f };
+            const float uvRect[4] = { 1.0f, 1.0f, 0.0f, 0.0f };
+            bgfx::setState(state);
+            bgfx::setTexture(0, _sampler, texture);
+            bgfx::setUniform(_params, params);
+            bgfx::setUniform(_uvRect, uvRect);
+            bgfx::setVertexBuffer(0, primitive.vertices, primitive.vertexStart, primitive.vertexCount);
+            bgfx::setIndexBuffer(primitive.indices, primitive.indexStart, primitive.indexCount);
+            bgfx::setInstanceDataBuffer(&buffer);
+            bgfx::submit(0, _distantProgram);
+            drawn += avail;
+        }
     }
 
     void meshDrawModel(int32_t id, const MeshInstance* instances, uint32_t count)

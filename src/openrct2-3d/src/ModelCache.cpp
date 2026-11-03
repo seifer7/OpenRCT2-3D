@@ -14,6 +14,8 @@
 #include <bit>
 #include <cassert>
 #include <chrono>
+#include <condition_variable>
+#include <cstdio>
 #include <cstring>
 #include <exception>
 #include <mutex>
@@ -22,6 +24,7 @@
 #include <openrct2/core/FileScanner.h>
 #include <openrct2/core/FileStream.h>
 #include <openrct2/core/Path.hpp>
+#include <openrct2/core/String.hpp>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -37,16 +40,17 @@ namespace OpenRCT2::View3D
     namespace
     {
         constexpr char kMagic[4] = { 'O', '3', 'D', 'M' };
-        constexpr const char* kOldCacheVersion = "cache version is old";
-        static_assert(kModelCacheHeaderBytes == 68, "header layout changed; bump kModelCacheVersion");
+        constexpr const char* kWrongCacheVersion = "cache version does not match this build";
+        static_assert(kModelCacheHeaderBytes == 76, "header layout changed; bump kModelCacheVersion");
         static_assert(std::endian::native == std::endian::little, "the scenery cache is little-endian");
 
-        // Header, little-endian:
-        //  0 magic, 4 format version, 8 source size, 16 source mtime, 24 source hash,
-        // 32 checksum, 40 converter version, 44 maxVertices, 48 maxIndices,
-        // 52 maxPrimitives, 56 maxImageBytes, 60 primitive count, 64 image count.
-        // The checksum is FNV-1a of every byte except the checksum field itself
-        // (bytes 0-31 and 40 through EOF). Modification time is nanoseconds.
+        // Header, little-endian, 76 bytes:
+        //  0 magic, 4 format version,
+        //  8 source size, 16 source mtime (outside the checksum),
+        // 24 source hash, 32 checksum, 40 converter version,
+        // 44 maxVertices, 48 maxIndices, 52 maxPrimitives, 56 maxImageBytes,
+        // 60 primitive count, 64 image count, 68 file byte count.
+        // The checksum skips size, mtime, and the checksum field.
 
         struct SourceStamp
         {
@@ -60,7 +64,6 @@ namespace OpenRCT2::View3D
             converted,
             skipped,
             failed,
-            upgraded,
         };
 
         uint64_t hashBytes(const uint8_t* data, size_t size)
@@ -74,22 +77,20 @@ namespace OpenRCT2::View3D
             return hash;
         }
 
-        // Covers the header counts and the body. The 8 checksum bytes at offset 32 are skipped.
+        // Skips GLB size and mtime (8..24) and the checksum field (32..40).
         uint64_t checksumFile(const uint8_t* data, size_t size)
         {
             uint64_t hash = 14695981039346656037uLL;
             const auto feed = [&](size_t begin, size_t end) {
-                for (size_t i = begin; i < end; i++)
+                for (size_t i = begin; i < end && i < size; i++)
                 {
                     hash ^= data[i];
                     hash *= 1099511628211uLL;
                 }
             };
-            feed(0, std::min(size, kModelCacheChecksumOffset));
-            if (size > kModelCacheChecksumOffset + 8)
-            {
-                feed(kModelCacheChecksumOffset + 8, size);
-            }
+            feed(0, 8);
+            feed(kModelCacheHashOffset, kModelCacheChecksumOffset);
+            feed(kModelCacheChecksumOffset + 8, size);
             return hash;
         }
 
@@ -330,7 +331,9 @@ namespace OpenRCT2::View3D
             appendU32(out, limits.maxImageBytes);
             appendU32(out, static_cast<uint32_t>(mesh.primitives.size()));
             appendU32(out, static_cast<uint32_t>(mesh.images.size()));
+            appendU64(out, 0);
             out.insert(out.end(), body.begin(), body.end());
+            storeU64(out, kModelCacheFileBytesOffset, static_cast<uint64_t>(out.size()));
             storeU64(out, kModelCacheChecksumOffset, checksumFile(out.data(), out.size()));
 
             const std::string temporary = temporaryCachePath(cachePath);
@@ -366,26 +369,61 @@ namespace OpenRCT2::View3D
             CpuMesh mesh;
         };
 
+        std::atomic<uint64_t> _drawOpens{ 0 };
+        std::atomic<uint64_t> _drawStats{ 0 };
+
+        // fopen and the header's fileBytes field. No stat and no GetLength.
+        bool readCacheBytes(const std::string& cachePath, std::vector<uint8_t>& bytes, std::string& error)
+        {
+            constexpr uint64_t kMaxCacheReadBytes = 64uLL << 20;
+            _drawOpens.fetch_add(1);
+#ifdef _WIN32
+            const auto pathW = String::toWideChar(cachePath);
+            FILE* file = _wfopen(pathW.c_str(), L"rb");
+#else
+            FILE* file = std::fopen(cachePath.c_str(), "rb");
+#endif
+            if (file == nullptr)
+            {
+                error = "could not open cache";
+                return false;
+            }
+            uint8_t header[kModelCacheHeaderBytes] = {};
+            if (std::fread(header, 1, kModelCacheHeaderBytes, file) != kModelCacheHeaderBytes)
+            {
+                std::fclose(file);
+                error = "cache header is short";
+                return false;
+            }
+            uint64_t fileBytes = 0;
+            for (size_t i = 0; i < 8; i++)
+            {
+                fileBytes |= static_cast<uint64_t>(header[kModelCacheFileBytesOffset + i]) << (8 * i);
+            }
+            if (fileBytes < kModelCacheHeaderBytes || fileBytes > kMaxCacheReadBytes)
+            {
+                std::fclose(file);
+                error = "cache is an unusual size";
+                return false;
+            }
+            bytes.resize(static_cast<size_t>(fileBytes));
+            std::memcpy(bytes.data(), header, kModelCacheHeaderBytes);
+            const size_t rest = static_cast<size_t>(fileBytes - kModelCacheHeaderBytes);
+            if (rest > 0 && std::fread(bytes.data() + kModelCacheHeaderBytes, 1, rest, file) != rest)
+            {
+                std::fclose(file);
+                error = "cache read was short";
+                return false;
+            }
+            std::fclose(file);
+            return true;
+        }
+
         std::optional<CachedMesh> readCache(const std::string& cachePath, std::string& error, bool checkChecksum)
         {
-            // One open. Exists + GetSize were a second and third stat on every in-game load.
-            constexpr uint64_t kMaxCacheReadBytes = 64uLL << 20;
             std::vector<uint8_t> bytes;
-            try
+            if (!readCacheBytes(cachePath, bytes, error))
             {
-                FileStream stream(cachePath, FileMode::open);
-                const uint64_t fileSize = stream.GetLength();
-                if (fileSize < kModelCacheHeaderBytes || fileSize > kMaxCacheReadBytes)
-                {
-                    error = "cache is missing or an unusual size";
-                    return std::nullopt;
-                }
-                bytes.resize(static_cast<size_t>(fileSize));
-                stream.Read(bytes.data(), fileSize);
-            }
-            catch (const std::exception& ex)
-            {
-                error = ex.what();
                 return std::nullopt;
             }
             Reader reader(bytes.data(), bytes.size());
@@ -399,8 +437,7 @@ namespace OpenRCT2::View3D
             const uint32_t version = reader.u32();
             if (checkChecksum && version != kModelCacheVersion)
             {
-                error = (version >= 1 && version < kModelCacheVersion) ? kOldCacheVersion
-                                                                       : "cache version does not match this build";
+                error = kWrongCacheVersion;
                 return std::nullopt;
             }
             SourceStamp stamp;
@@ -415,6 +452,7 @@ namespace OpenRCT2::View3D
             const uint32_t maxImageBytes = reader.u32();
             const uint32_t primitiveCount = reader.u32();
             const uint32_t imageCount = reader.u32();
+            reader.u64();
             if (checkChecksum
                 && (bytes.size() < kModelCacheHeaderBytes || checksumFile(bytes.data(), bytes.size()) != bodyChecksum))
             {
@@ -614,10 +652,7 @@ namespace OpenRCT2::View3D
                 const uint32_t version = reader.u32();
                 if (version != kModelCacheVersion)
                 {
-                    // Versions 1..3 are the formats this branch wrote. Zero and any
-                    // other value are a bit flip or a newer build, not "an older format".
-                    const bool knownOlder = version >= 1 && version < kModelCacheVersion;
-                    header.error = knownOlder ? kOldCacheVersion : "cache version does not match this build";
+                    header.error = kWrongCacheVersion;
                     return header;
                 }
                 if (length < kModelCacheHeaderBytes)
@@ -649,53 +684,31 @@ namespace OpenRCT2::View3D
 
         bool refreshCacheTime(const std::string& cachePath, const SourceStamp& stamp, std::string& error)
         {
-            std::vector<uint8_t> bytes;
-            try
-            {
-                bytes = File::ReadAllBytes(cachePath);
-            }
-            catch (const std::exception& ex)
-            {
-                error = ex.what();
-                return false;
-            }
-            if (bytes.size() < kModelCacheHeaderBytes)
-            {
-                error = "cache header is short";
-                return false;
-            }
-            uint64_t stored = 0;
+            uint8_t bytes[16] = {};
             for (size_t i = 0; i < 8; i++)
             {
-                stored |= static_cast<uint64_t>(bytes[kModelCacheChecksumOffset + i]) << (8 * i);
+                bytes[i] = static_cast<uint8_t>(stamp.size >> (8 * i));
+                bytes[8 + i] = static_cast<uint8_t>(stamp.mtime >> (8 * i));
             }
-            if (checksumFile(bytes.data(), bytes.size()) != stored)
+#ifdef _WIN32
+            const auto pathW = String::toWideChar(cachePath);
+            FILE* file = _wfopen(pathW.c_str(), L"r+b");
+#else
+            FILE* file = std::fopen(cachePath.c_str(), "r+b");
+#endif
+            if (file == nullptr)
             {
-                error = "cache checksum does not match";
+                error = "could not open cache";
                 return false;
             }
-            storeU64(bytes, kModelCacheSizeOffset, stamp.size);
-            storeU64(bytes, kModelCacheMtimeOffset, stamp.mtime);
-            storeU64(bytes, kModelCacheHashOffset, stamp.hash);
-            storeU64(bytes, kModelCacheChecksumOffset, checksumFile(bytes.data(), bytes.size()));
-            const std::string temporary = temporaryCachePath(cachePath);
-            try
+            if (std::fseek(file, static_cast<long>(kModelCacheSizeOffset), SEEK_SET) != 0
+                || std::fwrite(bytes, 1, sizeof(bytes), file) != sizeof(bytes))
             {
-                File::WriteAllBytes(temporary, bytes.data(), bytes.size());
-                File::Delete(cachePath);
-                if (!File::Move(temporary, cachePath))
-                {
-                    error = "could not replace cache file";
-                    File::Delete(temporary);
-                    return false;
-                }
-            }
-            catch (const std::exception& ex)
-            {
-                error = ex.what();
-                File::Delete(temporary);
+                std::fclose(file);
+                error = "could not rewrite cache stamp";
                 return false;
             }
+            std::fclose(file);
             return true;
         }
 
@@ -741,8 +754,7 @@ namespace OpenRCT2::View3D
                 }
                 LOG_WARNING("View3D: could not refresh cache time for %s (%s)", identifier.c_str(), writeError.c_str());
             }
-            const bool old = header.present && header.error == kOldCacheVersion;
-            if (header.present && !header.error.empty() && !old)
+            if (header.present && !header.error.empty())
             {
                 LOG_WARNING("View3D: cache for %s is unusable (%s)", identifier.c_str(), header.error.c_str());
             }
@@ -765,7 +777,7 @@ namespace OpenRCT2::View3D
                 return CacheAction::failed;
             }
             rememberValidated(identifier, cachePath);
-            return old ? CacheAction::upgraded : CacheAction::converted;
+            return CacheAction::converted;
         }
 
         void rememberValidated(const std::string& identifier, const std::string& cachePath)
@@ -802,7 +814,9 @@ namespace OpenRCT2::View3D
                     for (size_t i = 0; i < count; i++)
                     {
                         const uint64_t at = origin + static_cast<uint64_t>(i);
-                        if (at >= kModelCacheChecksumOffset && at < kModelCacheChecksumOffset + 8)
+                        const bool stamp = at >= kModelCacheSizeOffset && at < kModelCacheHashOffset;
+                        const bool sum = at >= kModelCacheChecksumOffset && at < kModelCacheChecksumOffset + 8;
+                        if (stamp || sum)
                         {
                             continue;
                         }
@@ -883,10 +897,11 @@ namespace OpenRCT2::View3D
             }
             const std::vector<std::pair<std::string, std::string>> files = collectGlbs(sourceDirs);
             const int32_t total = static_cast<int32_t>(files.size());
-            int32_t upgraded = 0;
-            // Checksums and conversions of distinct files run together. Each file still
-            // takes the size/mtime fast path and, on that path, still checksums the body.
+            // Distinct files run together. A matching size and mtime does not hash.
             std::atomic<int32_t> nextIndex{ 0 };
+            std::atomic<int32_t> finished{ 0 };
+            std::mutex progressMutex;
+            std::condition_variable progressCv;
             std::mutex statsMutex;
             const uint32_t workers = std::max(1u, std::min(8u, std::thread::hardware_concurrency()));
             std::vector<std::thread> pool;
@@ -924,25 +939,33 @@ namespace OpenRCT2::View3D
                             case CacheAction::failed:
                                 stats.failed++;
                                 break;
-                            case CacheAction::upgraded:
-                                stats.converted++;
-                                upgraded++;
-                                break;
                         }
-                        if (progress != nullptr)
-                        {
-                            progress(stats.converted + stats.skipped + stats.failed, total, identifier);
-                        }
+                        finished.fetch_add(1);
+                        progressCv.notify_one();
                     }
                 });
+            }
+            if (progress != nullptr && total > 0)
+            {
+                int32_t seen = 0;
+                std::unique_lock<std::mutex> lock(progressMutex);
+                while (seen < total)
+                {
+                    progressCv.wait_for(lock, std::chrono::milliseconds(50), [&]() { return finished.load() != seen; });
+                    const int32_t now = finished.load();
+                    if (now == seen)
+                    {
+                        continue;
+                    }
+                    seen = now;
+                    lock.unlock();
+                    progress(seen, total, {});
+                    lock.lock();
+                }
             }
             for (std::thread& thread : pool)
             {
                 thread.join();
-            }
-            if (upgraded > 0)
-            {
-                LOG_INFO("View3D: rebuilt %d scenery cache file(s) from an older format.", upgraded);
             }
         }
         catch (const std::exception& ex)
@@ -1000,6 +1023,22 @@ namespace OpenRCT2::View3D
     void resetCacheChecksumPassCount()
     {
         _checksumPasses.store(0);
+    }
+
+    uint64_t cacheDrawOpenCount()
+    {
+        return _drawOpens.load();
+    }
+
+    uint64_t cacheDrawStatCount()
+    {
+        return _drawStats.load();
+    }
+
+    void resetCacheDrawCounts()
+    {
+        _drawOpens.store(0);
+        _drawStats.store(0);
     }
 
     std::optional<CpuMesh> loadModelForDraw(

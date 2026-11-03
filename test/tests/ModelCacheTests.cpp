@@ -500,6 +500,19 @@ TEST(ModelCache, InGameLoadDoesNotChecksum)
     EXPECT_NE(corrupted->primitives[0].vertices[0].z, 1.0f * kGlbVerticalScale);
 }
 
+TEST(ModelCache, InGameOpenDoesNotStat)
+{
+    CacheDir dir;
+    dir.writeGlb("pine.glb", triangleGlb(1.0f));
+    const std::vector<std::string> sources = { dir.source };
+    ASSERT_EQ(prepareModelCache(sources, dir.cache, nullptr).converted, 1);
+    resetCacheDrawCounts();
+    std::string error;
+    ASSERT_TRUE(loadModelForDraw("pine", sources, dir.cache, error).has_value()) << error;
+    EXPECT_EQ(cacheDrawStatCount(), 0u);
+    EXPECT_EQ(cacheDrawOpenCount(), 1u);
+}
+
 TEST(ModelCache, InGameHugeCountStaysBounded)
 {
     CacheDir dir;
@@ -674,6 +687,8 @@ TEST(ModelCache, MtimeOnlyChangeRefreshesStamp)
     const std::vector<uint8_t> after = cacheBytes(dir, "pine");
     EXPECT_EQ(readU64(after, kModelCacheMtimeOffset), cacheSourceModifiedNs(glbPath));
     EXPECT_NE(readU64(after, kModelCacheMtimeOffset), stored);
+    EXPECT_EQ(after.size(), before.size());
+    EXPECT_EQ(readU64(after, kModelCacheChecksumOffset), readU64(before, kModelCacheChecksumOffset));
     ASSERT_GT(before.size(), kModelCacheHeaderBytes);
     EXPECT_EQ(
         std::vector<uint8_t>(after.begin() + kModelCacheHeaderBytes, after.end()),

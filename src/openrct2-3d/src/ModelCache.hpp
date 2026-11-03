@@ -20,11 +20,12 @@
 
 namespace OpenRCT2::View3D
 {
-    // Bump this when the .o3d bytes change. Older files are rebuilt.
-    // Version 4 stores one decoded RGBA image per texture (no PNG copy).
-    // The checksum still covers every byte except the checksum field.
-    constexpr uint32_t kModelCacheVersion = 4;
-    constexpr size_t kModelCacheHeaderBytes = 68;
+    // Bump this when the .o3d bytes change. A different version is reconverted.
+    // Version 5 stores one decoded RGBA image. GLB size and mtime sit outside
+    // the checksum, so a stamp refresh rewrites 16 header bytes in place.
+    // fileBytes is the total length. The in-game reader uses it instead of stat.
+    constexpr uint32_t kModelCacheVersion = 5;
+    constexpr size_t kModelCacheHeaderBytes = 76;
     constexpr size_t kModelCacheSizeOffset = 8;
     constexpr size_t kModelCacheMtimeOffset = 16;
     constexpr size_t kModelCacheHashOffset = 24;
@@ -33,6 +34,7 @@ namespace OpenRCT2::View3D
     constexpr size_t kModelCacheConverterOffset = 40;
     constexpr size_t kModelCacheMaxVerticesOffset = 44;
     constexpr size_t kModelCachePrimitiveCountOffset = 60;
+    constexpr size_t kModelCacheFileBytesOffset = 68;
 
     // JSON object ids keep the case they were authored with. Official ids are lowercase
     // (`rct2.scenery_small.tcrp`); custom ids may use A-Z (`MyTree`). Allowed characters
@@ -77,4 +79,8 @@ namespace OpenRCT2::View3D
     bool cacheChecksumMatchesFile(const std::string& path);
     uint64_t cacheChecksumPassCount();
     void resetCacheChecksumPassCount();
+    // In-game opens. statCount stays zero: that path does not call stat.
+    uint64_t cacheDrawOpenCount();
+    uint64_t cacheDrawStatCount();
+    void resetCacheDrawCounts();
 } // namespace OpenRCT2::View3D

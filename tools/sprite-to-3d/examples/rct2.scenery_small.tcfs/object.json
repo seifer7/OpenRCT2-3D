@@ -1,0 +1,50 @@
+{
+  "object_id": "rct2.scenery_small.tcfs",
+  "dat_name": "TCFS",
+  "display_name": "Snow-covered Caucasian Fir",
+  "archetype": "conifer",
+  "size_class": "tree_1tile",
+  "footprint_tiles": [
+    1,
+    1
+  ],
+  "height_sim": 122,
+  "base_sink_sim": 3,
+  "max_overhang_tiles": 0.35,
+  "direction_images": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "alignment": {
+    "sprite_shift": [
+      0,
+      0
+    ],
+    "sprite_y_nudge": -1
+  },
+  "recolour": {
+    "primary": false,
+    "secondary": false,
+    "tertiary": false,
+    "checked": "No pixel in any of the four sprites uses the remap ranges 243-254, 202-213 or 46-57."
+  },
+  "expected_triangles": 1140,
+  "texture_justification": "",
+  "review": {
+    "status": "approved",
+    "note": "Approved by the repo owner in batch 1 (2026-11-03)."
+  },
+  "notes": "Full tile. Same geometry generator and parameters as rct2.scenery_small.tcf (cone of drooping tiers, single-leader point). Atlas painted from TCFS colours: snow (21, 137-141) on the pad tops with dark green lump shadows, dark green skirts with a snow band along their top edge (\"side_cap\"), so snow reads as caps over dark undersides. Bark has no snow indices.",
+  "approved_iou": {
+    "views": [
+      0.757,
+      0.788,
+      0.759,
+      0.774
+    ],
+    "mean": 0.769,
+    "source": "Closed-mask (3px) IoU of the approved Blender 4.2 export, measured 2026-11-03 by validate.py against the four TCFS direction sprites."
+  }
+}

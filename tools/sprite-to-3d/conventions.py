@@ -63,19 +63,22 @@ TIP_VIEW_WARN_SIM = 2.0
 TIP_VIEW_FAIL_SIM = 4.0
 TIP_VIEW_EPS = 1e-6
 BASE_SINK_MAX = 0.1
-# Raw-mask IoU reference levels. Reported and recorded in the meta as
-# iou.threshold_per_view / iou.threshold_mean; they no longer gate.
-IOU_MIN_PER_VIEW = 0.65
-IOU_MIN_MEAN = 0.70
 # The IoU gate (batch 1 QA Decision 1). Both the sprite mask and the model
 # mask get a morphological close with a square IOU_CLOSE_KERNEL x
 # IOU_CLOSE_KERNEL structuring element (3 = 3x3, "3px") before scoring, so a
-# stippled sprite is not scored pixel by pixel. The thresholds are tighter
-# than the raw ones because the close inflates every score.
+# stippled sprite is not scored pixel by pixel. Raw-mask IoU is reported
+# only and has no threshold.
 IOU_CLOSE_KERNEL = 3
 IOU_CLOSED_MIN_PER_VIEW = 0.70
 IOU_CLOSED_MIN_MEAN = 0.75
 AREA_RATIO = (0.9, 1.3)
+# Sparse-crown gate (batch 1 QA). A tree whose sprite is a sparse stipple
+# (object.json "crown": "sparse", copied to the meta) must also keep the area
+# ratio at or under SPARSE_CROWN_MAX_AREA_RATIO in every view, and raw IoU at
+# or over SPARSE_CROWN_MIN_RAW_IOU in every view as a sanity floor.
+CROWN_KINDS = ("sparse",)
+SPARSE_CROWN_MAX_AREA_RATIO = 1.10
+SPARSE_CROWN_MIN_RAW_IOU = 0.50
 TEXEL_DENSITY = 32.0
 TEXEL_DENSITY_TOLERANCE = 0.25
 # Palette-index histograms in params.json (sprite_hist, top_hist, bark_hist,
@@ -92,6 +95,8 @@ def is_histogram_key(key):
     (flag histograms copied into a meta).
     """
     return key == "hist" or str(key).endswith("_hist")
+
+
 # Opaque-pixel floor per view for classes not in SIZE_CLASSES.
 DEFAULT_MIN_RENDER_PX = 500
 

@@ -1,0 +1,50 @@
+{
+  "object_id": "rct2.scenery_small.tcn",
+  "dat_name": "TCN",
+  "display_name": "Cannon",
+  "archetype": "prop",
+  "size_class": "prop_quarter",
+  "footprint_tiles": [
+    0.5,
+    0.5
+  ],
+  "height_sim": 15,
+  "base_sink_sim": 0,
+  "max_overhang_tiles": 0,
+  "direction_images": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "alignment": {
+    "sprite_shift": [
+      0,
+      -1
+    ],
+    "sprite_y_nudge": -1
+  },
+  "recolour": {
+    "primary": false,
+    "secondary": false,
+    "tertiary": false
+  },
+  "expected_triangles": 320,
+  "texture_justification": "",
+  "approved_iou": {
+    "views": [
+      0.785,
+      0.783,
+      0.738,
+      0.731
+    ],
+    "mean": 0.759,
+    "source": "Closed-mask (3px) IoU of the approved Blender 4.2 export, measured 2026-11-03 by validate.py against the four TCN direction sprites."
+  },
+  "review": {
+    "status": "approved",
+    "note": "Approved by the repo owner in batch 1 (2026-11-03)."
+  },
+  "notes": "Quarter-tile prop (offsets.json: quarter-tile). Origin at the quadrant centre, z=0 at the base. Rotatable: in view 0 the muzzle points to -x (raised about 43 degrees) and the trail rests on the ground toward +x, matching sprites 0-3. sprite_y_nudge -1 with the fitted sprite_shift [0,-1]. Lathe barrel, beam carriage, lathe tyres with cut-out spoke discs. Round 2: barrel profile 25% longer (forward of the trunnions), barrel origin moved back over the carriage and the whole prop offset -0.1 sim on x to stay inside +/-0.25 BU; trail 0.8 sim shorter. Steel is palette 12/13/14 with 19 as the single highlight; wheels are real cut-outs (no fill), spokes 106-108. height_sim 15 is the measured GLB tip (15.2 sim).",
+  "triangle_justification": "320 tris (70 over the 250 prop soft cap): 10-sided barrel lathe with muzzle lip and bore, two 12-sided tyre lathes plus spoke discs and a 5-beam carriage; fewer sides facets the barrel and wheel outlines at 64 px."
+}

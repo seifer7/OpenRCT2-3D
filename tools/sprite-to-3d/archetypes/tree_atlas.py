@@ -170,6 +170,33 @@ def paint(params, palette):
     ramp = (np.repeat(rng.random((1, 8)), 64, 0) * (len(branch_keys) - 0.8) + rng.random((64, 8)) * 1.0).astype(int)
     tile("branch", 104, 0, 8, 64, np.array(branch_keys)[np.clip(ramp, 0, len(branch_keys) - 1)])
 
+    # Optional "lump_fill": {"rows": [v0, v1], "key": index} fills the
+    # transparent texels between v0 and v1 of the pad_side tiles with one dark
+    # key, so closed foliage lumps (conifer clump "lump") have no see-through
+    # holes. Off unless the atlas asks for it.
+    lump_fill = spec.get("lump_fill")
+    if lump_fill:
+        v0, v1 = (float(v) for v in lump_fill["rows"])
+        for i in range(4):
+            x, y, w, h = tiles[f"pad_side{i}"]
+            band = indices[y + int(np.floor(v0 * h)) : y + int(np.ceil(v1 * h)), x : x + w]
+            band[band == 0] = int(lump_fill["key"])
+
+    # Optional "pinholes": fraction in [0, 1). Clears that share of the
+    # opaque texels in the pad_top/pad_side tiles, one texel at a time, with
+    # its own RNG (seed "pinhole_seed", default atlas seed + 1). The holes are
+    # small enough that the 3px-closed silhouette barely moves while the raw
+    # coverage drops, which matches stippled sprite foliage. Off unless the
+    # atlas asks for it, so atlases without the key are unchanged.
+    pinholes = float(spec.get("pinholes", 0.0))
+    if pinholes > 0.0:
+        prng = np.random.default_rng(int(spec.get("pinhole_seed", int(spec.get("seed", 2611)) + 1)))
+        for name, (x, y, w, h) in tiles.items():
+            if name.startswith(("pad_top", "pad_side")):
+                sub = indices[y : y + h, x : x + w]
+                hole = (sub > 0) & (prng.random(sub.shape) < pinholes)
+                sub[hole] = 0
+
     rgba = np.zeros((height, width, 4), np.uint8)
     opaque = indices > 0
     rgba[opaque, :3] = palette[indices[opaque]]

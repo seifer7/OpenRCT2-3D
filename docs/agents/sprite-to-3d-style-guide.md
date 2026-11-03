@@ -127,7 +127,7 @@ Quarter-tile objects: OpenRCT2 draws them at `SceneryQuadrantOffsets` − 1, tha
 
 Silhouette IoU is the overlap of opaque pixels (`alpha > 0` on the sprite, `alpha > 127` on a MASK render) divided by the union. The approved figures were measured with Blender 4.2 Workbench, flat lighting, no anti-aliasing, the Z squash on, and this paste.
 
-**Closed-mask IoU is the gate.** RCT2 sprites are stippled: single transparent pixels inside foliage, one-pixel gaps between leaves. Scored pixel by pixel, that dither costs a solid model several points of IoU it can do nothing about. So before scoring, the validator applies a morphological close (dilate, then erode) with a square `IOU_CLOSE_KERNEL` × `IOU_CLOSE_KERNEL` element (3×3, "3px") to **both** masks, for every object. The gate is closed IoU **≥ 0.70 on every view and ≥ 0.75 mean** (`IOU_CLOSED_MIN_PER_VIEW`, `IOU_CLOSED_MIN_MEAN`). The close inflates every score, which is why these thresholds are higher than the raw ones. Raw IoU is still computed and reported on its own row (and against the old 0.65 / 0.70 raw reference), so a stippled sprite stays visible, but it does not gate. The area ratio (render pixels / sprite pixels, 0.9–1.3) is computed on the raw masks and gates exactly as before. The meta records both: the approved raw figures in `iou.views` / `iou.mean`, and the rebuild's measurement in `iou.closed` and `iou.raw_measured`.
+**Closed-mask IoU is the gate.** RCT2 sprites are stippled: single transparent pixels inside foliage, one-pixel gaps between leaves. Scored pixel by pixel, that dither costs a solid model several points of IoU it can do nothing about. So before scoring, the validator applies a morphological close (dilate, then erode) with a square `IOU_CLOSE_KERNEL` × `IOU_CLOSE_KERNEL` element (3×3, "3px") to **both** masks, for every object. The gate is closed IoU **≥ 0.70 on every view and ≥ 0.75 mean** (`IOU_CLOSED_MIN_PER_VIEW`, `IOU_CLOSED_MIN_MEAN`). Raw IoU is still computed and reported on its own row, so a stippled sprite stays visible, but it has no threshold and does not gate. The area ratio (render pixels / sprite pixels, 0.9–1.3) is computed on the raw masks and gates. The meta records the closed figures at the top of `iou` and the rebuild's raw measurement in `iou.raw`. An object marked `"crown": "sparse"` must also keep the area ratio ≤ 1.10 and raw IoU ≥ 0.50 on every view (see [sprite-to-3d-batch-process.md](sprite-to-3d-batch-process.md#qa-gate-sparse-crowns)).
 
 **Empty-render floor.** Each view must also render at least `min_render_px` opaque pixels for its size class (prop_quarter 100, prop_tile 250, tree_quarter 150, every other class 500). That is a guard against a broken projection or alpha cut, not a size check; with sprites present the area ratio is the real guard. Quarter-tile objects draw about 200 px a view, which is why their floor is lower.
 
@@ -306,11 +306,12 @@ The tooling meta uses schema `openrct2-3d.object-model.v1`. Its fields:
 | `base_sink_sim` | how far below 0 the base may go |
 | `triangles` | must equal the GLB |
 | `texture` | width, height, `MASK`, cutoff 0.5, `NEAREST`, `mipmaps: false`, and the tile rects |
-| `iou.views` | four numbers, or the approved measurement |
+| `iou.views` | four closed-mask (3px) IoU values: the approved closed figures, or the rebuild's measurement |
 | `iou.mean` | average of the four |
-| `iou.threshold_per_view`, `iou.threshold_mean` | 0.65 and 0.70, the raw-mask reference levels (reported, not a gate) |
-| `iou.closed` | `{views, mean, kernel_px, threshold_per_view, threshold_mean}`: the rebuild's closed-mask IoU, the 3px kernel, and the gate (0.70 per view, 0.75 mean). Written when the rebuild had local sprites. |
-| `iou.raw_measured` | `{views, mean}`: the rebuild's raw IoU. When `object.json` has no `approved_iou`, `iou.views` and `iou.mean` are this measurement too. |
+| `iou.kernel_px` | the close kernel, 3 |
+| `iou.threshold_per_view`, `iou.threshold_mean` | 0.70 and 0.75, the closed-mask gate |
+| `iou.source` | where the figures came from |
+| `iou.raw` | `{views, mean}`: the rebuild's raw IoU, reported only. Written when the rebuild had local sprites. |
 | `triangle_justification` | optional; why the model stands over its `soft_max_tris`. Shown on the warning. |
 | `params` | the archetype inputs that rebuild the mesh (trunk, clumps, branches, quality, seeds), without palette histograms |
 | `review.status` | `approved` or `pending` |

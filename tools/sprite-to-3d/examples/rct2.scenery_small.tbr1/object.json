@@ -1,0 +1,50 @@
+{
+  "object_id": "rct2.scenery_small.tbr1",
+  "dat_name": "TBR1",
+  "display_name": "Barrel",
+  "archetype": "prop",
+  "size_class": "prop_quarter",
+  "footprint_tiles": [
+    0.5,
+    0.5
+  ],
+  "height_sim": 11,
+  "base_sink_sim": 0,
+  "max_overhang_tiles": 0,
+  "direction_images": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "alignment": {
+    "sprite_shift": [
+      -1,
+      1
+    ],
+    "sprite_y_nudge": -1
+  },
+  "recolour": {
+    "primary": false,
+    "secondary": false,
+    "tertiary": false
+  },
+  "expected_triangles": 256,
+  "texture_justification": "",
+  "approved_iou": {
+    "views": [
+      0.868,
+      0.873,
+      0.911,
+      0.906
+    ],
+    "mean": 0.889,
+    "source": "Closed-mask (3px) IoU of the approved Blender 4.2 export, measured 2026-11-03 by validate.py against the four TBR1 direction sprites."
+  },
+  "review": {
+    "status": "approved",
+    "note": "Approved by the repo owner in batch 1 (2026-11-03)."
+  },
+  "notes": "Quarter-tile prop (offsets.json: quarter-tile). Origin at the quadrant centre, z=0 at the base. Sprite anchor sits at (7,7) sim against the quadrant centre (8,8), hence sprite_y_nudge -1 plus the fitted sprite_shift [-1,1]. Lathe-turned barrel, 16 sides, painted from TBR1's own palette indices.",
+  "triangle_justification": "256 tris (6 over the 250 prop soft cap): 16-sided lathe so the barrel's round body and raised hoop rings stay smooth at quarter-tile scale; fewer sides facets the outline in views 2/3."
+}

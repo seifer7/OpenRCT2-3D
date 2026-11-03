@@ -1,0 +1,50 @@
+{
+  "object_id": "rct2.scenery_small.tcl",
+  "dat_name": "TCL",
+  "display_name": "Cedar of Lebanon",
+  "archetype": "conifer",
+  "size_class": "tree_large",
+  "footprint_tiles": [
+    1,
+    1
+  ],
+  "height_sim": 162,
+  "base_sink_sim": 3,
+  "max_overhang_tiles": 0.4,
+  "direction_images": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "alignment": {
+    "sprite_shift": [
+      0,
+      0
+    ],
+    "sprite_y_nudge": -1
+  },
+  "recolour": {
+    "primary": false,
+    "secondary": false,
+    "tertiary": false,
+    "checked": "No pixel in any of the four sprites uses the remap ranges 243-254, 202-213 or 46-57."
+  },
+  "expected_triangles": 1028,
+  "texture_justification": "",
+  "review": {
+    "status": "approved",
+    "note": "Approved by the repo owner in batch 1 (2026-11-03)."
+  },
+  "notes": "Full tile, requiresFlatSurface. tree_large: 167 sim tall. Conifer archetype with four curved stems that all start at z=1.5 within r~1.3 of the centre, rise in a smooth U (centreline r = rg + (rb-rg)*sin(pi/2*z/38), reaching r~9 at z38, no lower bulge), then each lean outward on its own curve (power profile with per-stem azimuth drift) to r~12-13 at the crown top. Stem radius 1.0 at the ground, 4.2-4.4 by z9-15, tapering to 0.7 at the tip; a short flared trunk stub (rings z0-14) fills the base. Nothing below z0 (no root stubs or sunken rings). 20 broad pads, all centred at z>=46: one per stem tip plus four per stem on short branches rooted on that stem at z-3, unevenly spaced, tilt up to +/-0.3. Pad layout fitted to the four TCL direction sprites by a local search (position/size/angle/tilt, with occasional stem moves and roots re-hung after each move). The sprite tip is clipped at row 0 of the 128x192 comparison frame. quality.sub=1, tufts=0 to keep exported verts <=2500.",
+  "approved_iou": {
+    "views": [
+      0.786,
+      0.79,
+      0.767,
+      0.773
+    ],
+    "mean": 0.779,
+    "source": "Closed-mask (3px) IoU of the approved Blender 4.2 export, measured 2026-11-03 by validate.py against the four TCL direction sprites."
+  }
+}

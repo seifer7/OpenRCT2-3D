@@ -1,0 +1,475 @@
+{
+ "schema": "openrct2-3d.object-model.v1",
+ "tool_version": "sprite-to-3d 1",
+ "object_id": "rct2.scenery_small.tac",
+ "dat_name": "TAC",
+ "display_name": "Arizona Cypress",
+ "archetype": "conifer",
+ "size_class": "tree_quarter",
+ "source_sprites": {
+  "image_indices": [
+   0,
+   1,
+   2,
+   3
+  ],
+  "offsets": [
+   {
+    "index": 0,
+    "width": 32,
+    "height": 117,
+    "x_offset": -16,
+    "y_offset": -113
+   },
+   {
+    "index": 1,
+    "width": 32,
+    "height": 111,
+    "x_offset": -16,
+    "y_offset": -107
+   },
+   {
+    "index": 2,
+    "width": 32,
+    "height": 113,
+    "x_offset": -16,
+    "y_offset": -109
+   },
+   {
+    "index": 3,
+    "width": 32,
+    "height": 116,
+    "x_offset": -16,
+    "y_offset": -112
+   }
+  ]
+ },
+ "alignment": {
+  "sprite_shift": [
+   0,
+   0
+  ],
+  "sprite_y_nudge": -1,
+  "anchor": "quarter tile: SceneryQuadrantOffsets[(quadrant + rotation) & 3] - 1 = (7,7)/(7,23)/(23,23)/(23,7)",
+  "model_origin": "quadrant centre (8,8)/(8,24)/(24,24)/(24,8), i.e. tile centre +/-8 sim on x and y",
+  "loader": "translate to the element's quadrant centre (from the stored quadrant, not view-rotated) and rotate about it"
+ },
+ "units": {
+  "blender_unit_per_tile": 1,
+  "sim_units_per_tile": 32,
+  "origin": "tile centre, z=0 at the element base",
+  "authored_up": "Z",
+  "exported_up": "Y",
+  "z_squash_in_file": false
+ },
+ "bounds_blender": {
+  "min": [
+   -0.3483754474951238,
+   -0.36451262794480677,
+   -0.0625
+  ],
+  "max": [
+   0.33361073316354267,
+   0.3696213939900884,
+   3.46875
+  ],
+  "size": [
+   0.6819861806586665,
+   0.7341340219348952,
+   3.53125
+  ]
+ },
+ "height_sim": 111,
+ "footprint_tiles": [
+  0.5,
+  0.5
+ ],
+ "max_overhang_tiles": 0.15,
+ "base_sink_sim": 2,
+ "triangles": 290,
+ "texture": {
+  "embedded": true,
+  "width": 128,
+  "height": 128,
+  "alpha_mode": "MASK",
+  "alpha_cutoff": 0.5,
+  "filter": "NEAREST",
+  "mipmaps": false,
+  "double_sided": true,
+  "tiles": {
+   "pad_top_L0": [
+    0,
+    0,
+    32,
+    32
+   ],
+   "pad_top_L1": [
+    32,
+    0,
+    32,
+    32
+   ],
+   "pad_top_L2": [
+    0,
+    32,
+    32,
+    32
+   ],
+   "pad_top_L3": [
+    32,
+    32,
+    32,
+    32
+   ],
+   "pad_top_S0": [
+    64,
+    0,
+    16,
+    16
+   ],
+   "pad_top_S1": [
+    80,
+    0,
+    16,
+    16
+   ],
+   "pad_top_S2": [
+    64,
+    16,
+    16,
+    16
+   ],
+   "pad_top_S3": [
+    80,
+    16,
+    16,
+    16
+   ],
+   "tuft0": [
+    64,
+    32,
+    16,
+    16
+   ],
+   "tuft1": [
+    80,
+    32,
+    16,
+    16
+   ],
+   "tuft2": [
+    64,
+    48,
+    16,
+    16
+   ],
+   "tuft3": [
+    80,
+    48,
+    16,
+    16
+   ],
+   "tuft4": [
+    64,
+    64,
+    16,
+    16
+   ],
+   "tuft5": [
+    80,
+    64,
+    16,
+    16
+   ],
+   "tuft6": [
+    64,
+    80,
+    16,
+    16
+   ],
+   "tuft7": [
+    80,
+    80,
+    16,
+    16
+   ],
+   "pad_side0": [
+    0,
+    64,
+    64,
+    16
+   ],
+   "pad_side1": [
+    0,
+    80,
+    64,
+    16
+   ],
+   "pad_side2": [
+    0,
+    96,
+    64,
+    16
+   ],
+   "pad_side3": [
+    0,
+    112,
+    64,
+    16
+   ],
+   "bark": [
+    112,
+    0,
+    16,
+    128
+   ],
+   "branch": [
+    104,
+    0,
+    8,
+    64
+   ]
+  },
+  "justification": "",
+  "palette_source": "Data/g1.dat"
+ },
+ "export": {
+  "exporter": "blender-4.2",
+  "reference": "The approved rct2.scenery_small.tcrp.glb next to the loader is the Blender 4.2 LTS export (Khronos glTF Blender I/O v4.2.83), patched to nearest filtering and alpha MASK. --no-blender uses the Python writer, which welds vertices and writes u16 indices so the structure matches that file. The game does not read this meta."
+ },
+ "iou": {
+  "views": [
+   0.873,
+   0.873,
+   0.87,
+   0.861
+  ],
+  "mean": 0.87,
+  "kernel_px": 3,
+  "threshold_per_view": 0.7,
+  "threshold_mean": 0.75,
+  "source": "Closed-mask (3px) IoU of the approved Blender 4.2 export, measured 2026-11-03 by validate.py against the four TAC direction sprites.",
+  "raw": {
+   "views": [
+    0.868,
+    0.864,
+    0.868,
+    0.861
+   ],
+   "mean": 0.865
+  }
+ },
+ "params": {
+  "trunk_rings": [
+   [
+    -2,
+    2.6
+   ],
+   [
+    0,
+    2.4
+   ],
+   [
+    6,
+    1.9
+   ],
+   [
+    14,
+    1.6
+   ],
+   [
+    95,
+    0.9
+   ]
+  ],
+  "trunk_v_denom": 116.0,
+  "foliage_seed": 1120,
+  "quality": {
+   "ring": 5,
+   "tufts": 2,
+   "sub": 0,
+   "limbs": 0,
+   "trunk_sides": 6,
+   "top_scale": 1.0,
+   "skirt_lean": -1.84761735695143,
+   "top_k": 0.7083414617585959,
+   "skirt_w": 1.0
+  },
+  "clumps": [
+   {
+    "x": 0.0,
+    "y": 0.0,
+    "z": 18.57194985993954,
+    "a": 5.103849042871474,
+    "b": 5.863996772660843,
+    "th": 0.0,
+    "ht": 13.467526801714808,
+    "hb": 13.467526801714808
+   },
+   {
+    "x": -0.0,
+    "y": 0.0,
+    "z": 26.321652002865555,
+    "a": 7.385536103149468,
+    "b": 6.428151793481943,
+    "th": 1.5707963267948966,
+    "ht": 13.467526801714808,
+    "hb": 13.467526801714808
+   },
+   {
+    "x": 0.0,
+    "y": -0.0,
+    "z": 34.07135414579157,
+    "a": 7.472303943889873,
+    "b": 8.585200275958579,
+    "th": 0.0,
+    "ht": 13.467526801714808,
+    "hb": 13.467526801714808
+   },
+   {
+    "x": 0.0,
+    "y": 0.0,
+    "z": 41.821056288717585,
+    "a": 9.209205450573593,
+    "b": 8.015419558832571,
+    "th": 1.5707963267948966,
+    "ht": 13.467526801714808,
+    "hb": 13.467526801714808
+   },
+   {
+    "x": -0.0,
+    "y": -0.0,
+    "z": 49.5707584316436,
+    "a": 8.025422220252931,
+    "b": 9.220697870077839,
+    "th": 0.0,
+    "ht": 13.467526801714808,
+    "hb": 13.467526801714808
+   },
+   {
+    "x": 0.0,
+    "y": -0.0,
+    "z": 57.32046057456961,
+    "a": 8.971383794491036,
+    "b": 7.8084266359459,
+    "th": 1.5707963267948966,
+    "ht": 13.467526801714808,
+    "hb": 13.467526801714808
+   },
+   {
+    "x": -0.0,
+    "y": 0.0,
+    "z": 65.07016271749562,
+    "a": 7.4014985097291355,
+    "b": 8.503849351603689,
+    "th": 0.0,
+    "ht": 13.467526801714808,
+    "hb": 13.467526801714808
+   },
+   {
+    "x": -0.0,
+    "y": -0.0,
+    "z": 72.81986486042165,
+    "a": 7.826220205486666,
+    "b": 6.811710178849505,
+    "th": 1.5707963267948966,
+    "ht": 13.467526801714808,
+    "hb": 13.467526801714808
+   },
+   {
+    "x": 0.0,
+    "y": 0.0,
+    "z": 80.56956700334766,
+    "a": 6.044378464005786,
+    "b": 6.944605043751329,
+    "th": 0.0,
+    "ht": 13.467526801714808,
+    "hb": 13.467526801714808
+   },
+   {
+    "x": -0.0,
+    "y": 0.0,
+    "z": 88.31926914627367,
+    "a": 5.8456787281297515,
+    "b": 5.087905559668487,
+    "th": 1.5707963267948966,
+    "ht": 13.467526801714808,
+    "hb": 13.467526801714808
+   },
+   {
+    "x": 0.0,
+    "y": -0.0,
+    "z": 97,
+    "a": 3.725,
+    "b": 4.28,
+    "th": 0.0,
+    "ht": 14,
+    "hb": 9,
+    "lump": {
+     "sides": 7,
+     "jitter": 0.1,
+     "offset": 0.0,
+     "profile": [
+      [
+       0,
+       0
+      ],
+      [
+       0.15,
+       0.8
+      ],
+      [
+       0.4,
+       1.0
+      ],
+      [
+       0.7,
+       0.7
+      ],
+      [
+       1.0,
+       0.0
+      ]
+     ],
+     "tip": [
+      -4,
+      2
+     ]
+    }
+   }
+  ],
+  "branches": [],
+  "atlas": {
+   "painter": "tree128",
+   "size": [
+    128,
+    128
+   ],
+   "seed": 112,
+   "bark_key_order": [
+    11,
+    12,
+    35,
+    13,
+    36,
+    14,
+    37,
+    15,
+    38
+   ],
+   "branch_keys": [
+    35,
+    36,
+    37,
+    38
+   ]
+  }
+ },
+ "review": {
+  "status": "approved",
+  "note": "Approved by the repo owner in batch 1 (2026-11-03)."
+ },
+ "files": {
+  "glb": "rct2.scenery_small.tac.glb"
+ }
+}

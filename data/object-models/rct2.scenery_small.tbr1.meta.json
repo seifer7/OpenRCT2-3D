@@ -1,0 +1,282 @@
+{
+ "schema": "openrct2-3d.object-model.v1",
+ "tool_version": "sprite-to-3d 1",
+ "object_id": "rct2.scenery_small.tbr1",
+ "dat_name": "TBR1",
+ "display_name": "Barrel",
+ "archetype": "prop",
+ "size_class": "prop_quarter",
+ "source_sprites": {
+  "image_indices": [
+   0,
+   1,
+   2,
+   3
+  ],
+  "offsets": [
+   {
+    "index": 0,
+    "width": 17,
+    "height": 18,
+    "x_offset": -9,
+    "y_offset": -13
+   },
+   {
+    "index": 1,
+    "width": 17,
+    "height": 18,
+    "x_offset": -9,
+    "y_offset": -13
+   },
+   {
+    "index": 2,
+    "width": 17,
+    "height": 18,
+    "x_offset": -9,
+    "y_offset": -12
+   },
+   {
+    "index": 3,
+    "width": 17,
+    "height": 17,
+    "x_offset": -9,
+    "y_offset": -12
+   }
+  ]
+ },
+ "alignment": {
+  "sprite_shift": [
+   -1,
+   1
+  ],
+  "sprite_y_nudge": -1
+ },
+ "units": {
+  "blender_unit_per_tile": 1,
+  "sim_units_per_tile": 32,
+  "origin": "tile centre, z=0 at the element base",
+  "authored_up": "Z",
+  "exported_up": "Y",
+  "z_squash_in_file": false
+ },
+ "bounds_blender": {
+  "min": [
+   -0.18389725687105737,
+   -0.18389725687105737,
+   0.0
+  ],
+  "max": [
+   0.18389725687105743,
+   0.1838972568710574,
+   0.340625
+  ],
+  "size": [
+   0.3677945137421148,
+   0.3677945137421148,
+   0.340625
+  ]
+ },
+ "height_sim": 11,
+ "footprint_tiles": [
+  0.5,
+  0.5
+ ],
+ "max_overhang_tiles": 0,
+ "base_sink_sim": 0,
+ "triangles": 256,
+ "texture": {
+  "embedded": true,
+  "width": 64,
+  "height": 64,
+  "alpha_mode": "MASK",
+  "alpha_cutoff": 0.5,
+  "filter": "NEAREST",
+  "mipmaps": false,
+  "double_sided": true,
+  "tiles": {
+   "staves": [
+    0,
+    0,
+    36,
+    12
+   ],
+   "lid": [
+    36,
+    0,
+    12,
+    12
+   ],
+   "chime": [
+    48,
+    0,
+    16,
+    2
+   ]
+  },
+  "justification": "",
+  "palette_source": "Data/g1.dat"
+ },
+ "export": {
+  "exporter": "blender-4.2",
+  "reference": "The approved rct2.scenery_small.tcrp.glb next to the loader is the Blender 4.2 LTS export (Khronos glTF Blender I/O v4.2.83), patched to nearest filtering and alpha MASK. --no-blender uses the Python writer, which welds vertices and writes u16 indices so the structure matches that file. The game does not read this meta."
+ },
+ "iou": {
+  "views": [
+   0.868,
+   0.873,
+   0.911,
+   0.906
+  ],
+  "mean": 0.889,
+  "kernel_px": 3,
+  "threshold_per_view": 0.7,
+  "threshold_mean": 0.75,
+  "source": "Closed-mask (3px) IoU of the approved Blender 4.2 export, measured 2026-11-03 by validate.py against the four TBR1 direction sprites.",
+  "raw": {
+   "views": [
+    0.863,
+    0.868,
+    0.91,
+    0.901
+   ],
+   "mean": 0.886
+  }
+ },
+ "params": {
+  "atlas": {
+   "size": [
+    64,
+    64
+   ],
+   "seed": 1201,
+   "tiles": [
+    {
+     "name": "staves",
+     "rect": [
+      0,
+      0,
+      36,
+      12
+     ],
+     "kind": "planks",
+     "plank": 3,
+     "grad": -0.5,
+     "bands": [
+      {
+       "v": [
+        0.0,
+        0.08
+       ]
+      },
+      {
+       "v": [
+        0.17,
+        0.27
+       ]
+      },
+      {
+       "v": [
+        0.45,
+        0.58
+       ]
+      },
+      {
+       "v": [
+        0.91,
+        1.0
+       ]
+      }
+     ]
+    },
+    {
+     "name": "lid",
+     "rect": [
+      36,
+      0,
+      12,
+      12
+     ],
+     "kind": "lid",
+     "plank": 3,
+     "rim": 1.0
+    },
+    {
+     "name": "chime",
+     "rect": [
+      48,
+      0,
+      16,
+      2
+     ],
+     "kind": "solid",
+     "grad": 0.2
+    }
+   ]
+  },
+  "parts": [
+   {
+    "kind": "lathe",
+    "tile": "staves",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "sides": 16,
+    "phase": 0.19635,
+    "profile": [
+     [
+      0,
+      4.7
+     ],
+     [
+      1.3,
+      5.3
+     ],
+     [
+      3.2,
+      5.85
+     ],
+     [
+      5.4,
+      6.0
+     ],
+     [
+      7.6,
+      5.85
+     ],
+     [
+      9.5,
+      5.3
+     ],
+     [
+      10.9,
+      4.7
+     ],
+     [
+      10.4,
+      4.0
+     ]
+    ],
+    "seg_tiles": {
+     "6": "chime"
+    },
+    "cap_start": "lid",
+    "cap_end": "lid"
+   }
+  ]
+ },
+ "review": {
+  "status": "approved",
+  "note": "Approved by the repo owner in batch 1 (2026-11-03)."
+ },
+ "files": {
+  "glb": "rct2.scenery_small.tbr1.glb"
+ },
+ "triangle_justification": "256 tris (6 over the 250 prop soft cap): 16-sided lathe so the barrel's round body and raised hoop rings stay smooth at quarter-tile scale; fewer sides facets the outline in views 2/3."
+}

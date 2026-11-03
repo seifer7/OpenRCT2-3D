@@ -60,6 +60,45 @@ namespace OpenRCT2::View3D
         return PlacementDraw::sprite;
     }
 
+    // True when another sprite would pass the sprite share of the atlas or the handle cap.
+    inline bool spriteOverShare(
+        uint32_t count, uint32_t maxCount, uint32_t texels, uint32_t maxTexels, uint32_t dedicated, uint32_t maxDedicated)
+    {
+        return count >= maxCount || texels > maxTexels || dedicated > maxDedicated;
+    }
+
+    // Oldest sprite that was not drawn this frame. `requireStale` keeps sprites newer than
+    // `staleFrames`. Returns -1 when every candidate was drawn this frame or none are stale.
+    inline int32_t pickSpriteToDrop(
+        const uint64_t* lastUsed, const uint8_t* usedThisFrame, int32_t count, uint64_t frame, uint32_t staleFrames,
+        bool requireStale)
+    {
+        int32_t best = -1;
+        uint64_t bestUsed = ~uint64_t{ 0 };
+        if (lastUsed == nullptr || usedThisFrame == nullptr || count <= 0)
+        {
+            return -1;
+        }
+        for (int32_t i = 0; i < count; i++)
+        {
+            if (usedThisFrame[i] != 0)
+            {
+                continue;
+            }
+            const uint64_t age = frame >= lastUsed[i] ? frame - lastUsed[i] : 0;
+            if (requireStale && age < staleFrames)
+            {
+                continue;
+            }
+            if (best < 0 || lastUsed[i] < bestUsed)
+            {
+                best = i;
+                bestUsed = lastUsed[i];
+            }
+        }
+        return best;
+    }
+
     // One held model may retry this frame. `keys` is sorted ascending and `due` is
     // parallel to it. `cursor` remembers the last key so the next frame continues
     // after it. A model that never fits therefore cannot take every upload slot.

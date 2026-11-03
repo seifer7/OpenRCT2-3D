@@ -244,9 +244,31 @@ namespace OpenRCT2::View3D
         return footprintFromSamples(clip, focusX, focusY, true, sceneryCullRadius(eyeX, eyeY, focusX, focusY));
     }
 
+    static bool farGroundMissed(const float clip[16])
+    {
+        const float samples[3][2] = { { -1.0f, 1.0f }, { 1.0f, 1.0f }, { 0.0f, 1.0f } };
+        for (const float* sample : samples)
+        {
+            float x = 0.0f;
+            float y = 0.0f;
+            if (!groundPlanePoint(clip, sample[0], sample[1], x, y))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     float groundReachRadius(const float clip[16], float focusX, float focusY)
     {
-        return footprintFromSamples(clip, focusX, focusY, false, 0.0f);
+        float reach = footprintFromSamples(clip, focusX, focusY, false, 0.0f);
+        // A fly camera near the horizon misses the ground at the top of the view.
+        // The sprite layer still covers out to its far limit instead of leaving that band empty.
+        if (farGroundMissed(clip))
+        {
+            reach = std::max(reach, sceneryDistantSpriteTiles());
+        }
+        return reach;
     }
 
     float distantSpriteRadius(const float clip[16], float focusX, float focusY, float farLimitTiles)
@@ -352,73 +374,6 @@ namespace OpenRCT2::View3D
                 }
             }
         }
-    }
-
-    DistantSpriteFrame countDistantSpriteFrame(
-        const SceneryChunkGrid& grid, const float planes[6][4], float focusX, float focusY, float meshRadius,
-        float spriteRadius, int face)
-    {
-        const int indexFace = face & 3;
-        std::unordered_map<uint64_t, std::vector<ChunkSpritePoint>> batches;
-        auto gather = [&](DistantSpriteFrame& stats) {
-            stats = {};
-            for (auto& item : batches)
-            {
-                item.second.clear();
-            }
-            for (int32_t y = 0; y < grid.chunksY(); y++)
-            {
-                for (int32_t x = 0; x < grid.chunksX(); x++)
-                {
-                    const SceneryChunk* chunk = grid.at(x, y);
-                    if (chunk == nullptr || !chunk->built)
-                    {
-                        continue;
-                    }
-                    if (!boxOutsideGroundDistance(chunk->box, focusX, focusY, meshRadius)
-                        && !boxOutsideFrustum(chunk->box, planes))
-                    {
-                        stats.meshChunks++;
-                        continue;
-                    }
-                    if (!chunkInDistantSprites(chunk->box, focusX, focusY, meshRadius, spriteRadius, planes))
-                    {
-                        continue;
-                    }
-                    stats.spriteChunks++;
-                    for (const ChunkSpriteRun& run : chunk->spriteRuns[indexFace])
-                    {
-                        if (run.count == 0)
-                        {
-                            continue;
-                        }
-                        std::vector<ChunkSpritePoint>& batch = batches[run.key];
-                        batch.reserve(batch.size() + static_cast<size_t>(run.count));
-                        const std::vector<uint32_t>& order = chunk->spriteOrder[indexFace];
-                        for (uint32_t n = 0; n < run.count; n++)
-                        {
-                            batch.push_back(chunk->spriteInstances[order[run.begin + n]]);
-                        }
-                        stats.instances += static_cast<int32_t>(run.count);
-                    }
-                }
-            }
-            stats.draws = 0;
-            for (const auto& item : batches)
-            {
-                if (!item.second.empty())
-                {
-                    stats.draws++;
-                }
-            }
-        };
-        DistantSpriteFrame stats;
-        gather(stats);
-        const auto start = std::chrono::steady_clock::now();
-        gather(stats);
-        stats.microseconds = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start)
-                                 .count();
-        return stats;
     }
 
     float sceneryCullRadius(float eyeX, float eyeY, float focusX, float focusY)

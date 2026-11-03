@@ -67,7 +67,28 @@ namespace OpenRCT2::View3D::Park
             int32_t handle = -1;
             bool model = false;
             bool vegetation = false;
+            bool distant = false;
+            int32_t page = -1;
+            int face = 0;
             std::vector<MeshInstance> instances;
+            std::vector<DistantSpriteInstance> distantInstances;
+        };
+
+        struct SpriteResident
+        {
+            int32_t handle = -1;
+            int32_t page = -1;
+            uint32_t texels = 0;
+            uint64_t lastUsed = 0;
+            bool dedicated = false;
+            float uvScaleX = 1.0f;
+            float uvScaleY = 1.0f;
+            float uvOffX = 0.0f;
+            float uvOffY = 0.0f;
+            float left = 0.0f;
+            float right = 0.0f;
+            float bottom = 0.0f;
+            float top = 0.0f;
         };
 
         struct SpriteKey
@@ -116,12 +137,13 @@ namespace OpenRCT2::View3D::Park
 
         bool _dropSprites = false;
 
-        std::unordered_map<SpriteKey, int32_t, SpriteKeyHash> _spriteHandles;
+        std::unordered_map<SpriteKey, SpriteResident, SpriteKeyHash> _spriteResidents;
         std::unordered_set<std::string> _loggedUploadFail;
         std::vector<Batch> _batches;
         size_t _batchCount = 0;
         std::unordered_map<uint32_t, size_t> _modelBatches;
         std::unordered_map<int32_t, size_t> _spriteBatches;
+        std::unordered_map<int32_t, size_t> _distantPages;
         bool _loggedShader = false;
         std::vector<Drawing::PaletteIndex> _blit;
         std::vector<uint8_t> _rgba;
@@ -139,6 +161,9 @@ namespace OpenRCT2::View3D::Park
         std::unordered_set<uint32_t> _pinned;
         std::unordered_set<uint32_t> _loadKeys;
         int32_t _spriteUploads = 0;
+        uint32_t _spriteCount = 0;
+        uint32_t _spriteTexels = 0;
+        uint32_t _spriteDedicated = 0;
         std::list<SpriteKey> _spriteLru;
         std::unordered_map<SpriteKey, std::list<SpriteKey>::iterator, SpriteKeyHash> _spriteLruPos;
         // Upload failed after eviction. Draw the X-sprite and try the model again.
@@ -315,40 +340,102 @@ namespace OpenRCT2::View3D::Park
             _spriteLru.splice(_spriteLru.begin(), _spriteLru, found->second);
         }
 
-        bool evictSprite()
+        void forgetSpriteKey(const SpriteKey& key)
         {
-            if (_spriteLru.empty())
+            const auto listed = _spriteLruPos.find(key);
+            if (listed == _spriteLruPos.end())
+            {
+                return;
+            }
+            _spriteLru.erase(listed->second);
+            _spriteLruPos.erase(listed);
+        }
+
+        void releaseSprite(const SpriteKey& key)
+        {
+            const auto found = _spriteResidents.find(key);
+            if (found == _spriteResidents.end())
+            {
+                forgetSpriteKey(key);
+                return;
+            }
+            if (found->second.handle >= 0)
+            {
+                meshDrawReleaseSprite(found->second.handle);
+                if (found->second.dedicated)
+                {
+                    if (_spriteDedicated > 0)
+                    {
+                        _spriteDedicated--;
+                    }
+                }
+                else if (_spriteTexels >= found->second.texels)
+                {
+                    _spriteTexels -= found->second.texels;
+                }
+                if (_spriteCount > 0)
+                {
+                    _spriteCount--;
+                }
+                _spaceFreed = true;
+            }
+            _spriteResidents.erase(found);
+            forgetSpriteKey(key);
+        }
+
+        bool evictColdSprite(bool requireStale)
+        {
+            std::vector<SpriteKey> keys;
+            std::vector<uint64_t> lastUsed;
+            std::vector<uint8_t> used;
+            keys.reserve(_spriteLru.size());
+            for (const SpriteKey& key : _spriteLru)
+            {
+                const auto found = _spriteResidents.find(key);
+                if (found == _spriteResidents.end() || found->second.handle < 0)
+                {
+                    continue;
+                }
+                keys.push_back(key);
+                lastUsed.push_back(found->second.lastUsed);
+                used.push_back(static_cast<uint8_t>(found->second.lastUsed == _frame ? 1 : 0));
+            }
+            const int32_t index = pickSpriteToDrop(
+                lastUsed.data(), used.data(), static_cast<int32_t>(keys.size()), _frame, kSpriteStaleFrames, requireStale);
+            if (index < 0)
             {
                 return false;
             }
-            const SpriteKey key = _spriteLru.back();
-            _spriteLru.pop_back();
-            _spriteLruPos.erase(key);
-            const auto found = _spriteHandles.find(key);
-            if (found == _spriteHandles.end())
-            {
-                return false;
-            }
-            if (found->second >= 0)
-            {
-                meshDrawReleaseSprite(found->second);
-            }
-            _spriteHandles.erase(found);
-            _spaceFreed = true;
+            releaseSprite(keys[static_cast<size_t>(index)]);
             return true;
+        }
+
+        void dropStaleSprites()
+        {
+            while (evictColdSprite(true))
+            {
+            }
+        }
+
+        bool spriteFits(uint32_t texels, bool dedicated)
+        {
+            return !spriteOverShare(
+                _spriteCount + 1u, kMaxSpriteImages, _spriteTexels + (dedicated ? 0u : texels), kMaxSpriteAtlasTexels,
+                _spriteDedicated + (dedicated ? 1u : 0u), kMaxSpriteDedicated);
         }
 
         int32_t spriteHandleForFace(const ImageId& image, int face)
         {
             const SpriteKey key{ image, face };
-            const auto found = _spriteHandles.find(key);
-            if (found != _spriteHandles.end())
+            const auto found = _spriteResidents.find(key);
+            if (found != _spriteResidents.end())
             {
-                if (found->second >= 0)
+                if (found->second.handle >= 0)
                 {
+                    found->second.lastUsed = _frame;
                     touchSprite(key);
                 }
-                return found->second;
+                return found->second.handle;
             }
             if (_spriteUploads >= static_cast<int32_t>(kSpriteUploadsPerFrame))
             {
@@ -357,11 +444,21 @@ namespace OpenRCT2::View3D::Park
             const G1Element* g1 = GfxGetG1Element(image);
             if (g1 == nullptr || g1->width <= 0 || g1->height <= 0 || g1->width > kMaxSpriteEdge || g1->height > kMaxSpriteEdge)
             {
-                _spriteHandles.emplace(key, -1);
+                SpriteResident failed;
+                failed.lastUsed = _frame;
+                _spriteResidents.emplace(key, failed);
                 return -1;
             }
             const int32_t width = g1->width;
             const int32_t height = g1->height;
+            const uint32_t texels = static_cast<uint32_t>(width) * static_cast<uint32_t>(height);
+            while (!spriteFits(texels, false))
+            {
+                if (!evictColdSprite(false))
+                {
+                    return -1;
+                }
+            }
             _blit.assign(static_cast<size_t>(width) * static_cast<size_t>(height), Drawing::PaletteIndex::transparent);
             Drawing::RenderTarget rt;
             rt.bits = _blit.data();
@@ -392,19 +489,48 @@ namespace OpenRCT2::View3D::Park
                 dst[3] = 255;
             }
             const SpriteQuad quad = makeDirectionSpriteQuad(face, g1->width, g1->height, g1->xOffset, g1->yOffset);
-            int32_t handle = meshDrawUploadSprite(quad, _rgba.data(), width, height);
-            if (handle < 0 && evictSprite())
+            const bool allowDedicated = _spriteDedicated < kMaxSpriteDedicated;
+            SpritePlace place = meshDrawUploadSprite(quad, _rgba.data(), width, height, allowDedicated);
+            if (place.id < 0 && evictColdSprite(false))
             {
-                handle = meshDrawUploadSprite(quad, _rgba.data(), width, height);
+                place = meshDrawUploadSprite(quad, _rgba.data(), width, height, _spriteDedicated < kMaxSpriteDedicated);
             }
-            if (handle < 0)
+            if (place.id < 0)
             {
                 return -1;
             }
+            if (place.page < 0 && !spriteFits(0, true))
+            {
+                meshDrawReleaseSprite(place.id);
+                return -1;
+            }
+            SpriteResident resident;
+            resident.handle = place.id;
+            resident.page = place.page;
+            resident.texels = place.page >= 0 ? texels : 0u;
+            resident.lastUsed = _frame;
+            resident.dedicated = place.page < 0;
+            resident.uvScaleX = place.uvScaleX;
+            resident.uvScaleY = place.uvScaleY;
+            resident.uvOffX = place.uvOffX;
+            resident.uvOffY = place.uvOffY;
+            resident.left = static_cast<float>(g1->xOffset) * kSpritePixelAcross;
+            resident.right = static_cast<float>(g1->xOffset + g1->width) * kSpritePixelAcross;
+            resident.top = -static_cast<float>(g1->yOffset) * kViewerZPerSimUnit;
+            resident.bottom = -static_cast<float>(g1->yOffset + g1->height) * kViewerZPerSimUnit;
+            _spriteCount++;
+            if (resident.dedicated)
+            {
+                _spriteDedicated++;
+            }
+            else
+            {
+                _spriteTexels += resident.texels;
+            }
             _spriteUploads++;
-            _spriteHandles.emplace(key, handle);
+            _spriteResidents.emplace(key, resident);
             touchSprite(key);
-            return handle;
+            return place.id;
         }
 
         void appendElement(SceneryChunk& chunk, const TileCoordsXY& tile, const SmallSceneryElement& element)
@@ -498,6 +624,7 @@ namespace OpenRCT2::View3D::Park
         {
             _modelBatches.clear();
             _spriteBatches.clear();
+            _distantPages.clear();
             _batchCount = 0;
         }
 
@@ -509,9 +636,13 @@ namespace OpenRCT2::View3D::Park
             }
             Batch& batch = _batches[_batchCount];
             batch.instances.clear();
+            batch.distantInstances.clear();
             batch.handle = -1;
             batch.model = false;
             batch.vegetation = false;
+            batch.distant = false;
+            batch.page = -1;
+            batch.face = 0;
             return _batchCount++;
         }
 
@@ -527,47 +658,93 @@ namespace OpenRCT2::View3D::Park
             cull.spriteRadius = std::min(cull.reach, limit);
         }
 
-        void appendDistant(const SceneryChunk& chunk, int face)
+        void appendDistant(const SceneryChunkGrid& grid, const FrameCull& cull, int face)
         {
-            const int indexFace = face & 3;
-            for (const ChunkSpriteRun& run : chunk.spriteRuns[indexFace])
-            {
-                if (run.count == 0)
-                {
-                    continue;
-                }
-                const int32_t handle = spriteHandleForFace(run.image, indexFace);
-                if (handle < 0)
-                {
-                    continue;
-                }
-                const auto found = _spriteBatches.find(handle);
-                size_t batchIndex;
-                if (found == _spriteBatches.end())
-                {
-                    batchIndex = takeBatch();
-                    _spriteBatches.emplace(handle, batchIndex);
-                    _batches[batchIndex].handle = handle;
-                    _batches[batchIndex].model = false;
-                    _batches[batchIndex].vegetation = run.vegetation;
-                }
-                else
-                {
-                    batchIndex = found->second;
-                    if (!run.vegetation)
+            appendDistantPlacements(
+                grid, cull.planes, cull.focusX, cull.focusY, cull.radius, cull.spriteRadius, face,
+                [&](const SceneryChunk& chunk, const ChunkSpriteRun& run) {
+                    const int32_t handle = spriteHandleForFace(run.image, face & 3);
+                    if (handle < 0)
                     {
-                        _batches[batchIndex].vegetation = false;
+                        return;
                     }
-                }
-                Batch& batch = _batches[batchIndex];
-                batch.instances.reserve(batch.instances.size() + static_cast<size_t>(run.count));
-                const std::vector<uint32_t>& order = chunk.spriteOrder[indexFace];
-                for (uint32_t n = 0; n < run.count; n++)
-                {
-                    const ChunkSpritePoint& point = chunk.spriteInstances[order[run.begin + n]];
-                    batch.instances.push_back(MeshInstance{ point.x, point.y, point.z, 0.0f });
-                }
-            }
+                    const auto resident = _spriteResidents.find(SpriteKey{ run.image, face & 3 });
+                    if (resident == _spriteResidents.end() || resident->second.handle < 0)
+                    {
+                        return;
+                    }
+                    if (resident->second.page < 0)
+                    {
+                        const int32_t dedicatedHandle = resident->second.handle;
+                        const auto spriteBatch = _spriteBatches.find(dedicatedHandle);
+                        size_t index;
+                        if (spriteBatch == _spriteBatches.end())
+                        {
+                            index = takeBatch();
+                            _spriteBatches.emplace(dedicatedHandle, index);
+                            _batches[index].handle = dedicatedHandle;
+                            _batches[index].vegetation = run.vegetation;
+                        }
+                        else
+                        {
+                            index = spriteBatch->second;
+                            if (!run.vegetation)
+                            {
+                                _batches[index].vegetation = false;
+                            }
+                        }
+                        Batch& fallback = _batches[index];
+                        fallback.instances.reserve(fallback.instances.size() + static_cast<size_t>(run.count));
+                        const std::vector<uint32_t>& order = chunk.spriteOrder[face & 3];
+                        for (uint32_t n = 0; n < run.count; n++)
+                        {
+                            const ChunkSpritePoint& point = chunk.spriteInstances[order[run.begin + n]];
+                            fallback.instances.push_back(MeshInstance{ point.x, point.y, point.z, 0.0f });
+                        }
+                        return;
+                    }
+                    const int32_t page = resident->second.page;
+                    const auto found = _distantPages.find(page);
+                    size_t batchIndex;
+                    if (found == _distantPages.end())
+                    {
+                        batchIndex = takeBatch();
+                        _distantPages.emplace(page, batchIndex);
+                        _batches[batchIndex].distant = true;
+                        _batches[batchIndex].page = page;
+                        _batches[batchIndex].face = face & 3;
+                        _batches[batchIndex].vegetation = run.vegetation;
+                    }
+                    else
+                    {
+                        batchIndex = found->second;
+                        if (!run.vegetation)
+                        {
+                            _batches[batchIndex].vegetation = false;
+                        }
+                    }
+                    Batch& batch = _batches[batchIndex];
+                    batch.distantInstances.reserve(batch.distantInstances.size() + static_cast<size_t>(run.count));
+                    const std::vector<uint32_t>& order = chunk.spriteOrder[face & 3];
+                    const SpriteResident& sprite = resident->second;
+                    for (uint32_t n = 0; n < run.count; n++)
+                    {
+                        const ChunkSpritePoint& point = chunk.spriteInstances[order[run.begin + n]];
+                        DistantSpriteInstance instance;
+                        instance.x = point.x;
+                        instance.y = point.y;
+                        instance.z = point.z;
+                        instance.left = sprite.left;
+                        instance.right = sprite.right;
+                        instance.bottom = sprite.bottom;
+                        instance.top = sprite.top;
+                        instance.uvScaleX = sprite.uvScaleX;
+                        instance.uvScaleY = sprite.uvScaleY;
+                        instance.uvOffX = sprite.uvOffX;
+                        instance.uvOffY = sprite.uvOffY;
+                        batch.distantInstances.push_back(instance);
+                    }
+                });
         }
 
         bool chunkVisible(const SceneryChunk& chunk, const FrameCull& cull)
@@ -758,6 +935,15 @@ namespace OpenRCT2::View3D::Park
                         releaseResident(*dropped);
                         uploaded = meshDrawUploadModel(mesh);
                     }
+                    // Models inside the radius outrank sprites. Free a cold sprite and retry.
+                    for (int32_t attempt = 0; attempt < 8 && uploaded.status == MeshUploadStatus::capacity; attempt++)
+                    {
+                        if (!evictColdSprite(false))
+                        {
+                            break;
+                        }
+                        uploaded = meshDrawUploadModel(mesh);
+                    }
                 }
             }
             if (uploaded.status == MeshUploadStatus::ready)
@@ -871,6 +1057,10 @@ namespace OpenRCT2::View3D::Park
         {
             beginFrameBatches();
             const int distantFace = spriteFaceForView(cull.eyeX - cull.focusX, cull.eyeY - cull.focusY);
+            if (cull.haveCamera)
+            {
+                appendDistant(_grid, cull, distantFace);
+            }
             for (int32_t y = 0; y < _grid.chunksY(); y++)
             {
                 for (int32_t x = 0; x < _grid.chunksX(); x++)
@@ -882,12 +1072,6 @@ namespace OpenRCT2::View3D::Park
                     }
                     if (!chunkVisible(*chunk, cull))
                     {
-                        if (cull.haveCamera
-                            && chunkInDistantSprites(
-                                chunk->box, cull.focusX, cull.focusY, cull.radius, cull.spriteRadius, cull.planes))
-                        {
-                            appendDistant(*chunk, distantFace);
-                        }
                         continue;
                     }
                     for (const ChunkPlacement& placement : chunk->placements)
@@ -992,12 +1176,16 @@ namespace OpenRCT2::View3D::Park
     {
         _loads.reset();
         meshDrawShutdown();
-        _spriteHandles.clear();
+        _spriteResidents.clear();
+        _spriteCount = 0;
+        _spriteTexels = 0;
+        _spriteDedicated = 0;
         _loggedUploadFail.clear();
         _batches.clear();
         _batchCount = 0;
         _modelBatches.clear();
         _spriteBatches.clear();
+        _distantPages.clear();
         _loggedShader = false;
         _blit.clear();
         _rgba.clear();
@@ -1015,6 +1203,7 @@ namespace OpenRCT2::View3D::Park
         _loadKeys.clear();
         _spriteLru.clear();
         _spriteLruPos.clear();
+        _distantPages.clear();
         _vram = LruBudget(kDefaultVramBudgetBytes);
         _frame = 0;
         std::lock_guard<std::mutex> guard(_dirtyMutex);
@@ -1034,7 +1223,9 @@ namespace OpenRCT2::View3D::Park
             return;
         }
         _frame++;
+        meshDrawBeginFrame();
         _spriteUploads = 0;
+        dropStaleSprites();
         bool dropSprites = false;
         {
             std::lock_guard<std::mutex> guard(_dirtyMutex);
@@ -1043,7 +1234,10 @@ namespace OpenRCT2::View3D::Park
         }
         if (dropSprites)
         {
-            _spriteHandles.clear();
+            _spriteResidents.clear();
+            _spriteCount = 0;
+            _spriteTexels = 0;
+            _spriteDedicated = 0;
             _spriteLru.clear();
             _spriteLruPos.clear();
             meshDrawClearSprites();
@@ -1073,11 +1267,18 @@ namespace OpenRCT2::View3D::Park
         for (size_t i = 0; i < _batchCount; i++)
         {
             const Batch& batch = _batches[i];
-            if (batch.instances.empty() || hideBatch(batch))
+            const bool empty = batch.distant ? batch.distantInstances.empty() : batch.instances.empty();
+            if (empty || hideBatch(batch))
             {
                 continue;
             }
-            if (batch.model)
+            if (batch.distant)
+            {
+                meshDrawDistantSprites(
+                    batch.page, batch.face, batch.distantInstances.data(),
+                    static_cast<uint32_t>(batch.distantInstances.size()));
+            }
+            else if (batch.model)
             {
                 meshDrawModel(batch.handle, batch.instances.data(), static_cast<uint32_t>(batch.instances.size()));
             }

@@ -894,34 +894,260 @@ TEST(SceneryScale, LargeParkZoom3SpriteCost)
     }
 
     const int face = spriteFaceForView(pose.eyeX - pose.focusX, pose.eyeY - pose.focusY);
-    const DistantSpriteFrame stats = countDistantSpriteFrame(grid, pose.planes, focusX, focusY, mesh, sprites, face);
-    int32_t expectChunks = 0;
-    int32_t expectInstances = 0;
+    std::vector<std::vector<ChunkSpritePoint>> pages(static_cast<size_t>(kSpriteAtlasPageBudget));
+    int32_t spriteChunks = 0;
+    int32_t instances = 0;
+    auto gather = [&]() {
+        spriteChunks = 0;
+        instances = 0;
+        for (auto& page : pages)
+        {
+            page.clear();
+        }
+        int32_t lastChunk = -1;
+        appendDistantPlacements(
+            grid, pose.planes, focusX, focusY, mesh, sprites, face, [&](const SceneryChunk& chunk, const ChunkSpriteRun& run) {
+                const int32_t chunkId = static_cast<int32_t>(&chunk - grid.at(0, 0));
+                if (chunkId != lastChunk)
+                {
+                    lastChunk = chunkId;
+                    spriteChunks++;
+                }
+                const int32_t page = static_cast<int32_t>(run.image.GetIndex() % static_cast<uint32_t>(kSpriteAtlasPageBudget));
+                auto& batch = pages[static_cast<size_t>(page)];
+                batch.reserve(batch.size() + static_cast<size_t>(run.count));
+                const std::vector<uint32_t>& order = chunk.spriteOrder[face];
+                for (uint32_t n = 0; n < run.count; n++)
+                {
+                    batch.push_back(chunk.spriteInstances[order[run.begin + n]]);
+                }
+                instances += static_cast<int32_t>(run.count);
+            });
+    };
+    gather();
+    const auto started = std::chrono::steady_clock::now();
+    gather();
+    const int64_t microseconds = std::chrono::duration_cast<std::chrono::microseconds>(
+                                     std::chrono::steady_clock::now() - started)
+                                     .count();
+    int32_t draws = 0;
+    for (const auto& page : pages)
+    {
+        if (!page.empty())
+        {
+            draws++;
+        }
+    }
+    int32_t meshChunks = 0;
     for (int32_t cy = 0; cy < grid.chunksY(); cy++)
     {
         for (int32_t cx = 0; cx < grid.chunksX(); cx++)
         {
             const SceneryChunk* chunk = grid.at(cx, cy);
-            if (!chunkInDistantSprites(chunk->box, focusX, focusY, mesh, sprites, pose.planes))
+            if (!boxOutsideGroundDistance(chunk->box, focusX, focusY, mesh) && !boxOutsideFrustum(chunk->box, pose.planes))
             {
-                continue;
-            }
-            expectChunks++;
-            for (const ChunkSpriteRun& run : chunk->spriteRuns[face])
-            {
-                expectInstances += static_cast<int32_t>(run.count);
+                meshChunks++;
             }
         }
     }
-    EXPECT_GT(expectChunks, 0);
-    EXPECT_EQ(stats.spriteChunks, expectChunks);
-    EXPECT_EQ(stats.instances, expectInstances);
-    EXPECT_EQ(stats.instances, expectChunks * kSceneryChunkTiles * kSceneryChunkTiles);
-    EXPECT_EQ(stats.draws, kImages);
-    EXPECT_LT(stats.meshChunks, 256);
+    EXPECT_GT(spriteChunks, 0);
+    EXPECT_EQ(instances, spriteChunks * kSceneryChunkTiles * kSceneryChunkTiles);
+    EXPECT_EQ(draws, static_cast<int32_t>(kSpriteAtlasPageBudget));
+    EXPECT_LT(meshChunks, 256);
     std::printf(
         "DISTANT_SPRITE_FRAME map=%d zoom=3 focus=(%.0f,%.0f) meshRadius=%.1f spriteRadius=%.1f meshChunks=%d spriteChunks=%d "
         "instances=%d draws=%d us=%lld\n",
-        kMap, focusX, focusY, static_cast<double>(mesh), static_cast<double>(sprites), stats.meshChunks, stats.spriteChunks,
-        stats.instances, stats.draws, static_cast<long long>(stats.microseconds));
+        kMap, focusX, focusY, static_cast<double>(mesh), static_cast<double>(sprites), meshChunks, spriteChunks, instances,
+        draws, static_cast<long long>(microseconds));
+}
+
+TEST(SceneryScale, SpriteShareStaysCapped)
+{
+    EXPECT_FALSE(spriteOverShare(10, kMaxSpriteImages, 100, kMaxSpriteAtlasTexels, 0, kMaxSpriteDedicated));
+    EXPECT_TRUE(spriteOverShare(kMaxSpriteImages, kMaxSpriteImages, 0, kMaxSpriteAtlasTexels, 0, kMaxSpriteDedicated));
+    EXPECT_TRUE(
+        spriteOverShare(1, kMaxSpriteImages, kMaxSpriteAtlasTexels + 1u, kMaxSpriteAtlasTexels, 0, kMaxSpriteDedicated));
+    EXPECT_TRUE(spriteOverShare(1, kMaxSpriteImages, 0, kMaxSpriteAtlasTexels, kMaxSpriteDedicated + 1u, kMaxSpriteDedicated));
+}
+
+TEST(SceneryScale, StaleSpriteDropsAndThisFrameStays)
+{
+    const uint64_t lastUsed[3] = { 10, 400, 500 };
+    const uint8_t used[3] = { 0, 0, 1 };
+    EXPECT_EQ(pickSpriteToDrop(lastUsed, used, 3, 500, kSpriteStaleFrames, true), 0);
+    const uint8_t allFresh[3] = { 0, 0, 0 };
+    const uint64_t recent[3] = { 490, 495, 499 };
+    EXPECT_EQ(pickSpriteToDrop(recent, allFresh, 3, 500, kSpriteStaleFrames, true), -1);
+    EXPECT_EQ(pickSpriteToDrop(lastUsed, used, 3, 500, kSpriteStaleFrames, false), 0);
+    const uint8_t allUsed[2] = { 1, 1 };
+    const uint64_t old[2] = { 1, 2 };
+    EXPECT_EQ(pickSpriteToDrop(old, allUsed, 2, 500, kSpriteStaleFrames, false), -1);
+}
+
+TEST(SceneryScale, ModelTakesAColdSpriteBeforeItFails)
+{
+    const uint64_t lastUsed[2] = { 10, 500 };
+    const uint8_t used[2] = { 0, 1 };
+    const int32_t dropped = pickSpriteToDrop(lastUsed, used, 2, 500, kSpriteStaleFrames, false);
+    EXPECT_EQ(dropped, 0);
+    const uint8_t onlyVisible[1] = { 1 };
+    const uint64_t visible[1] = { 1 };
+    EXPECT_EQ(pickSpriteToDrop(visible, onlyVisible, 1, 500, kSpriteStaleFrames, false), -1);
+}
+
+TEST(SceneryScale, FreedSpriteIdWaitsUntilNextFrame)
+{
+    SpriteIdPool pool;
+    pool.release(3);
+    pool.release(7);
+    EXPECT_EQ(pool.acquire(), -1);
+    pool.nextFrame();
+    EXPECT_EQ(pool.acquire(), 7);
+    EXPECT_EQ(pool.acquire(), 3);
+    EXPECT_EQ(pool.acquire(), -1);
+}
+
+namespace
+{
+    void mulClipLocal(float out[16], const float proj[16], const float view[16])
+    {
+        for (int32_t col = 0; col < 4; col++)
+        {
+            for (int32_t row = 0; row < 4; row++)
+            {
+                float sum = 0.0f;
+                for (int32_t k = 0; k < 4; k++)
+                {
+                    sum += proj[row + k * 4] * view[k + col * 4];
+                }
+                out[row + col * 4] = sum;
+            }
+        }
+    }
+
+    // ParkView's camera: bx left-handed lookAt, the X row negated, bx::mtxProj in degrees.
+    void gameClip(
+        float clip[16], float eyeX, float eyeY, float eyeZ, float forwardX, float forwardY, float forwardZ, float aspect)
+    {
+        const float fl = std::sqrt(forwardX * forwardX + forwardY * forwardY + forwardZ * forwardZ);
+        const float vx = forwardX / fl;
+        const float vy = forwardY / fl;
+        const float vz = forwardZ / fl;
+        const float ux = 0.0f;
+        const float uy = 0.0f;
+        const float uz = 1.0f;
+        float rx = uy * vz - uz * vy;
+        float ry = uz * vx - ux * vz;
+        float rz = ux * vy - uy * vx;
+        const float rl = std::sqrt(rx * rx + ry * ry + rz * rz);
+        rx /= rl;
+        ry /= rl;
+        rz /= rl;
+        const float upX = vy * rz - vz * ry;
+        const float upY = vz * rx - vx * rz;
+        const float upZ = vx * ry - vy * rx;
+        float view[16] = {};
+        view[0] = rx;
+        view[1] = upX;
+        view[2] = vx;
+        view[4] = ry;
+        view[5] = upY;
+        view[6] = vy;
+        view[8] = rz;
+        view[9] = upZ;
+        view[10] = vz;
+        view[12] = -(rx * eyeX + ry * eyeY + rz * eyeZ);
+        view[13] = -(upX * eyeX + upY * eyeY + upZ * eyeZ);
+        view[14] = -(vx * eyeX + vy * eyeY + vz * eyeZ);
+        view[15] = 1.0f;
+        view[0] = -view[0];
+        view[4] = -view[4];
+        view[8] = -view[8];
+        view[12] = -view[12];
+        const float height = 1.0f / std::tan(50.0f * 0.5f * 3.14159265f / 180.0f);
+        const float width = height / aspect;
+        const float nearPlane = 0.2f;
+        const float farPlane = 8000.0f;
+        const float diff = farPlane - nearPlane;
+        float proj[16] = {};
+        proj[0] = width;
+        proj[5] = height;
+        proj[10] = (farPlane + nearPlane) / diff;
+        proj[11] = 1.0f;
+        proj[14] = -(2.0f * farPlane * nearPlane) / diff;
+        mulClipLocal(clip, proj, view);
+    }
+} // namespace
+
+TEST(SceneryScale, GameCameraKeepsTheFocusChunk)
+{
+    const float aspect = 16.0f / 9.0f;
+    const float targetX = 128.0f;
+    const float targetY = 96.0f;
+    const float targetZ = 1.0f;
+    const float dir = 0.70710678f;
+    const float distance = (1.0f / std::tan(25.0f * 3.14159265f / 180.0f)) * 1.41421356f * 1080.0f / (2.0f * 32.0f) * 0.8f;
+    const float horizontal = distance * std::cos(0.52359878f);
+    const float vertical = distance * std::sin(0.52359878f);
+    const float eyeX = targetX + dir * horizontal;
+    const float eyeY = targetY + dir * horizontal;
+    const float eyeZ = targetZ + vertical;
+    const float yaw = std::atan2(-dir, -dir);
+    const float pitch = -0.52359878f;
+    const float forwardX = std::cos(yaw) * std::cos(pitch);
+    const float forwardY = std::sin(yaw) * std::cos(pitch);
+    const float forwardZ = std::sin(pitch);
+    float clip[16];
+    gameClip(clip, eyeX, eyeY, eyeZ, forwardX, forwardY, forwardZ, aspect);
+    const float t = -eyeZ / forwardZ;
+    const float focusX = eyeX + forwardX * t;
+    const float focusY = eyeY + forwardY * t;
+    float planes[6][4];
+    extractFrustumPlanes(clip, planes);
+    const float radius = groundFootprintRadius(clip, eyeX, eyeY, focusX, focusY);
+    ChunkBox focus = boxAround(targetX, targetY);
+    focus.minZ = 0.0f;
+    focus.maxZ = targetZ + 4.0f;
+    EXPECT_GT(radius, 40.0f);
+    EXPECT_LT(radius, 160.0f);
+    EXPECT_FALSE(boxOutsideGroundDistance(focus, focusX, focusY, radius));
+    EXPECT_FALSE(boxOutsideFrustum(focus, planes));
+    EXPECT_FALSE(
+        chunkInDistantSprites(focus, focusX, focusY, radius, distantSpriteRadius(clip, focusX, focusY, 1280.0f), planes));
+}
+
+TEST(SceneryScale, HorizonMissFallsBackToTheFarLimit)
+{
+    const float aspect = 16.0f / 9.0f;
+    const float eyeX = 0.0f;
+    const float eyeY = -30.0f;
+    const float eyeZ = 40.0f;
+    const float pitch = -0.05f;
+    const float forwardX = 0.0f;
+    const float forwardY = std::cos(pitch);
+    const float forwardZ = std::sin(pitch);
+    float clip[16];
+    gameClip(clip, eyeX, eyeY, eyeZ, forwardX, forwardY, forwardZ, aspect);
+    float missX = 0.0f;
+    float missY = 0.0f;
+    EXPECT_FALSE(groundPlanePoint(clip, 0.0f, 1.0f, missX, missY));
+    const float t = -eyeZ / forwardZ;
+    const float focusX = eyeX + forwardX * t;
+    const float focusY = eyeY + forwardY * t;
+    const float mesh = groundFootprintRadius(clip, eyeX, eyeY, focusX, focusY);
+    const float reach = groundReachRadius(clip, focusX, focusY);
+    EXPECT_GE(reach, kDefaultDistantSpriteTiles);
+    EXPECT_LT(mesh, reach);
+    float planes[6][4];
+    extractFrustumPlanes(clip, planes);
+    const float sprites = distantSpriteRadius(clip, focusX, focusY, kDefaultDistantSpriteTiles);
+    const float along = std::min(600.0f, sprites - 20.0f);
+    const float nx = forwardX / std::sqrt(forwardX * forwardX + forwardY * forwardY);
+    const float ny = forwardY / std::sqrt(forwardX * forwardX + forwardY * forwardY);
+    ChunkBox far = boxAround(focusX + nx * along, focusY + ny * along);
+    if (along > mesh)
+    {
+        EXPECT_TRUE(boxOutsideGroundDistance(far, focusX, focusY, mesh));
+        EXPECT_FALSE(boxOutsideGroundDistance(far, focusX, focusY, sprites));
+    }
 }

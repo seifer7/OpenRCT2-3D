@@ -137,20 +137,37 @@ namespace OpenRCT2::View3D
     // Group placements into per-face sprite runs. Called when a chunk is rebuilt.
     void buildChunkSpriteRuns(SceneryChunk& chunk);
 
-    struct DistantSpriteFrame
-    {
-        int32_t meshChunks = 0;
-        int32_t spriteChunks = 0;
-        int32_t instances = 0;
-        int32_t draws = 0;
-        int64_t microseconds = 0;
-    };
-
-    // Steady-state gather of one camera face. The timed pass reuses batch storage,
-    // so the microseconds are the copy, not the first allocation.
-    DistantSpriteFrame countDistantSpriteFrame(
+    // The walk `appendDistant` uses. `fn` is called once per sprite run on a distant chunk.
+    template<typename Fn>
+    void appendDistantPlacements(
         const SceneryChunkGrid& grid, const float planes[6][4], float focusX, float focusY, float meshRadius,
-        float spriteRadius, int face);
+        float spriteRadius, int face, Fn&& fn)
+    {
+        const int indexFace = face & 3;
+        for (int32_t y = 0; y < grid.chunksY(); y++)
+        {
+            for (int32_t x = 0; x < grid.chunksX(); x++)
+            {
+                const SceneryChunk* chunk = grid.at(x, y);
+                if (chunk == nullptr || !chunk->built)
+                {
+                    continue;
+                }
+                if (!chunkInDistantSprites(chunk->box, focusX, focusY, meshRadius, spriteRadius, planes))
+                {
+                    continue;
+                }
+                for (const ChunkSpriteRun& run : chunk->spriteRuns[indexFace])
+                {
+                    if (run.count == 0)
+                    {
+                        continue;
+                    }
+                    fn(*chunk, run);
+                }
+            }
+        }
+    }
 
     // Builds `count` placements across a square of chunks and returns how many survive a cull.
     // `microseconds` is the cull time. Used as the 10k-instance check.

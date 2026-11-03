@@ -139,6 +139,8 @@ namespace OpenRCT2::View3D::Park
         bool _dropSprites = false;
 
         std::unordered_map<SpriteKey, SpriteResident, SpriteKeyHash> _spriteResidents;
+        // Near faces this frame. Eviction will not drop these to admit a distant sprite.
+        std::unordered_set<SpriteKey, SpriteKeyHash> _nearFaces;
         std::unordered_set<std::string> _loggedUploadFail;
         std::vector<Batch> _batches;
         size_t _batchCount = 0;
@@ -386,7 +388,7 @@ namespace OpenRCT2::View3D::Park
             forgetSpriteKey(key);
         }
 
-        bool evictColdSprite(bool requireStale)
+        bool evictColdSprite(bool requireStale, bool protectNear = false)
         {
             std::vector<SpriteKey> keys;
             std::vector<uint64_t> lastUsed;
@@ -396,6 +398,10 @@ namespace OpenRCT2::View3D::Park
             {
                 const auto found = _spriteResidents.find(key);
                 if (found == _spriteResidents.end() || found->second.handle < 0)
+                {
+                    continue;
+                }
+                if (protectNear && _nearFaces.find(key) != _nearFaces.end())
                 {
                     continue;
                 }
@@ -420,14 +426,9 @@ namespace OpenRCT2::View3D::Park
             }
         }
 
-        bool spriteFits(uint32_t texels, bool dedicated)
-        {
-            return !spriteOverShare(
-                _spriteCount + 1u, kMaxSpriteImages, _spriteTexels + (dedicated ? 0u : texels), kMaxSpriteAtlasTexels,
-                _spriteDedicated + (dedicated ? 1u : 0u), kMaxSpriteDedicated);
-        }
-
-        int32_t spriteHandleForFace(const ImageId& image, int face)
+        // `near` is an X-sprite inside the 3D radius. It is not refused by the image cap or the
+        // per-frame upload budget, and it can take a slot from a sprite only the distant layer uses.
+        int32_t spriteHandleForFace(const ImageId& image, int face, bool near)
         {
             const SpriteKey key{ image, face };
             const auto found = _spriteResidents.find(key);
@@ -440,7 +441,7 @@ namespace OpenRCT2::View3D::Park
                 }
                 return found->second.handle;
             }
-            if (_spriteUploads >= static_cast<int32_t>(kSpriteUploadsPerFrame))
+            if (!near && _spriteUploads >= static_cast<int32_t>(kSpriteUploadsPerFrame))
             {
                 return -1;
             }
@@ -465,12 +466,25 @@ namespace OpenRCT2::View3D::Park
             const int32_t width = useOverride ? overrideWidth : g1->width;
             const int32_t height = useOverride ? overrideHeight : g1->height;
             const uint32_t texels = static_cast<uint32_t>(width) * static_cast<uint32_t>(height);
-            while (!spriteFits(texels, false))
+            const auto room = [&](bool dedicated) {
+                // A count of 0 skips the image cap. Near faces may pass kMaxSpriteImages.
+                const uint32_t count = near ? 0u : _spriteCount + 1u;
+                return !spriteOverShare(
+                    count, kMaxSpriteImages, _spriteTexels + (dedicated ? 0u : texels), kMaxSpriteAtlasTexels,
+                    _spriteDedicated + (dedicated ? 1u : 0u), kMaxSpriteDedicated);
+            };
+            if (near)
             {
-                if (!evictColdSprite(false))
+                while (_spriteCount >= kMaxSpriteImages && evictColdSprite(false, true))
                 {
-                    return -1;
                 }
+            }
+            while (!room(false) && evictColdSprite(false, true))
+            {
+            }
+            if (!room(false))
+            {
+                return -1;
             }
             const uint8_t* rgba = nullptr;
             int16_t xOffset = 0;
@@ -517,7 +531,7 @@ namespace OpenRCT2::View3D::Park
             const SpriteQuad quad = makeDirectionSpriteQuad(face, width, height, xOffset, yOffset);
             const bool allowDedicated = _spriteDedicated < kMaxSpriteDedicated;
             SpritePlace place = meshDrawUploadSprite(quad, rgba, width, height, allowDedicated);
-            if (place.id < 0 && evictColdSprite(false))
+            if (place.id < 0 && evictColdSprite(false, true))
             {
                 place = meshDrawUploadSprite(quad, rgba, width, height, _spriteDedicated < kMaxSpriteDedicated);
             }
@@ -525,7 +539,7 @@ namespace OpenRCT2::View3D::Park
             {
                 return -1;
             }
-            if (place.page < 0 && !spriteFits(0, true))
+            if (place.page < 0 && !room(true))
             {
                 meshDrawReleaseSprite(place.id);
                 return -1;
@@ -553,7 +567,10 @@ namespace OpenRCT2::View3D::Park
             {
                 _spriteTexels += resident.texels;
             }
-            _spriteUploads++;
+            if (!near)
+            {
+                _spriteUploads++;
+            }
             _spriteResidents.emplace(key, resident);
             touchSprite(key);
             return place.id;
@@ -689,7 +706,7 @@ namespace OpenRCT2::View3D::Park
             appendDistantPlacements(
                 grid, cull.planes, cull.focusX, cull.focusY, cull.radius, cull.spriteRadius, face,
                 [&](const SceneryChunk& chunk, const ChunkSpriteRun& run) {
-                    const int32_t handle = spriteHandleForFace(run.image, face & 3);
+                    const int32_t handle = spriteHandleForFace(run.image, face & 3, false);
                     if (handle < 0)
                     {
                         return;
@@ -1079,14 +1096,48 @@ namespace OpenRCT2::View3D::Park
             }
         }
 
+        void markNearFaces(const FrameCull& cull)
+        {
+            _nearFaces.clear();
+            for (int32_t y = 0; y < _grid.chunksY(); y++)
+            {
+                for (int32_t x = 0; x < _grid.chunksX(); x++)
+                {
+                    const SceneryChunk* chunk = _grid.at(x, y);
+                    if (chunk == nullptr || !chunk->built || !chunkVisible(*chunk, cull))
+                    {
+                        continue;
+                    }
+                    for (const ChunkPlacement& placement : chunk->placements)
+                    {
+                        bool resident = false;
+                        if (placement.modelCandidate)
+                        {
+                            const auto gpu = _gpu.find(placement.typeKey);
+                            resident = gpu != _gpu.end() && gpu->second >= 0;
+                        }
+                        if (placementDraw(placement.modelCandidate, resident, false) != PlacementDraw::sprite)
+                        {
+                            continue;
+                        }
+                        for (int face = 0; face < 4; face++)
+                        {
+                            if (!placement.spriteFace[face])
+                            {
+                                continue;
+                            }
+                            _nearFaces.insert(SpriteKey{ placement.spriteImage[face], face });
+                        }
+                    }
+                }
+            }
+        }
+
         void composeVisible(const FrameCull& cull)
         {
             beginFrameBatches();
-            const int distantFace = spriteFaceForView(cull.eyeX - cull.focusX, cull.eyeY - cull.focusY);
-            if (cull.haveCamera)
-            {
-                appendDistant(_grid, cull, distantFace);
-            }
+            // Near faces first. The distant layer then keeps only the slots they left.
+            markNearFaces(cull);
             for (int32_t y = 0; y < _grid.chunksY(); y++)
             {
                 for (int32_t x = 0; x < _grid.chunksX(); x++)
@@ -1156,7 +1207,7 @@ namespace OpenRCT2::View3D::Park
                             {
                                 continue;
                             }
-                            const int32_t handle = spriteHandleForFace(placement.spriteImage[face], face);
+                            const int32_t handle = spriteHandleForFace(placement.spriteImage[face], face, true);
                             if (handle < 0)
                             {
                                 continue;
@@ -1179,6 +1230,11 @@ namespace OpenRCT2::View3D::Park
                         }
                     }
                 }
+            }
+            if (cull.haveCamera)
+            {
+                const int distantFace = spriteFaceForView(cull.eyeX - cull.focusX, cull.eyeY - cull.focusY);
+                appendDistant(_grid, cull, distantFace);
             }
         }
 
@@ -1203,6 +1259,7 @@ namespace OpenRCT2::View3D::Park
         _loads.reset();
         meshDrawShutdown();
         _spriteResidents.clear();
+        _nearFaces.clear();
         _spriteCount = 0;
         _spriteTexels = 0;
         _spriteDedicated = 0;

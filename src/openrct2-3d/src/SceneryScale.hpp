@@ -32,11 +32,14 @@ namespace OpenRCT2::View3D
     constexpr uint32_t kAtlasSize = 2048u;
     constexpr uint32_t kMaxAtlasPages = 8u;
     constexpr uint32_t kUploadsPerFrame = 2u;
-    // Distant fill-in. Still bounded by the sprite atlas share below.
+    // Distant fill-in. Near X-sprites ignore this and kMaxSpriteImages: a face inside
+    // the 3D radius is drawn even when the distant layer has filled both.
     constexpr uint32_t kSpriteUploadsPerFrame = 16u;
     // Sprites may use this many atlas pages. Models keep the rest, and a sprite
     // that does not fit does not take a private texture once the dedicated cap is hit.
     constexpr uint32_t kSpriteAtlasPageBudget = 2u;
+    // Image cap for the shared sprite set. Near faces may pass it. Distant sprites
+    // only take a slot when the count is still under this after the near faces.
     constexpr uint32_t kMaxSpriteImages = 384u;
     constexpr uint32_t kMaxSpriteAtlasTexels = kAtlasSize * kAtlasSize * kSpriteAtlasPageBudget;
     constexpr uint32_t kMaxSpriteDedicated = 32u;

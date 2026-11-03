@@ -10,6 +10,7 @@
 #include "SmallSceneryPlaceAction.h"
 
 #include "../../Cheats.h"
+#include "../../Context.h"
 #include "../../Diagnostic.h"
 #include "../../GameState.h"
 #include "../../OpenRCT2.h"
@@ -22,6 +23,7 @@
 #include "../../world/Footpath.h"
 #include "../../world/Map.h"
 #include "../../world/MapAnimation.h"
+#include "../../world/MapLimits.h"
 #include "../../world/QuarterTile.h"
 #include "../../world/Scenery.h"
 #include "../../world/Wall.h"
@@ -442,6 +444,7 @@ namespace OpenRCT2::GameActions
             SmallSceneryPlaceActionResult{ groundFlags, sceneryElement->getBaseZ(), sceneryElement->getSceneryQuadrant() });
 
         MapInvalidateTileFull(_loc);
+        NotifyMapChanged(_loc.x / kCoordsXYStep, _loc.y / kCoordsXYStep);
         if (sceneryEntry->flags.has(SmallSceneryFlag::isClock))
         {
             MapAnimations::MarkTileForUpdate(TileCoordsXY(_loc));

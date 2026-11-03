@@ -9,6 +9,7 @@
 
 #include "SmallSceneryElement.h"
 
+#include "../../Context.h"
 #include "../../drawing/Colour.h"
 #include "../../object/ObjectEntryManager.h"
 #include "../../object/SmallSceneryEntry.h"
@@ -67,6 +68,7 @@ namespace OpenRCT2
                 if (sceneryEntry->flags.has(SmallSceneryFlag::canWither))
                 {
                     MapInvalidateTileZoom1({ sceneryPos, getBaseZ(), getClearanceZ() });
+                    NotifyMapChanged(sceneryPos.x / kCoordsXYStep, sceneryPos.y / kCoordsXYStep);
                 }
             }
         }

@@ -385,6 +385,7 @@ void GameLoadInit()
     }
 
     gGameSpeed = 1;
+    NotifyMapChanged(-1, -1);
 }
 
 void GameLoadScripts()
@@ -419,6 +420,7 @@ void GameNotifyMapChange()
 
 void GameNotifyMapChanged()
 {
+    NotifyMapChanged(-1, -1);
 #ifdef ENABLE_SCRIPTING
     using namespace OpenRCT2::Scripting;
 

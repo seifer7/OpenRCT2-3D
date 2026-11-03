@@ -85,8 +85,12 @@
     <ClInclude Include="src\BgfxRenderer.hpp" />
     <ClInclude Include="src\GlbMesh.hpp" />
     <ClInclude Include="src\MeshDraw.hpp" />
+    <ClInclude Include="src\GpuBudget.hpp" />
     <ClInclude Include="src\ModelCache.hpp" />
+    <ClInclude Include="src\ModelLoadQueue.hpp" />
     <ClInclude Include="src\ParkView.hpp" />
+    <ClInclude Include="src\SceneryChunk.hpp" />
+    <ClInclude Include="src\SceneryScale.hpp" />
     <ClInclude Include="src\SceneryDraw.hpp" />
     <ClInclude Include="src\SpriteQuad.hpp" />
     <ClInclude Include="src\ViewerScale.hpp" />
@@ -94,8 +98,11 @@
   <ItemGroup>
     <ClCompile Include="src\BgfxRenderer.cpp" />
     <ClCompile Include="src\GlbMesh.cpp" />
+    <ClCompile Include="src\GpuBudget.cpp" />
     <ClCompile Include="src\MeshDraw.cpp" />
     <ClCompile Include="src\ModelCache.cpp" />
+    <ClCompile Include="src\ModelLoadQueue.cpp" />
+    <ClCompile Include="src\SceneryChunk.cpp" />
     <ClCompile Include="src\ParkView.cpp" />
     <ClCompile Include="src\SceneryDraw.cpp" />
     <ClCompile Include="src\View3D.cpp" />

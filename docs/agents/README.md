@@ -7,9 +7,16 @@ Project notes, memories, decisions, surveys, and other working documents live in
 - `repo-setup.md` — repository setup record
 - `scenery-sprites-angles-and-3d-view-survey.md` — scenery sprites, angles, and 3D view survey
 - `scenery-3d-milestone.md` — first scenery milestone: GLB loader, Corsican Pine, sprite-cross fallback
+- `scenery-3d-scale.md` — chunked scenery, async cache loads, shared GPU buffers, startup-only validation
 - `glb-model-pipeline-recommendation.md` — GLB model pipeline recommendation
 - `sprite-to-3d-style-guide.md` — how to build scenery GLBs in the Corsican Pine style
 - [`qa/`](qa/README.md) — QA Officer: review process, model style checklist, and PR reviews
+
+## Standing rules
+
+- Keep the work and the report short. Do the change in one pass.
+- The 3D view does not keep compatibility with its own earlier formats or behaviour. A cache from another version is reconverted.
+- In-game tests go to SeiferX7. Do not run or simulate an in-game test (no headless or offscreen game run to verify). Unit tests and CI stay as they are.
 
 ## CI
 
@@ -17,4 +24,4 @@ Project notes, memories, decisions, surveys, and other working documents live in
 
 Pushes to `develop` always run CI. `workflow_dispatch` runs the CI workflow by hand.
 
-To trigger or retrigger a run, add the `CI Request` label, or remove it and add it again, or push a commit while the label is on, or use `workflow_dispatch`. Adding any other label does not start CI.
+To trigger or retrigger a run, add the `CI Request` label, or remove it and add it again, or push a commit while the label is on, or use `workflow_dispatch`. Adding any other label still starts a workflow, and every job in that run is skipped. Removing `CI Request` does not cancel a run already in progress: `unlabeled` is not a trigger, and a different label is a separate concurrency group so it does not cancel the build.

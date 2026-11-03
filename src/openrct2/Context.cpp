@@ -101,6 +101,7 @@ namespace OpenRCT2
         static constexpr auto kForcedUpdateInterval = 25ms;
 
         PrepareSceneryModelsFn prepareSceneryModels = nullptr;
+        MapChangedFn mapChangedHook = nullptr;
     } // namespace
 
     class Context final : public IContext
@@ -1582,6 +1583,19 @@ namespace OpenRCT2
     void SetPrepareSceneryModels(PrepareSceneryModelsFn fn)
     {
         prepareSceneryModels = fn;
+    }
+
+    void SetMapChangedHook(MapChangedFn fn)
+    {
+        mapChangedHook = fn;
+    }
+
+    void NotifyMapChanged(int32_t tileX, int32_t tileY)
+    {
+        if (mapChangedHook != nullptr)
+        {
+            mapChangedHook(tileX, tileY);
+        }
     }
 
     IContext* GetContext()

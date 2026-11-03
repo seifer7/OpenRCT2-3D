@@ -14,7 +14,23 @@
 #include <algorithm>
 #include <cgltf.h>
 #include <cmath>
+#include <cstring>
 #include <fstream>
+#if defined(_MSC_VER)
+    #pragma warning(push)
+    #pragma warning(disable : 4505)
+#endif
+#if defined(__clang__)
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wunused-function"
+#endif
+#include <stb_image.h>
+#if defined(__clang__)
+    #pragma clang diagnostic pop
+#endif
+#if defined(_MSC_VER)
+    #pragma warning(pop)
+#endif
 
 namespace OpenRCT2::View3D
 {
@@ -452,5 +468,76 @@ namespace OpenRCT2::View3D
             return std::nullopt;
         }
         return loadGlbMesh(bytes.data(), bytes.size(), limits, error);
+    }
+
+    bool decodeMeshImages(CpuMesh& mesh, std::string& error)
+    {
+        const MeshLoadLimits limits;
+        for (MeshImage& image : mesh.images)
+        {
+            if (image.png.empty())
+            {
+                continue;
+            }
+            int width = 0;
+            int height = 0;
+            int components = 0;
+            if (stbi_info_from_memory(image.png.data(), static_cast<int>(image.png.size()), &width, &height, &components) == 0)
+            {
+                error = "png header is unreadable";
+                return false;
+            }
+            if (width <= 0 || height <= 0 || static_cast<uint32_t>(width) > limits.hardImageEdge
+                || static_cast<uint32_t>(height) > limits.hardImageEdge)
+            {
+                error = "png dimensions are over the limit";
+                return false;
+            }
+            const uint64_t bytes = static_cast<uint64_t>(width) * static_cast<uint64_t>(height) * 4u;
+            if (bytes > limits.maxImageBytes)
+            {
+                error = "png bitmap is over the limit";
+                return false;
+            }
+            stbi_uc* pixels = stbi_load_from_memory(
+                image.png.data(), static_cast<int>(image.png.size()), &width, &height, &components, 4);
+            if (pixels == nullptr)
+            {
+                error = "png could not be decoded";
+                return false;
+            }
+            int32_t storedW = width;
+            int32_t storedH = height;
+            if (static_cast<uint32_t>(width) > limits.maxImageEdge || static_cast<uint32_t>(height) > limits.maxImageEdge)
+            {
+                const float scale = static_cast<float>(limits.maxImageEdge) / static_cast<float>(std::max(width, height));
+                storedW = std::max(1, static_cast<int32_t>(static_cast<float>(width) * scale));
+                storedH = std::max(1, static_cast<int32_t>(static_cast<float>(height) * scale));
+                image.rgba.resize(static_cast<size_t>(storedW) * static_cast<size_t>(storedH) * 4u);
+                for (int32_t y = 0; y < storedH; y++)
+                {
+                    const int32_t sy = std::min(height - 1, y * height / storedH);
+                    for (int32_t x = 0; x < storedW; x++)
+                    {
+                        const int32_t sx = std::min(width - 1, x * width / storedW);
+                        const uint8_t* src = pixels
+                            + (static_cast<size_t>(sy) * static_cast<size_t>(width) + static_cast<size_t>(sx)) * 4u;
+                        uint8_t* dst = image.rgba.data()
+                            + (static_cast<size_t>(y) * static_cast<size_t>(storedW) + static_cast<size_t>(x)) * 4u;
+                        std::memcpy(dst, src, 4);
+                    }
+                }
+            }
+            else
+            {
+                image.rgba.assign(pixels, pixels + bytes);
+            }
+            image.width = static_cast<uint32_t>(storedW);
+            image.height = static_cast<uint32_t>(storedH);
+            stbi_image_free(pixels);
+            image.png.clear();
+            image.png.shrink_to_fit();
+        }
+        return true;
     }
 } // namespace OpenRCT2::View3D

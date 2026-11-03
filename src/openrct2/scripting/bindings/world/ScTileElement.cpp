@@ -63,6 +63,7 @@ namespace OpenRCT2::Scripting
     static inline void Invalidate(OpaqueTileElementData* data)
     {
         MapInvalidateTileFull(data->coords);
+        NotifyMapChanged(data->coords.x / kCoordsXYStep, data->coords.y / kCoordsXYStep);
     }
 
     JSValue ScTileElement::type_get(JSContext* ctx, JSValue thisValue)

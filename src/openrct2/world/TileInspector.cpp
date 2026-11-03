@@ -9,6 +9,7 @@
 
 #include "TileInspector.h"
 
+#include "../Context.h"
 #include "../Diagnostic.h"
 #include "../actions/GameAction.hpp"
 #include "../core/Guard.hpp"
@@ -42,6 +43,11 @@ using namespace OpenRCT2::TrackMetadata;
 
 namespace OpenRCT2::TileInspector
 {
+    static void NotifySceneryTile(const CoordsXY& loc)
+    {
+        NotifyMapChanged(loc.x / kCoordsXYStep, loc.y / kCoordsXYStep);
+    }
+
     static GameActions::Result SwapTileElements(const CoordsXY& loc, int16_t first, int16_t second)
     {
         TileElement* const firstElement = MapGetNthElementAt(loc, first);
@@ -164,6 +170,7 @@ namespace OpenRCT2::TileInspector
             }
 
             TileElementRemove(tileElement);
+            NotifyMapChanged(loc.x / kCoordsXYStep, loc.y / kCoordsXYStep);
 
             if (IsTileSelected(loc))
             {
@@ -198,6 +205,7 @@ namespace OpenRCT2::TileInspector
                 else if (windowTileInspectorSelectedIndex == second)
                     windowTileInspectorSelectedIndex = first;
             }
+            NotifySceneryTile(loc);
         }
 
         return GameActions::Result();
@@ -277,6 +285,7 @@ namespace OpenRCT2::TileInspector
                 case TileElementType::largeScenery:
                     break;
             }
+            NotifySceneryTile(loc);
         }
 
         return GameActions::Result();
@@ -361,6 +370,7 @@ namespace OpenRCT2::TileInspector
                 else if (windowTileInspectorSelectedIndex >= newIndex)
                     windowTileInspectorSelectedIndex++;
             }
+            NotifySceneryTile(loc);
         }
 
         return GameActions::Result();
@@ -417,6 +427,7 @@ namespace OpenRCT2::TileInspector
                 // Deselect tile for clients who had it selected
                 windowTileInspectorSelectedIndex = -1;
             }
+            NotifySceneryTile(loc);
         }
 
         return GameActions::Result();
@@ -484,6 +495,7 @@ namespace OpenRCT2::TileInspector
 
             tileElement->baseHeight += heightOffset;
             tileElement->clearanceHeight += heightOffset;
+            NotifySceneryTile(loc);
         }
 
         return GameActions::Result();
@@ -908,6 +920,7 @@ namespace OpenRCT2::TileInspector
 
             // Update collision
             tileElement->setOccupiedQuadrants(1 << ((quarterIndex + 2) & 3));
+            NotifySceneryTile(loc);
         }
 
         return GameActions::Result();

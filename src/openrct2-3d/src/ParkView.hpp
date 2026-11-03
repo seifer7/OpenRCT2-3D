@@ -38,4 +38,19 @@ namespace OpenRCT2::View3D::Park
     // that object, and the original direction sprites otherwise. Returns false when the terrain
     // shaders are unavailable; the caller still clears the sky and draws the UI.
     bool draw(uint16_t backWidth, uint16_t backHeight);
+
+    // The pose lookAtMainView takes on the first frame: map centre, zoom 0, this back-buffer size.
+    // Does not submit the view. copyCamera is valid afterwards.
+    void poseDefaultCamera(uint16_t backWidth, uint16_t backHeight);
+
+    // Same matrices as the in-game view for a frame of this height and a zoom expressed as pixels per tile.
+    // The target is the origin. Restores the live camera when it returns.
+    void sceneryClipForFrame(
+        float frameHeight, float tilePixels, float aspect, float viewProj[16], float& eyeX, float& eyeY, float& eyeZ,
+        float& focusX, float& focusY);
+
+    // Eye position and the column-major view-projection from the last draw. False before the first frame.
+    bool copyCamera(float& eyeX, float& eyeY, float& eyeZ, float viewProj[16]);
+    // Ground point the camera is aimed at. False before the first frame.
+    bool copyViewFocus(float& focusX, float& focusY);
 } // namespace OpenRCT2::View3D::Park

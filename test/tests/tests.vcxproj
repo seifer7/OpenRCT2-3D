@@ -146,23 +146,26 @@
     </ClCompile>
     <ClCompile Include="..\..\src\openrct2-3d\src\MeshDraw.cpp">
       <TreatWarningAsError>false</TreatWarningAsError>
+      <AdditionalOptions>/Zc:__cplusplus /Zc:preprocessor %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\src;$(SolutionDir)src\openrct2-3d\third_party\cgltf;$(SolutionDir)src\openrct2-3d\third_party\bimg\3rdparty\stb;$(SolutionDir)src\openrct2-3d\third_party\bgfx\include;$(SolutionDir)src\openrct2-3d\third_party\bgfx\3rdparty;$(SolutionDir)src\openrct2-3d\third_party\bx\include;$(SolutionDir)src\openrct2-3d\third_party\bx\3rdparty;$(SolutionDir)src\openrct2-3d\third_party\bx\include\compat\msvc;$(SolutionDir)src\openrct2-3d\third_party\bimg\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;__STDC_CONSTANT_MACROS;BGFX_CONFIG_RENDERER_OPENGL=43;BGFX_CONFIG_MULTITHREADED=1;BGFX_CONFIG_VIDEO=0;BX_CONFIG_DEBUG=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\..\src\openrct2-3d\src\SceneryDraw.cpp">
       <TreatWarningAsError>false</TreatWarningAsError>
+      <AdditionalOptions>/Zc:__cplusplus /Zc:preprocessor %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\src;$(SolutionDir)src\openrct2-3d\third_party\bgfx\include;$(SolutionDir)src\openrct2-3d\third_party\bx\include;$(SolutionDir)src\openrct2-3d\third_party\bx\include\compat\msvc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;__STDC_CONSTANT_MACROS;BGFX_CONFIG_RENDERER_OPENGL=43;BGFX_CONFIG_MULTITHREADED=1;BGFX_CONFIG_VIDEO=0;BX_CONFIG_DEBUG=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\..\src\openrct2-3d\src\ParkView.cpp">
       <TreatWarningAsError>false</TreatWarningAsError>
+      <AdditionalOptions>/Zc:__cplusplus /Zc:preprocessor %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\src;$(SolutionDir)src\openrct2-3d\third_party\bgfx\include;$(SolutionDir)src\openrct2-3d\third_party\bx\include;$(SolutionDir)src\openrct2-3d\third_party\bx\include\compat\msvc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;__STDC_CONSTANT_MACROS;BGFX_CONFIG_RENDERER_OPENGL=43;BGFX_CONFIG_MULTITHREADED=1;BGFX_CONFIG_VIDEO=0;BX_CONFIG_DEBUG=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\..\src\openrct2-3d\third_party\bimg\src\image.cpp">
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
       <TreatWarningAsError>false</TreatWarningAsError>
-      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/Zc:__cplusplus /Zc:preprocessor /bigobj %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\third_party\bimg\include;$(SolutionDir)src\openrct2-3d\third_party\bimg\3rdparty;$(SolutionDir)src\openrct2-3d\third_party\bx\include;$(SolutionDir)src\openrct2-3d\third_party\bx\include\compat\msvc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>BX_CONFIG_DEBUG=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
@@ -170,7 +173,7 @@
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
       <TreatWarningAsError>false</TreatWarningAsError>
       <ObjectFileName>$(IntDir)bgfx_amalgamated_tests.obj</ObjectFileName>
-      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/Zc:__cplusplus /Zc:preprocessor /bigobj %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\third_party\bgfx\include;$(SolutionDir)src\openrct2-3d\third_party\bgfx\3rdparty;$(SolutionDir)src\openrct2-3d\third_party\bgfx\3rdparty\khronos;$(SolutionDir)src\openrct2-3d\third_party\bx\include;$(SolutionDir)src\openrct2-3d\third_party\bx\3rdparty;$(SolutionDir)src\openrct2-3d\third_party\bx\include\compat\msvc;$(SolutionDir)src\openrct2-3d\third_party\bimg\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;__STDC_CONSTANT_MACROS;BGFX_CONFIG_RENDERER_OPENGL=43;BGFX_CONFIG_MULTITHREADED=1;BGFX_CONFIG_VIDEO=0;BIMG_CONFIG_DECODE_ASTC=0;BX_CONFIG_DEBUG=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
@@ -179,7 +182,7 @@
       <TreatWarningAsError>false</TreatWarningAsError>
       <ObjectFileName>$(IntDir)bx_amalgamated_tests.obj</ObjectFileName>
       <ExceptionHandling>false</ExceptionHandling>
-      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/Zc:__cplusplus /Zc:preprocessor /bigobj %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\third_party\bx\include;$(SolutionDir)src\openrct2-3d\third_party\bx\3rdparty;$(SolutionDir)src\openrct2-3d\third_party\bx\include\compat\msvc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_HAS_EXCEPTIONS=0;BX_CONFIG_DEBUG=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>

@@ -63,6 +63,29 @@ namespace OpenRCT2::View3D
 
 namespace OpenRCT2::View3D::Park
 {
+    struct SceneryFrameStats
+    {
+        int32_t placements = 0;
+        int32_t modelInstances = 0;
+        int32_t spriteInstances = 0;
+        int32_t modelSubmits = 0;
+        int32_t spriteSubmits = 0;
+    };
+
+    // Pixels for a face when g1 has no element. The game leaves this null.
+    using ScenerySpriteOverride = bool (*)(int32_t& width, int32_t& height, const uint8_t*& rgba);
+    void setScenerySpriteOverride(ScenerySpriteOverride fn);
+
+    void resetSceneryFrameStats();
+    SceneryFrameStats sceneryFrameStats();
+    // The next draw rebuilds every chunk. Park load already does this when it is not headless.
+    void markAllSceneryDirty();
+
+    // Noop device so a test can run the real upload and submit path without a window.
+    bool initSceneryTestDevice(uint16_t width, uint16_t height);
+    void sceneryTestFrame();
+    void shutdownSceneryTestDevice();
+
     // Drops scenery meshes and sprite textures. Safe before bgfx::shutdown.
     void releaseScenery();
 

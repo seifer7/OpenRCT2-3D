@@ -87,6 +87,10 @@ The constants live in `src/openrct2-3d/src/SceneryScale.hpp`.
 | `kMaxGeometrySlabs` | 32 | 64 buffer handles. |
 | `kMaxAtlasPages` | 8 | Shared colour textures. |
 
+## Cull matrix
+
+`drawScenery` culls with the clip matrix from `commitView` in `ParkView.cpp`. bgfx builds that same matrix as projection × view when the view and projection are passed separately to `setViewTransform`. `bx::mtxMul(result, a, b)` stores b × a, so the call is `mtxMul(clip, view, projection)`. The other order rejects every chunk, which drops models and X-sprites together while the terrain pass still draws. `SceneryScale.DefaultCameraDrawsParkScenery` poses the default 1280×720 zoom-0 camera and requires both kinds of submission.
+
 ## Deferred
 
 KTX/BC, meshopt, LOD, impostors, skeletal animation, texture arrays, indirect draws, and instancing of guests and vehicles. The pipeline note still describes those. Per-frame entity lists are not built here. Freed atlas rects are reused as whole rectangles; neighbouring free space is not merged.

@@ -168,6 +168,9 @@ namespace OpenRCT2::View3D::Park
         }
         static_assert(worldZ(16) == kLandStepHeight);
 
+        void applyIsoPose(float targetX, float targetY, float targetZ, uint8_t rotation, float tilePixels);
+        void commitView(uint16_t backWidth, uint16_t backHeight, float view[16], float projection[16]);
+
         void seedFlyCamera()
         {
             float targetX = 0.0f;
@@ -205,6 +208,12 @@ namespace OpenRCT2::View3D::Park
                 targetY = static_cast<float>(size.y) * 0.5f;
             }
 
+            applyIsoPose(targetX, targetY, targetZ, rotation, tilePixels);
+        }
+
+        // Shared with the default in-game pose and the zoom-radius test. tilePixels is 64 at zoom 0.
+        void applyIsoPose(float targetX, float targetY, float targetZ, uint8_t rotation, float tilePixels)
+        {
             const float frameHeight = _frameHeight > 0 ? static_cast<float>(_frameHeight) : 720.0f;
             tilePixels = std::clamp(tilePixels, 4.0f, frameHeight);
             const float cotHalfFov = 1.0f / std::tan(bx::toRad(kFovDegrees * 0.5f));
@@ -1529,13 +1538,22 @@ namespace OpenRCT2::View3D::Park
             }
             applyHeldMovement();
 
+            float view[16];
+            float projection[16];
+            commitView(backWidth, backHeight, view, projection);
+            bgfx::setViewTransform(0, view, projection);
+        }
+
+        // CPU cull reads _viewProj. bgfx multiplies the view and projection passed to
+        // setViewTransform as projection * view. bx::mtxMul(result, a, b) stores b * a,
+        // so the arguments are view then projection.
+        void commitView(uint16_t backWidth, uint16_t backHeight, float view[16], float projection[16])
+        {
             float forwardX;
             float forwardY;
             float forwardZ;
             lookVector(forwardX, forwardY, forwardZ);
 
-            float view[16];
-            float projection[16];
             bx::mtxLookAt(
                 view, bx::Vec3(_fly.eyeX, _fly.eyeY, _fly.eyeZ),
                 bx::Vec3(_fly.eyeX + forwardX, _fly.eyeY + forwardY, _fly.eyeZ + forwardZ), bx::Vec3(0.0f, 0.0f, 1.0f));
@@ -1549,9 +1567,7 @@ namespace OpenRCT2::View3D::Park
             // bx::mtxProj converts this angle with toRad, so the value is degrees. Passing radians
             // collapses the field of view to under one degree and fills the window with one tile.
             bx::mtxProj(projection, kFovDegrees, aspect, 0.2f, 8000.0f, bgfx::getCaps()->homogeneousDepth);
-            // bx stores column-major matrices and mtxMul(result, a, b) is result = a * b.
-            // Clip is projection * view.
-            bx::mtxMul(_viewProj, projection, view);
+            bx::mtxMul(_viewProj, view, projection);
             _eyeX = _fly.eyeX;
             _eyeY = _fly.eyeY;
             _eyeZ = _fly.eyeZ;
@@ -1567,7 +1583,6 @@ namespace OpenRCT2::View3D::Park
                 }
             }
             _haveCamera = true;
-            bgfx::setViewTransform(0, view, projection);
         }
     } // namespace
 
@@ -1614,6 +1629,56 @@ namespace OpenRCT2::View3D::Park
         _resyncView = true;
         _fly.live = false;
         _fly.haveTick = false;
+    }
+
+    void poseDefaultCamera(uint16_t backWidth, uint16_t backHeight)
+    {
+        _frameHeight = backHeight;
+        _fly.live = false;
+        seedFlyCamera();
+        float view[16];
+        float projection[16];
+        commitView(backWidth, backHeight, view, projection);
+    }
+
+    void sceneryClipForFrame(
+        float frameHeight, float tilePixels, float aspect, float viewProj[16], float& eyeX, float& eyeY, float& eyeZ,
+        float& focusX, float& focusY)
+    {
+        const FlyCamera savedFly = _fly;
+        const uint16_t savedHeight = _frameHeight;
+        const bool savedHave = _haveCamera;
+        const float savedEyeX = _eyeX;
+        const float savedEyeY = _eyeY;
+        const float savedEyeZ = _eyeZ;
+        const float savedFocusX = _focusX;
+        const float savedFocusY = _focusY;
+        float savedViewProj[16];
+        std::memcpy(savedViewProj, _viewProj, sizeof(savedViewProj));
+
+        const float height = std::clamp(frameHeight, 1.0f, 65535.0f);
+        _frameHeight = static_cast<uint16_t>(height);
+        applyIsoPose(0.0f, 0.0f, worldZ(32), 0, tilePixels);
+        const auto width = static_cast<uint16_t>(std::clamp(aspect * height, 1.0f, 65535.0f));
+        float view[16];
+        float projection[16];
+        commitView(width, _frameHeight, view, projection);
+        std::memcpy(viewProj, _viewProj, sizeof(_viewProj));
+        eyeX = _eyeX;
+        eyeY = _eyeY;
+        eyeZ = _eyeZ;
+        focusX = _focusX;
+        focusY = _focusY;
+
+        _fly = savedFly;
+        _frameHeight = savedHeight;
+        _haveCamera = savedHave;
+        _eyeX = savedEyeX;
+        _eyeY = savedEyeY;
+        _eyeZ = savedEyeZ;
+        _focusX = savedFocusX;
+        _focusY = savedFocusY;
+        std::memcpy(_viewProj, savedViewProj, sizeof(_viewProj));
     }
 
     bool copyCamera(float& eyeX, float& eyeY, float& eyeZ, float viewProj[16])

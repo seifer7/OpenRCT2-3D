@@ -21,6 +21,7 @@
 #include "ViewerScale.hpp"
 
 #include <algorithm>
+#include <bgfx/bgfx.h>
 #include <cstdio>
 #include <cstring>
 #include <list>
@@ -141,6 +142,8 @@ namespace OpenRCT2::View3D::Park
         bool _dirtyAll = true;
         uint64_t _frame = 0;
         LruBudget _vram(kDefaultVramBudgetBytes);
+        SceneryFrameStats _stats;
+        ScenerySpriteOverride _spriteOverride = nullptr;
 
         void onMapChanged(int32_t tileX, int32_t tileY)
         {
@@ -347,10 +350,37 @@ namespace OpenRCT2::View3D::Park
                 return -1;
             }
             const G1Element* g1 = GfxGetG1Element(image);
-            if (g1 == nullptr || g1->width <= 0 || g1->height <= 0 || g1->width > kMaxSpriteEdge || g1->height > kMaxSpriteEdge)
+            int32_t overrideWidth = 0;
+            int32_t overrideHeight = 0;
+            const uint8_t* overrideRgba = nullptr;
+            const bool useOverride = (g1 == nullptr || g1->width <= 0 || g1->height <= 0 || g1->width > kMaxSpriteEdge
+                                      || g1->height > kMaxSpriteEdge)
+                && _spriteOverride != nullptr && _spriteOverride(overrideWidth, overrideHeight, overrideRgba)
+                && overrideRgba != nullptr && overrideWidth > 0 && overrideHeight > 0 && overrideWidth <= kMaxSpriteEdge
+                && overrideHeight <= kMaxSpriteEdge;
+            if (!useOverride
+                && (g1 == nullptr || g1->width <= 0 || g1->height <= 0 || g1->width > kMaxSpriteEdge
+                    || g1->height > kMaxSpriteEdge))
             {
                 _spriteHandles.emplace(key, -1);
                 return -1;
+            }
+            if (useOverride)
+            {
+                const SpriteQuad quad = makeDirectionSpriteQuad(face, overrideWidth, overrideHeight, 0, 0);
+                int32_t handle = meshDrawUploadSprite(quad, overrideRgba, overrideWidth, overrideHeight);
+                if (handle < 0 && evictSprite())
+                {
+                    handle = meshDrawUploadSprite(quad, overrideRgba, overrideWidth, overrideHeight);
+                }
+                if (handle < 0)
+                {
+                    return -1;
+                }
+                _spriteUploads++;
+                _spriteHandles.emplace(key, handle);
+                touchSprite(key);
+                return handle;
             }
             const int32_t width = g1->width;
             const int32_t height = g1->height;
@@ -921,9 +951,52 @@ namespace OpenRCT2::View3D::Park
         _spriteLruPos.clear();
         _vram = LruBudget(kDefaultVramBudgetBytes);
         _frame = 0;
+        _stats = {};
+        _spriteOverride = nullptr;
         std::lock_guard<std::mutex> guard(_dirtyMutex);
         _dirtyTiles.clear();
         _dirtyAll = true;
+    }
+
+    void setScenerySpriteOverride(ScenerySpriteOverride fn)
+    {
+        _spriteOverride = fn;
+    }
+
+    void resetSceneryFrameStats()
+    {
+        _stats = {};
+    }
+
+    SceneryFrameStats sceneryFrameStats()
+    {
+        return _stats;
+    }
+
+    void markAllSceneryDirty()
+    {
+        std::lock_guard<std::mutex> guard(_dirtyMutex);
+        _dirtyAll = true;
+        _dirtyTiles.clear();
+    }
+
+    bool initSceneryTestDevice(uint16_t width, uint16_t height)
+    {
+        bgfx::Init device;
+        device.type = bgfx::RendererType::Noop;
+        device.swapChain.width = width;
+        device.swapChain.height = height;
+        return bgfx::init(device);
+    }
+
+    void sceneryTestFrame()
+    {
+        bgfx::frame();
+    }
+
+    void shutdownSceneryTestDevice()
+    {
+        bgfx::shutdown();
     }
 
     void drawScenery()
@@ -955,6 +1028,19 @@ namespace OpenRCT2::View3D::Park
         FrameCull cull;
         readCamera(cull);
         syncChunks(cull.focusX, cull.focusY);
+        int32_t placements = 0;
+        for (int32_t y = 0; y < _grid.chunksY(); y++)
+        {
+            for (int32_t x = 0; x < _grid.chunksX(); x++)
+            {
+                const SceneryChunk* chunk = _grid.at(x, y);
+                if (chunk != nullptr && chunk->built)
+                {
+                    placements += static_cast<int32_t>(chunk->placements.size());
+                }
+            }
+        }
+        _stats.placements = placements;
         _pinned.clear();
         _loadKeys.clear();
         composeVisible(cull);
@@ -982,10 +1068,14 @@ namespace OpenRCT2::View3D::Park
             if (batch.model)
             {
                 meshDrawModel(batch.handle, batch.instances.data(), static_cast<uint32_t>(batch.instances.size()));
+                _stats.modelSubmits++;
+                _stats.modelInstances += static_cast<int32_t>(batch.instances.size());
             }
             else
             {
                 meshDrawSprite(batch.handle, batch.instances.data(), static_cast<uint32_t>(batch.instances.size()));
+                _stats.spriteSubmits++;
+                _stats.spriteInstances += static_cast<int32_t>(batch.instances.size());
             }
         }
     }

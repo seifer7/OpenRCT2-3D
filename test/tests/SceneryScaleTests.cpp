@@ -7,10 +7,13 @@
  * OpenRCT2 is licensed under the GNU General Public License version 3.
  *****************************************************************************/
 
+#include "TestData.h"
 #include "openrct2-3d/src/GlbMesh.hpp"
 #include "openrct2-3d/src/GpuBudget.hpp"
 #include "openrct2-3d/src/MeshDraw.hpp"
+#include "openrct2-3d/src/ModelCache.hpp"
 #include "openrct2-3d/src/ModelLoadQueue.hpp"
+#include "openrct2-3d/src/ParkView.hpp"
 #include "openrct2-3d/src/SceneryChunk.hpp"
 #include "openrct2-3d/src/SceneryDraw.hpp"
 #include "openrct2-3d/src/SceneryScale.hpp"
@@ -19,14 +22,29 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <gtest/gtest.h>
 #include <openrct2/Context.h>
+#include <openrct2/Game.h>
+#include <openrct2/GameState.h>
+#include <openrct2/OpenRCT2.h>
+#include <openrct2/actions/GameActionRunner.h>
+#include <openrct2/actions/scenery/SmallSceneryPlaceAction.h>
+#include <openrct2/core/Path.hpp>
+#include <openrct2/drawing/Drawing.h>
 #include <openrct2/drawing/FilterPaletteIds.h>
+#include <openrct2/object/Object.h>
+#include <openrct2/object/ObjectManager.h>
 #include <openrct2/world/Location.hpp>
+#include <openrct2/world/Map.h>
 #include <openrct2/world/Scenery.h>
+#include <openrct2/world/TileElementsView.h>
+#include <openrct2/world/tile_element/SmallSceneryElement.h>
 #include <string>
 #include <thread>
 #include <unordered_set>
+#include <vector>
 
 using namespace OpenRCT2::View3D;
 
@@ -435,70 +453,17 @@ TEST(SceneryScale, FootprintKeepsCornerAndEdge)
 
 namespace
 {
-    void mulClip(float out[16], const float proj[16], const float view[16])
-    {
-        for (int32_t col = 0; col < 4; col++)
-        {
-            for (int32_t row = 0; row < 4; row++)
-            {
-                float sum = 0.0f;
-                for (int32_t k = 0; k < 4; k++)
-                {
-                    sum += proj[row + k * 4] * view[k + col * 4];
-                }
-                out[row + col * 4] = sum;
-            }
-        }
-    }
-
-    // Same pose as the 3D view: 50° vertical fov, 30° down, eye distance from the frame height and tile size.
+    // ParkView::commitView, including bx::mtxMul's argument order.
     float zoomRadius(float frameHeight, float tilePixels, float aspect)
     {
-        const float cotHalf = 1.0f / std::tan(50.0f * 0.5f * 3.14159265f / 180.0f);
-        const float distance = cotHalf * 1.41421356f * frameHeight / (2.0f * tilePixels) * 0.8f;
-        const float pitch = 0.52359878f;
-        const float eyeY = -distance * std::cos(pitch);
-        const float eyeZ = distance * std::sin(pitch);
-        const float fx = 0.0f;
-        const float fy = -eyeY;
-        const float fz = -eyeZ;
-        const float fl = std::sqrt(fx * fx + fy * fy + fz * fz);
-        const float fwx = fx / fl;
-        const float fwy = fy / fl;
-        const float fwz = fz / fl;
-        const float rx = fwy;
-        const float ry = -fwx;
-        const float rl = std::sqrt(rx * rx + ry * ry);
-        const float rnx = rx / rl;
-        const float rny = ry / rl;
-        const float ux = rny * fwz;
-        const float uy = -rnx * fwz;
-        const float uz = rnx * fwy - rny * fwx;
-        float view[16] = {};
-        view[0] = rnx;
-        view[4] = rny;
-        view[12] = -(rnx * 0.0f + rny * eyeY);
-        view[1] = ux;
-        view[5] = uy;
-        view[9] = uz;
-        view[13] = -(uy * eyeY + uz * eyeZ);
-        view[2] = -fwx;
-        view[6] = -fwy;
-        view[10] = -fwz;
-        view[14] = fwy * eyeY + fwz * eyeZ;
-        view[15] = 1.0f;
-        const float f = cotHalf;
-        const float n = 0.2f;
-        const float farPlane = 8000.0f;
-        float proj[16] = {};
-        proj[0] = f / aspect;
-        proj[5] = f;
-        proj[10] = (farPlane + n) / (n - farPlane);
-        proj[11] = -1.0f;
-        proj[14] = (2.0f * farPlane * n) / (n - farPlane);
         float clip[16];
-        mulClip(clip, proj, view);
-        return groundFootprintRadius(clip, 0.0f, eyeY, 0.0f, 0.0f);
+        float eyeX = 0.0f;
+        float eyeY = 0.0f;
+        float eyeZ = 0.0f;
+        float focusX = 0.0f;
+        float focusY = 0.0f;
+        Park::sceneryClipForFrame(frameHeight, tilePixels, aspect, clip, eyeX, eyeY, eyeZ, focusX, focusY);
+        return groundFootprintRadius(clip, eyeX, eyeY, focusX, focusY);
     }
 } // namespace
 
@@ -514,6 +479,25 @@ TEST(SceneryScale, ZoomedOutRadiusStaysBounded)
     EXPECT_LT(hdZoom3, 220.0f);
     EXPECT_GT(uhdZoom3, 270.0f);
     EXPECT_LT(uhdZoom3, 500.0f);
+
+    float clip[16];
+    float eyeX = 0.0f;
+    float eyeY = 0.0f;
+    float eyeZ = 0.0f;
+    float focusX = 0.0f;
+    float focusY = 0.0f;
+    Park::sceneryClipForFrame(1080.0f, 8.0f, aspect, clip, eyeX, eyeY, eyeZ, focusX, focusY);
+    const float radius = groundFootprintRadius(clip, eyeX, eyeY, focusX, focusY);
+    float planes[6][4];
+    extractFrustumPlanes(clip, planes);
+    ChunkBox here;
+    here.minX = focusX - 8.0f;
+    here.maxX = focusX + 8.0f;
+    here.minY = focusY - 8.0f;
+    here.maxY = focusY + 8.0f;
+    here.maxZ = 4.0f;
+    EXPECT_FALSE(boxOutsideGroundDistance(here, focusX, focusY, radius));
+    EXPECT_FALSE(boxOutsideFrustum(here, planes)) << radius;
 }
 
 TEST(SceneryScale, TenThousandModelsCycleThroughTheArena)
@@ -662,4 +646,176 @@ TEST(SceneryScale, LoaderStopsAndDoesNotResurrectForgottenWork)
         EXPECT_FALSE(queue.takeReady(taken).has_value());
     }
     EXPECT_EQ(started.load(), 1);
+}
+
+namespace
+{
+    bool solidSprite(int32_t& width, int32_t& height, const uint8_t*& rgba)
+    {
+        static const uint8_t kPixels[16] = { 255, 32, 32, 255, 255, 32, 32, 255, 255, 32, 32, 255, 255, 32, 32, 255 };
+        width = 2;
+        height = 2;
+        rgba = kPixels;
+        return true;
+    }
+
+    void pumpScenery(int32_t frames)
+    {
+        for (int32_t frame = 0; frame < frames; frame++)
+        {
+            Park::drawScenery();
+            Park::sceneryTestFrame();
+        }
+    }
+
+    void writeSceneryObject(const std::filesystem::path& path, const std::string& id)
+    {
+        std::ofstream out(path);
+        out << "{\n"
+            << "  \"id\": \"" << id << "\",\n"
+            << "  \"authors\": [\"OpenRCT2 3D test\"],\n"
+            << "  \"version\": \"1.0\",\n"
+            << "  \"sourceGame\": \"custom\",\n"
+            << "  \"objectType\": \"scenery_small\",\n"
+            << "  \"properties\": {\n"
+            << "    \"height\": 32,\n"
+            << "    \"price\": 10,\n"
+            << "    \"removalPrice\": 10,\n"
+            << "    \"cursor\": \"treeDown\",\n"
+            << "    \"isTree\": true,\n"
+            << "    \"shape\": \"4/4\"\n"
+            << "  }\n"
+            << "}\n";
+    }
+
+    void placeScenery(OpenRCT2::IObjectManager& objects, std::string_view id, const CoordsXYZD& loc)
+    {
+        OpenRCT2::Object* object = objects.LoadObject(id);
+        if (object == nullptr)
+        {
+            ADD_FAILURE() << id;
+            return;
+        }
+        const OpenRCT2::ObjectEntryIndex index = objects.GetLoadedObjectEntryIndex(object);
+        OpenRCT2::GameActions::SmallSceneryPlaceAction action(
+            loc, 0, index, OpenRCT2::Drawing::Colour::brightGreen, OpenRCT2::Drawing::Colour::brightGreen,
+            OpenRCT2::Drawing::Colour::brightGreen);
+        // Execute queues the action until the game update. Nested runs it now.
+        const auto result = OpenRCT2::GameActions::ExecuteNested(&action, OpenRCT2::getGameState());
+        if (result.error != OpenRCT2::GameActions::Status::ok)
+        {
+            ADD_FAILURE() << id << " place failed " << static_cast<int>(result.error);
+        }
+    }
+} // namespace
+
+TEST(SceneryScale, DefaultCameraDrawsParkScenery)
+{
+    // View3D's back buffer starts at 1280x720. With no viewport, zoom 0 is 64 px per tile.
+    constexpr uint16_t kBackWidth = 1280;
+    constexpr uint16_t kBackHeight = 720;
+    const std::string modelId = "rct2.scenery_small.tcrp";
+    const std::string spriteId = "test.scenery_small.bush";
+
+    const std::filesystem::path dataRoot = std::filesystem::temp_directory_path() / "o3d-default-camera-data";
+    const std::filesystem::path source = std::filesystem::temp_directory_path() / "o3d-default-camera-src";
+    const std::filesystem::path cache = std::filesystem::temp_directory_path() / "o3d-default-camera-cache";
+    std::filesystem::remove_all(dataRoot);
+    std::filesystem::remove_all(source);
+    std::filesystem::remove_all(cache);
+    std::filesystem::create_directories(dataRoot / "object");
+    std::filesystem::create_directories(source);
+    std::filesystem::create_directories(cache);
+    std::filesystem::path language = std::filesystem::absolute("../data/language");
+    if (!std::filesystem::exists(language))
+    {
+        language = std::filesystem::absolute("data/language");
+    }
+    std::filesystem::create_directory_symlink(language, dataRoot / "language");
+    writeSceneryObject(dataRoot / "object" / (modelId + ".json"), modelId);
+    writeSceneryObject(dataRoot / "object" / (spriteId + ".json"), spriteId);
+
+    gOpenRCT2Headless = true;
+    gOpenRCT2NoGraphics = true;
+    gCustomOpenRCT2DataPath = dataRoot.string();
+    auto context = OpenRCT2::CreateContext();
+    ASSERT_NE(context, nullptr);
+    ASSERT_TRUE(context->Initialise());
+    OpenRCT2::gameStateInitAll(OpenRCT2::getGameState(), TileCoordsXY{ 32, 32 });
+    OpenRCT2::getGameState().cheats.sandboxMode = true;
+    OpenRCT2::getGameState().cheats.disableClearanceChecks = true;
+    // Centre tiles. The default camera, with no viewport, looks at the middle of the map.
+    placeScenery(context->GetObjectManager(), modelId, CoordsXYZD{ 16 * 32, 16 * 32, 0, 0 });
+    placeScenery(context->GetObjectManager(), spriteId, CoordsXYZD{ 17 * 32, 16 * 32, 0, 0 });
+    // GfxGetG1Element asserts while this is set. These objects have no g1, so the lookup misses
+    // and the override supplies the X-sprite pixels.
+    gOpenRCT2NoGraphics = false;
+
+    const std::filesystem::path glb = std::filesystem::path(TestData::GetBasePath()) / "object-models"
+        / "rct2.scenery_small.tcrp.glb";
+    std::filesystem::copy_file(glb, source / (modelId + ".glb"));
+    const ModelCacheStats prepared = prepareModelCache({ source.string() }, cache.string(), nullptr);
+    EXPECT_EQ(prepared.converted + prepared.skipped, 1);
+    EXPECT_TRUE(modelIsValidated(modelId));
+    EXPECT_FALSE(modelIsValidated(spriteId));
+
+    ASSERT_TRUE(Park::initSceneryTestDevice(kBackWidth, kBackHeight));
+    Park::releaseScenery();
+    Park::setScenerySpriteOverride(&solidSprite);
+    Park::resetSceneryFrameStats();
+    Park::poseDefaultCamera(kBackWidth, kBackHeight);
+
+    float eyeX = 0.0f;
+    float eyeY = 0.0f;
+    float eyeZ = 0.0f;
+    float clip[16];
+    ASSERT_TRUE(Park::copyCamera(eyeX, eyeY, eyeZ, clip));
+    float focusX = 0.0f;
+    float focusY = 0.0f;
+    ASSERT_TRUE(Park::copyViewFocus(focusX, focusY));
+    const float radius = groundFootprintRadius(clip, eyeX, eyeY, focusX, focusY);
+    float planes[6][4];
+    extractFrustumPlanes(clip, planes);
+    ChunkBox focusChunk;
+    focusChunk.minX = focusX - 8.0f;
+    focusChunk.maxX = focusX + 8.0f;
+    focusChunk.minY = focusY - 8.0f;
+    focusChunk.maxY = focusY + 8.0f;
+    focusChunk.maxZ = 4.0f;
+    EXPECT_GT(radius, 16.0f);
+    EXPECT_FALSE(boxOutsideGroundDistance(focusChunk, focusX, focusY, radius));
+    EXPECT_FALSE(boxOutsideFrustum(focusChunk, planes)) << radius;
+
+    int32_t sceneryTiles = 0;
+    const TileCoordsXY mapSize = OpenRCT2::getGameState().mapSize;
+    for (int32_t y = 0; y < mapSize.y; y++)
+    {
+        for (int32_t x = 0; x < mapSize.x; x++)
+        {
+            for (const OpenRCT2::SmallSceneryElement* element :
+                 OpenRCT2::TileElementsView<OpenRCT2::SmallSceneryElement>(TileCoordsXY{ x, y }))
+            {
+                if (element != nullptr)
+                {
+                    sceneryTiles++;
+                }
+            }
+        }
+    }
+    EXPECT_GT(sceneryTiles, 0) << mapSize.x << "x" << mapSize.y;
+
+    pumpScenery(48);
+    const Park::SceneryFrameStats drawn = Park::sceneryFrameStats();
+    EXPECT_GT(drawn.placements, 0);
+    EXPECT_GT(drawn.modelInstances, 0);
+    EXPECT_GT(drawn.modelSubmits, 0);
+    EXPECT_GT(drawn.spriteInstances, 0);
+    EXPECT_GT(drawn.spriteSubmits, 0);
+
+    Park::setScenerySpriteOverride(nullptr);
+    Park::releaseScenery();
+    Park::shutdownSceneryTestDevice();
+    std::filesystem::remove_all(dataRoot);
+    std::filesystem::remove_all(source);
+    std::filesystem::remove_all(cache);
 }

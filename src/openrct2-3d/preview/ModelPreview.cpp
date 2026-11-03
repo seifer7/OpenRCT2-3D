@@ -230,7 +230,8 @@ namespace
         }
         primitive.indices = { 0, 1, 2, 0, 2, 3 };
         mesh.primitives.push_back(std::move(primitive));
-        return OpenRCT2::View3D::meshDrawUploadModel(mesh);
+        const OpenRCT2::View3D::MeshUpload uploaded = OpenRCT2::View3D::meshDrawUploadModel(mesh);
+        return uploaded.status == OpenRCT2::View3D::MeshUploadStatus::ready ? uploaded.id : -1;
     }
 } // namespace
 
@@ -272,7 +273,8 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    const int32_t model = OpenRCT2::View3D::meshDrawUploadModel(*mesh);
+    const OpenRCT2::View3D::MeshUpload uploaded = OpenRCT2::View3D::meshDrawUploadModel(*mesh);
+    const int32_t model = uploaded.status == OpenRCT2::View3D::MeshUploadStatus::ready ? uploaded.id : -1;
     const int32_t ground = makeGround();
     int32_t sprites[4] = { -1, -1, -1, -1 };
     const uint8_t colours[4][3] = {

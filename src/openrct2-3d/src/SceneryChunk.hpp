@@ -93,9 +93,9 @@ namespace OpenRCT2::View3D
     bool boxOutsideDistance(const ChunkBox& box, float eyeX, float eyeY, float eyeZ, float maxDistanceTiles);
     // Horizontal distance from the view focus. The eye's height is not part of it.
     bool boxOutsideGroundDistance(const ChunkBox& box, float focusX, float focusY, float maxDistanceTiles);
-    // Distance from the focus to the farthest of the four screen corners on z = 0,
-    // plus a margin. Falls back to the configured view distance if the clip has no ground hit.
-    float groundFootprintRadius(const float clip[16], float focusX, float focusY);
+    // Near screen corners and the width at the focus, on z = 0. The top corners are
+    // capped at the eye-to-focus distance: they meet the ground a few degrees under the horizon.
+    float groundFootprintRadius(const float clip[16], float eyeX, float eyeY, float focusX, float focusY);
     float sceneryCullRadius(float eyeX, float eyeY, float focusX, float focusY);
 
     // Builds `count` placements across a square of chunks and returns how many survive a cull.

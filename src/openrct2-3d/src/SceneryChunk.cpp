@@ -187,22 +187,31 @@ namespace OpenRCT2::View3D
         return clipW > 0.0f;
     }
 
-    float groundFootprintRadius(const float clip[16], float focusX, float focusY)
+    float groundFootprintRadius(const float clip[16], float eyeX, float eyeY, float focusX, float focusY)
     {
-        const float corners[4][2] = { { -1.0f, -1.0f }, { 1.0f, -1.0f }, { 1.0f, 1.0f }, { -1.0f, 1.0f } };
+        // Bottom corners and the left/right edge through the focus. Top corners are the far side.
+        const float samples[6][2] = {
+            { -1.0f, -1.0f }, { 1.0f, -1.0f }, { -1.0f, 0.0f }, { 1.0f, 0.0f }, { -1.0f, 1.0f }, { 1.0f, 1.0f },
+        };
+        const float farCap = sceneryCullRadius(eyeX, eyeY, focusX, focusY);
         float farthest = 0.0f;
         int32_t hits = 0;
-        for (const float* corner : corners)
+        for (const float* sample : samples)
         {
             float x = 0.0f;
             float y = 0.0f;
-            if (!groundCorner(clip, corner[0], corner[1], x, y))
+            if (!groundCorner(clip, sample[0], sample[1], x, y))
             {
                 continue;
             }
             const float dx = x - focusX;
             const float dy = y - focusY;
-            farthest = std::max(farthest, std::sqrt(dx * dx + dy * dy));
+            float distance = std::sqrt(dx * dx + dy * dy);
+            if (sample[1] > 0.5f)
+            {
+                distance = std::min(distance, farCap);
+            }
+            farthest = std::max(farthest, distance);
             hits++;
         }
         if (hits == 0)

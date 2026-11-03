@@ -400,7 +400,7 @@ TEST(SceneryScale, FootprintKeepsCornerAndEdge)
     clip[0] = 1.0f;
     clip[5] = 1.0f;
     clip[15] = 136.0f;
-    const float radius = groundFootprintRadius(clip, 0.0f, 0.0f);
+    const float radius = groundFootprintRadius(clip, 0.0f, -1000.0f, 0.0f, 0.0f);
     EXPECT_GT(radius, 136.0f * std::sqrt(2.0f));
 
     ChunkBox centre;
@@ -431,6 +431,89 @@ TEST(SceneryScale, FootprintKeepsCornerAndEdge)
     beyond.minY = 400.0f;
     beyond.maxY = 416.0f;
     EXPECT_TRUE(boxOutsideGroundDistance(beyond, 0.0f, 0.0f, radius));
+}
+
+namespace
+{
+    void mulClip(float out[16], const float proj[16], const float view[16])
+    {
+        for (int32_t col = 0; col < 4; col++)
+        {
+            for (int32_t row = 0; row < 4; row++)
+            {
+                float sum = 0.0f;
+                for (int32_t k = 0; k < 4; k++)
+                {
+                    sum += proj[row + k * 4] * view[k + col * 4];
+                }
+                out[row + col * 4] = sum;
+            }
+        }
+    }
+
+    // Same pose as the 3D view: 50° vertical fov, 30° down, eye distance from the frame height and tile size.
+    float zoomRadius(float frameHeight, float tilePixels, float aspect)
+    {
+        const float cotHalf = 1.0f / std::tan(50.0f * 0.5f * 3.14159265f / 180.0f);
+        const float distance = cotHalf * 1.41421356f * frameHeight / (2.0f * tilePixels) * 0.8f;
+        const float pitch = 0.52359878f;
+        const float eyeY = -distance * std::cos(pitch);
+        const float eyeZ = distance * std::sin(pitch);
+        const float fx = 0.0f;
+        const float fy = -eyeY;
+        const float fz = -eyeZ;
+        const float fl = std::sqrt(fx * fx + fy * fy + fz * fz);
+        const float fwx = fx / fl;
+        const float fwy = fy / fl;
+        const float fwz = fz / fl;
+        const float rx = fwy;
+        const float ry = -fwx;
+        const float rl = std::sqrt(rx * rx + ry * ry);
+        const float rnx = rx / rl;
+        const float rny = ry / rl;
+        const float ux = rny * fwz;
+        const float uy = -rnx * fwz;
+        const float uz = rnx * fwy - rny * fwx;
+        float view[16] = {};
+        view[0] = rnx;
+        view[4] = rny;
+        view[12] = -(rnx * 0.0f + rny * eyeY);
+        view[1] = ux;
+        view[5] = uy;
+        view[9] = uz;
+        view[13] = -(uy * eyeY + uz * eyeZ);
+        view[2] = -fwx;
+        view[6] = -fwy;
+        view[10] = -fwz;
+        view[14] = fwy * eyeY + fwz * eyeZ;
+        view[15] = 1.0f;
+        const float f = cotHalf;
+        const float n = 0.2f;
+        const float farPlane = 8000.0f;
+        float proj[16] = {};
+        proj[0] = f / aspect;
+        proj[5] = f;
+        proj[10] = (farPlane + n) / (n - farPlane);
+        proj[11] = -1.0f;
+        proj[14] = (2.0f * farPlane * n) / (n - farPlane);
+        float clip[16];
+        mulClip(clip, proj, view);
+        return groundFootprintRadius(clip, 0.0f, eyeY, 0.0f, 0.0f);
+    }
+} // namespace
+
+TEST(SceneryScale, ZoomedOutRadiusStaysBounded)
+{
+    const float aspect = 16.0f / 9.0f;
+    const float hdZoom2 = zoomRadius(1080.0f, 16.0f, aspect);
+    const float hdZoom3 = zoomRadius(1080.0f, 8.0f, aspect);
+    const float uhdZoom3 = zoomRadius(2160.0f, 8.0f, aspect);
+    EXPECT_GT(hdZoom2, 68.0f);
+    EXPECT_LT(hdZoom2, 120.0f);
+    EXPECT_GT(hdZoom3, 136.0f);
+    EXPECT_LT(hdZoom3, 220.0f);
+    EXPECT_GT(uhdZoom3, 270.0f);
+    EXPECT_LT(uhdZoom3, 500.0f);
 }
 
 TEST(SceneryScale, TenThousandModelsCycleThroughTheArena)

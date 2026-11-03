@@ -507,7 +507,7 @@ namespace OpenRCT2::View3D::Park
             if (cull.haveCamera)
             {
                 extractFrustumPlanes(viewProj, cull.planes);
-                cull.radius = groundFootprintRadius(viewProj, cull.focusX, cull.focusY);
+                cull.radius = groundFootprintRadius(viewProj, cull.eyeX, cull.eyeY, cull.focusX, cull.focusY);
             }
         }
 
@@ -706,6 +706,8 @@ namespace OpenRCT2::View3D::Park
                 }
                 notePermanent(typeKeyFor(*failed), *failed);
             }
+            uint32_t uploaded = 0;
+            uint32_t bytes = 0;
             {
                 std::vector<uint32_t> keys;
                 keys.reserve(_held.size());
@@ -715,6 +717,10 @@ namespace OpenRCT2::View3D::Park
                 }
                 for (uint32_t key : keys)
                 {
+                    if (uploaded >= kUploadsPerFrame || bytes >= kUploadBytesPerFrame)
+                    {
+                        break;
+                    }
                     if (_pinned.find(key) == _pinned.end())
                     {
                         _held.erase(key);
@@ -741,12 +747,13 @@ namespace OpenRCT2::View3D::Park
                     CpuMesh mesh = std::move(held->second);
                     _held.erase(held);
                     const std::string identifier = key < _typeIds.size() ? _typeIds[key] : std::string();
+                    const uint32_t meshBytes = meshBytesOf(mesh);
                     uploadOne(key, identifier, std::move(mesh), true);
+                    uploaded++;
+                    bytes += meshBytes;
                 }
                 _spaceFreed = false;
             }
-            uint32_t uploaded = 0;
-            uint32_t bytes = 0;
             while (uploaded < kUploadsPerFrame && bytes < kUploadBytesPerFrame)
             {
                 std::string identifier;

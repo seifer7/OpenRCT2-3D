@@ -9,6 +9,7 @@
 
 #include "TileInspector.h"
 
+#include "../Context.h"
 #include "../Diagnostic.h"
 #include "../actions/GameAction.hpp"
 #include "../core/Guard.hpp"
@@ -164,6 +165,7 @@ namespace OpenRCT2::TileInspector
             }
 
             TileElementRemove(tileElement);
+            NotifyMapChanged(loc.x / kCoordsXYStep, loc.y / kCoordsXYStep);
 
             if (IsTileSelected(loc))
             {

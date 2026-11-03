@@ -10,6 +10,7 @@
 #include "Scenery.h"
 
 #include "../Cheats.h"
+#include "../Context.h"
 #include "../GameState.h"
 #include "../OpenRCT2.h"
 #include "../actions/GameActionRunner.h"
@@ -219,6 +220,7 @@ void SmallSceneryElement::updateAge(const CoordsXY& sceneryPos)
     // Reset age / water plant
     setAge(0);
     MapInvalidateTileZoom1({ sceneryPos, getBaseZ(), getClearanceZ() });
+    NotifyMapChanged(sceneryPos.x / kCoordsXYStep, sceneryPos.y / kCoordsXYStep);
 }
 
 /**

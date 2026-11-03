@@ -124,7 +124,9 @@ namespace OpenRCT2::View3D
         std::vector<bgfx::TextureHandle> _atlasPages;
         bgfx::TextureHandle _white = BGFX_INVALID_HANDLE;
         std::vector<DrawModel> _models;
+        std::vector<int32_t> _freeModelIds;
         std::vector<DrawPrimitive> _sprites;
+        std::vector<int32_t> _freeSpriteIds;
         uint32_t _ownedTextures = 0;
         bool _ready = false;
 
@@ -446,10 +448,12 @@ namespace OpenRCT2::View3D
             }
         }
         _models.clear();
+        _freeModelIds.clear();
         for (DrawPrimitive& sprite : _sprites)
         {
             destroyPrimitive(sprite);
         }
+        _freeSpriteIds.clear();
         _sprites.clear();
         if (bgfx::isValid(_white))
         {
@@ -513,6 +517,7 @@ namespace OpenRCT2::View3D
             destroyPrimitive(primitive);
         }
         _models[static_cast<size_t>(id)].primitives.clear();
+        _freeModelIds.push_back(id);
     }
 
     void meshDrawClearSprites()
@@ -522,22 +527,33 @@ namespace OpenRCT2::View3D
             destroyPrimitive(sprite);
         }
         _sprites.clear();
+        _freeSpriteIds.clear();
     }
 
-    int32_t meshDrawUploadModel(const CpuMesh& mesh)
+    void meshDrawReleaseSprite(int32_t id)
+    {
+        if (id < 0 || static_cast<size_t>(id) >= _sprites.size())
+        {
+            return;
+        }
+        destroyPrimitive(_sprites[static_cast<size_t>(id)]);
+        _freeSpriteIds.push_back(id);
+    }
+
+    MeshUpload meshDrawUploadModel(const CpuMesh& mesh)
     {
         if (!meshDrawInit() || !bgfx::isValid(_program))
         {
-            return -1;
+            return { MeshUploadStatus::capacity, -1 };
         }
         DrawModel model;
-        auto abandon = [&]() {
+        auto abandon = [&](MeshUploadStatus status = MeshUploadStatus::capacity) {
             for (DrawPrimitive& primitive : model.primitives)
             {
                 destroyPrimitive(primitive);
             }
             model.primitives.clear();
-            return -1;
+            return MeshUpload{ status, -1 };
         };
         for (const MeshPrimitive& primitive : mesh.primitives)
         {
@@ -555,14 +571,14 @@ namespace OpenRCT2::View3D
             {
                 if (static_cast<size_t>(primitive.image) >= mesh.images.size())
                 {
-                    return abandon();
+                    return abandon(MeshUploadStatus::rejected);
                 }
                 const MeshImage& image = mesh.images[static_cast<size_t>(primitive.image)];
                 const bool rgbaReady = !image.rgba.empty() && image.width > 0 && image.height > 0
                     && image.rgba.size() >= static_cast<size_t>(image.width) * static_cast<size_t>(image.height) * 4u;
                 if (!rgbaReady)
                 {
-                    return abandon();
+                    return abandon(MeshUploadStatus::rejected);
                 }
                 clampUv = image.clamp;
                 const uint32_t padded = kAtlasGutter * 2u;
@@ -648,10 +664,21 @@ namespace OpenRCT2::View3D
         }
         if (model.primitives.empty())
         {
-            return -1;
+            return { MeshUploadStatus::rejected, -1 };
         }
-        _models.push_back(std::move(model));
-        return static_cast<int32_t>(_models.size() - 1);
+        int32_t id = 0;
+        if (!_freeModelIds.empty())
+        {
+            id = _freeModelIds.back();
+            _freeModelIds.pop_back();
+            _models[static_cast<size_t>(id)] = std::move(model);
+        }
+        else
+        {
+            _models.push_back(std::move(model));
+            id = static_cast<int32_t>(_models.size() - 1);
+        }
+        return { MeshUploadStatus::ready, id };
     }
 
     int32_t meshDrawUploadSprite(const SpriteQuad& quad, const uint8_t* rgba, int32_t width, int32_t height)
@@ -742,6 +769,13 @@ namespace OpenRCT2::View3D
         gpu.uvScaleY = uvScaleY;
         gpu.uvOffX = uvOffX;
         gpu.uvOffY = uvOffY;
+        if (!_freeSpriteIds.empty())
+        {
+            const int32_t id = _freeSpriteIds.back();
+            _freeSpriteIds.pop_back();
+            _sprites[static_cast<size_t>(id)] = gpu;
+            return id;
+        }
         _sprites.push_back(gpu);
         return static_cast<int32_t>(_sprites.size() - 1);
     }

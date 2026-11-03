@@ -11,6 +11,8 @@
 
 #include <condition_variable>
 #include <deque>
+#include <iterator>
+#include <list>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -23,6 +25,8 @@ namespace OpenRCT2::View3D
         ModelLoadPhase phase = ModelLoadPhase::absent;
         std::optional<CpuMesh> mesh;
         std::string error;
+        bool inReady = false;
+        std::list<std::string>::iterator readyIt;
     };
 
     struct ModelLoadQueue::State
@@ -31,7 +35,8 @@ namespace OpenRCT2::View3D
         std::condition_variable wake;
         std::unordered_map<std::string, Slot> slots;
         std::deque<std::string> queue;
-        std::deque<std::string> ready;
+        std::list<std::string> ready;
+        std::deque<std::string> failed;
         bool stop = false;
         std::thread worker;
     };
@@ -65,7 +70,7 @@ namespace OpenRCT2::View3D
         std::lock_guard<std::mutex> guard(_state->mutex);
         Slot& slot = _state->slots[identifier];
         if (slot.phase == ModelLoadPhase::queued || slot.phase == ModelLoadPhase::loading || slot.phase == ModelLoadPhase::ready
-            || slot.phase == ModelLoadPhase::delivered)
+            || slot.phase == ModelLoadPhase::delivered || slot.phase == ModelLoadPhase::failed)
         {
             return;
         }
@@ -84,7 +89,8 @@ namespace OpenRCT2::View3D
         {
             Slot& slot = _state->slots[identifier];
             if (slot.phase == ModelLoadPhase::queued || slot.phase == ModelLoadPhase::loading
-                || slot.phase == ModelLoadPhase::ready || slot.phase == ModelLoadPhase::delivered)
+                || slot.phase == ModelLoadPhase::ready || slot.phase == ModelLoadPhase::delivered
+                || slot.phase == ModelLoadPhase::failed)
             {
                 continue;
             }
@@ -97,21 +103,6 @@ namespace OpenRCT2::View3D
         if (added)
         {
             _state->wake.notify_one();
-        }
-    }
-
-    static void dropReady(std::deque<std::string>& ready, const std::string& identifier)
-    {
-        for (auto it = ready.begin(); it != ready.end();)
-        {
-            if (*it == identifier)
-            {
-                it = ready.erase(it);
-            }
-            else
-            {
-                ++it;
-            }
         }
     }
 
@@ -138,8 +129,26 @@ namespace OpenRCT2::View3D
             {
                 continue;
             }
+            found->second.inReady = false;
             found->second.phase = ModelLoadPhase::delivered;
             return std::move(found->second.mesh);
+        }
+        return std::nullopt;
+    }
+
+    std::optional<std::string> ModelLoadQueue::takeFailed()
+    {
+        std::lock_guard<std::mutex> guard(_state->mutex);
+        while (!_state->failed.empty())
+        {
+            const std::string identifier = _state->failed.front();
+            _state->failed.pop_front();
+            const auto found = _state->slots.find(identifier);
+            if (found == _state->slots.end() || found->second.phase != ModelLoadPhase::failed)
+            {
+                continue;
+            }
+            return identifier;
         }
         return std::nullopt;
     }
@@ -147,8 +156,23 @@ namespace OpenRCT2::View3D
     void ModelLoadQueue::forget(const std::string& identifier)
     {
         std::lock_guard<std::mutex> guard(_state->mutex);
-        dropReady(_state->ready, identifier);
-        _state->slots.erase(identifier);
+        const auto found = _state->slots.find(identifier);
+        if (found == _state->slots.end())
+        {
+            return;
+        }
+        if (found->second.inReady)
+        {
+            _state->ready.erase(found->second.readyIt);
+        }
+        _state->slots.erase(found);
+    }
+
+    void ModelLoadQueue::requestStop()
+    {
+        std::lock_guard<std::mutex> guard(_state->mutex);
+        _state->stop = true;
+        _state->wake.notify_all();
     }
 
     void ModelLoadQueue::pump()
@@ -189,11 +213,14 @@ namespace OpenRCT2::View3D
             found->second.mesh = std::move(mesh);
             found->second.phase = ModelLoadPhase::ready;
             _state->ready.push_back(identifier);
+            found->second.readyIt = std::prev(_state->ready.end());
+            found->second.inReady = true;
         }
         else
         {
             found->second.error = error;
             found->second.phase = ModelLoadPhase::failed;
+            _state->failed.push_back(identifier);
         }
     }
 
@@ -239,11 +266,14 @@ namespace OpenRCT2::View3D
                 found->second.mesh = std::move(mesh);
                 found->second.phase = ModelLoadPhase::ready;
                 _state->ready.push_back(identifier);
+                found->second.readyIt = std::prev(_state->ready.end());
+                found->second.inReady = true;
             }
             else
             {
                 found->second.error = error;
                 found->second.phase = ModelLoadPhase::failed;
+                _state->failed.push_back(identifier);
             }
         }
     }

@@ -50,16 +50,13 @@ namespace OpenRCT2::View3D
         waiting,
     };
 
-    inline PlacementDraw placementDraw(bool modelCandidate, bool resident, bool uploadFailed)
+    inline PlacementDraw placementDraw(bool modelCandidate, bool resident, bool /*uploadFailed*/)
     {
         if (modelCandidate && resident)
         {
             return PlacementDraw::model;
         }
-        if (modelCandidate && !uploadFailed)
-        {
-            return PlacementDraw::waiting;
-        }
+        // Loading, over budget, or a permanent failure is the X-sprite.
         return PlacementDraw::sprite;
     }
 } // namespace OpenRCT2::View3D

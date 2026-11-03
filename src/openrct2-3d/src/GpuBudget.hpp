@@ -27,8 +27,8 @@ namespace OpenRCT2::View3D
         uint32_t count = 0;
     };
 
-    // Indices stored in a shared slab are mesh-local. bgfx adds setVertexBuffer's
-    // start vertex as a base, so the index must not also include that offset.
+    // Stored indices are mesh-local. bgfx adds the vertex-buffer start once.
+    // This helper is that sum, applied one time: base + local.
     constexpr uint32_t slabVertexIndex(uint32_t vertexStart, uint32_t localIndex)
     {
         return vertexStart + localIndex;
@@ -104,6 +104,7 @@ namespace OpenRCT2::View3D
         {
             std::vector<FreeRect> freeRects;
         };
+        void coalesce(std::vector<FreeRect>& rects);
         uint32_t _pageSize = 0;
         uint32_t _maxPages = 0;
         uint32_t _gutter = 0;

@@ -9,6 +9,7 @@
 
 #include "ConstructionClearance.h"
 
+#include "../Context.h"
 #include "../GameState.h"
 #include "../localisation/Formatter.h"
 #include "../object/LargeSceneryEntry.h"
@@ -63,6 +64,7 @@ static bool MapPlaceClearFunc(
         return true;
 
     MapInvalidateTile({ coords, (*tile_element)->getBaseZ(), (*tile_element)->getClearanceZ() });
+    NotifyMapChanged(coords.x / kCoordsXYStep, coords.y / kCoordsXYStep);
 
     TileElementRemove(*tile_element);
 

@@ -29,15 +29,30 @@ namespace OpenRCT2::View3D
     bool meshDrawInit();
     void meshDrawShutdown();
 
-    // A non-negative id. -1 if the mesh or its textures could not be uploaded.
-    int32_t meshDrawUploadModel(const CpuMesh& mesh);
-    // Frees one uploaded model's ranges and any texture it owns. The id is left empty.
+    enum class MeshUploadStatus : uint8_t
+    {
+        ready,
+        // Atlas, slab, or handle cap. Evict and retry later.
+        capacity,
+        // The bytes are not a drawable mesh. Do not retry.
+        rejected,
+    };
+
+    struct MeshUpload
+    {
+        MeshUploadStatus status = MeshUploadStatus::rejected;
+        int32_t id = -1;
+    };
+
+    MeshUpload meshDrawUploadModel(const CpuMesh& mesh);
+    // Frees one uploaded model's ranges and any texture it owns. The id can be reused.
     void meshDrawReleaseModel(int32_t id);
     // Drops sprite textures. Called on park load so the previous park's images do not linger.
     void meshDrawClearSprites();
 
     // One face. The quad is in local space and instances only translate it (yaw 0).
     int32_t meshDrawUploadSprite(const SpriteQuad& quad, const uint8_t* rgba, int32_t width, int32_t height);
+    void meshDrawReleaseSprite(int32_t id);
 
     // Clamp folds an interpolated UV into 0..1 before the atlas rect. Repeat leaves
     // the interpolated value alone so a GL_REPEAT texture wraps it. fract() on the

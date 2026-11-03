@@ -161,6 +161,38 @@ namespace OpenRCT2::View3D
         }
         _pages[slot.page].freeRects.push_back(
             FreeRect{ slot.x - _gutter, slot.y - _gutter, slot.width + _gutter * 2u, slot.height + _gutter * 2u });
+        coalesce(_pages[slot.page].freeRects);
+    }
+
+    void AtlasPacker::coalesce(std::vector<FreeRect>& rects)
+    {
+        bool merged = true;
+        while (merged)
+        {
+            merged = false;
+            for (size_t i = 0; i < rects.size() && !merged; i++)
+            {
+                for (size_t j = i + 1; j < rects.size(); j++)
+                {
+                    FreeRect& a = rects[i];
+                    const FreeRect& b = rects[j];
+                    const bool horizontal = a.y == b.y && a.h == b.h && (a.x + a.w == b.x || b.x + b.w == a.x);
+                    const bool vertical = a.x == b.x && a.w == b.w && (a.y + a.h == b.y || b.y + b.h == a.y);
+                    if (!horizontal && !vertical)
+                    {
+                        continue;
+                    }
+                    const uint32_t x = std::min(a.x, b.x);
+                    const uint32_t y = std::min(a.y, b.y);
+                    const uint32_t right = std::max(a.x + a.w, b.x + b.w);
+                    const uint32_t bottom = std::max(a.y + a.h, b.y + b.h);
+                    a = FreeRect{ x, y, right - x, bottom - y };
+                    rects.erase(rects.begin() + static_cast<std::ptrdiff_t>(j));
+                    merged = true;
+                    break;
+                }
+            }
+        }
     }
 
     LruBudget::LruBudget(uint32_t budgetBytes)

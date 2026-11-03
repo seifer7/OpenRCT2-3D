@@ -11,6 +11,7 @@
 
     #include "ScTile.hpp"
 
+    #include "../../../Context.h"
     #include "../../../world/Map.h"
     #include "../../../world/tile_element/LargeSceneryElement.h"
 
@@ -195,6 +196,7 @@ namespace OpenRCT2::Scripting
             }
             TileElementRemove(&first[index]);
             MapInvalidateTileFull(coords);
+            NotifyMapChanged(coords.x / kCoordsXYStep, coords.y / kCoordsXYStep);
         }
         return JS_UNDEFINED;
     }

@@ -9,6 +9,7 @@
 
 #include "LandSetHeightAction.h"
 
+#include "../../Context.h"
 #include "../../GameState.h"
 #include "../../OpenRCT2.h"
 #include "../../localisation/StringIds.h"
@@ -257,6 +258,7 @@ namespace OpenRCT2::GameActions
             if (_height + 4 < sceneryElement->baseHeight)
                 continue;
             TileElementRemove(reinterpret_cast<TileElement*>(sceneryElement));
+            NotifyMapChanged(_coords.x / kCoordsXYStep, _coords.y / kCoordsXYStep);
         }
     }
 
@@ -337,6 +339,7 @@ namespace OpenRCT2::GameActions
         }
 
         MapInvalidateTileFull(_coords);
+        NotifyMapChanged(_coords.x / kCoordsXYStep, _coords.y / kCoordsXYStep);
     }
 
     bool LandSetHeightAction::MapSetLandHeightClearFunc(

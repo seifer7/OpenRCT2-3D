@@ -32,10 +32,13 @@ namespace OpenRCT2::View3D
     constexpr uint32_t kAtlasSize = 2048u;
     constexpr uint32_t kMaxAtlasPages = 8u;
     constexpr uint32_t kUploadsPerFrame = 2u;
+    constexpr uint32_t kSpriteUploadsPerFrame = 4u;
     constexpr uint32_t kUploadBytesPerFrame = 1024u * 1024u;
     constexpr uint32_t kHandleCap = 4096u;
     // Stay this far under the cap so terrain, UI, and a burst of sprites still fit.
     constexpr uint32_t kHandleHeadroom = 256u;
+    // On-screen ground span. The eye-to-focus distance at high zoom is larger than the view.
+    constexpr float kMaxCullTiles = 96.0f;
 
     float sceneryViewDistanceTiles();
     void setSceneryViewDistanceTiles(float tiles);

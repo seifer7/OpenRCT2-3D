@@ -1132,6 +1132,7 @@ namespace OpenRCT2
 
                 tile_element->asSmallScenery()->setAge(0);
                 MapInvalidateTileZoom0({ actionLoc, tile_element->getBaseZ(), tile_element->getClearanceZ() });
+                NotifyMapChanged(actionLoc.x / kCoordsXYStep, actionLoc.y / kCoordsXYStep);
                 staffGardensWatered = AddClamp(staffGardensWatered, 1u);
                 windowInvalidateFlags |= PEEP_INVALIDATE_STAFF_STATS;
             } while (!(tile_element++)->isLastForTile());

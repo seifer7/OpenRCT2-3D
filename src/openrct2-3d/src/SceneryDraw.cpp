@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <openrct2/Context.h>
@@ -58,6 +59,8 @@ namespace OpenRCT2::View3D::Park
     namespace
     {
         constexpr int32_t kMaxSpriteEdge = 1024;
+        constexpr int32_t kGpuPermanent = -2;
+        constexpr int32_t kGpuNeedsSpace = -3;
 
         struct Batch
         {
@@ -120,9 +123,17 @@ namespace OpenRCT2::View3D::Park
         std::vector<std::string> _typeIds;
         std::unordered_map<std::string, uint32_t> _typeIndex;
         std::unordered_map<uint32_t, int32_t> _gpu;
+        std::unordered_map<uint32_t, CpuMesh> _held;
+        std::unordered_map<uint32_t, uint64_t> _retryAt;
+        std::unordered_map<uint32_t, uint32_t> _backoff;
+        bool _spaceFreed = false;
+        std::unordered_set<uint32_t> _pinned;
+        std::unordered_set<uint32_t> _loadKeys;
+        int32_t _spriteUploads = 0;
+        std::list<SpriteKey> _spriteLru;
+        std::unordered_map<SpriteKey, std::list<SpriteKey>::iterator, SpriteKeyHash> _spriteLruPos;
         // Upload failed after eviction. Draw the X-sprite and try the model again.
         // This is not _gpu[key] = -1: a later frame can still admit the mesh.
-        std::unordered_set<uint32_t> _spriteFallback;
         std::unique_ptr<ModelLoadQueue> _loads;
         std::mutex _dirtyMutex;
         std::vector<std::pair<int32_t, int32_t>> _dirtyTiles;
@@ -283,13 +294,56 @@ namespace OpenRCT2::View3D::Park
             return Drawing::LightFx::IsAvailable() ? Drawing::LightFx::GetPalette() : Drawing::gPalette;
         }
 
+        void touchSprite(const SpriteKey& key)
+        {
+            const auto found = _spriteLruPos.find(key);
+            if (found == _spriteLruPos.end())
+            {
+                _spriteLru.push_front(key);
+                _spriteLruPos.emplace(key, _spriteLru.begin());
+                return;
+            }
+            _spriteLru.splice(_spriteLru.begin(), _spriteLru, found->second);
+        }
+
+        bool evictSprite()
+        {
+            if (_spriteLru.empty())
+            {
+                return false;
+            }
+            const SpriteKey key = _spriteLru.back();
+            _spriteLru.pop_back();
+            _spriteLruPos.erase(key);
+            const auto found = _spriteHandles.find(key);
+            if (found == _spriteHandles.end())
+            {
+                return false;
+            }
+            if (found->second >= 0)
+            {
+                meshDrawReleaseSprite(found->second);
+            }
+            _spriteHandles.erase(found);
+            _spaceFreed = true;
+            return true;
+        }
+
         int32_t spriteHandleForFace(const ImageId& image, int face)
         {
             const SpriteKey key{ image, face };
             const auto found = _spriteHandles.find(key);
             if (found != _spriteHandles.end())
             {
+                if (found->second >= 0)
+                {
+                    touchSprite(key);
+                }
                 return found->second;
+            }
+            if (_spriteUploads >= static_cast<int32_t>(kSpriteUploadsPerFrame))
+            {
+                return -1;
             }
             const G1Element* g1 = GfxGetG1Element(image);
             if (g1 == nullptr || g1->width <= 0 || g1->height <= 0 || g1->width > kMaxSpriteEdge || g1->height > kMaxSpriteEdge)
@@ -329,13 +383,18 @@ namespace OpenRCT2::View3D::Park
                 dst[3] = 255;
             }
             const SpriteQuad quad = makeDirectionSpriteQuad(face, g1->width, g1->height, g1->xOffset, g1->yOffset);
-            const int32_t handle = meshDrawUploadSprite(quad, _rgba.data(), width, height);
+            int32_t handle = meshDrawUploadSprite(quad, _rgba.data(), width, height);
+            if (handle < 0 && evictSprite())
+            {
+                handle = meshDrawUploadSprite(quad, _rgba.data(), width, height);
+            }
             if (handle < 0)
             {
-                // Handle cap or a full atlas. Do not remember the miss: a later frame may fit.
                 return -1;
             }
+            _spriteUploads++;
             _spriteHandles.emplace(key, handle);
+            touchSprite(key);
             return handle;
         }
 
@@ -451,31 +510,7 @@ namespace OpenRCT2::View3D::Park
             }
         }
 
-        std::unordered_set<uint32_t> visibleModelKeys(const FrameCull& cull)
-        {
-            std::unordered_set<uint32_t> keys;
-            for (int32_t y = 0; y < _grid.chunksY(); y++)
-            {
-                for (int32_t x = 0; x < _grid.chunksX(); x++)
-                {
-                    const SceneryChunk* chunk = _grid.at(x, y);
-                    if (chunk == nullptr || !chunk->built || !chunkVisible(*chunk, cull))
-                    {
-                        continue;
-                    }
-                    for (const ChunkPlacement& placement : chunk->placements)
-                    {
-                        if (placement.modelCandidate)
-                        {
-                            keys.insert(placement.typeKey);
-                        }
-                    }
-                }
-            }
-            return keys;
-        }
-
-        void syncChunks()
+        void syncChunks(float focusX, float focusY)
         {
             const TileCoordsXY mapSize = getGameState().mapSize;
             if (!_gridReady || _grid.tilesX() != mapSize.x || _grid.tilesY() != mapSize.y)
@@ -503,25 +538,212 @@ namespace OpenRCT2::View3D::Park
                     _grid.markTile(tile.first, tile.second);
                 }
             }
-            int32_t rebuilt = 0;
-            for (int32_t y = 0; y < _grid.chunksY() && rebuilt < kChunkRebuildsPerFrame; y++)
+            struct DirtyChunk
             {
-                for (int32_t x = 0; x < _grid.chunksX() && rebuilt < kChunkRebuildsPerFrame; x++)
+                int32_t x = 0;
+                int32_t y = 0;
+                float distance2 = 0.0f;
+            };
+            std::vector<DirtyChunk> dirty;
+            for (int32_t y = 0; y < _grid.chunksY(); y++)
+            {
+                for (int32_t x = 0; x < _grid.chunksX(); x++)
                 {
-                    if (_grid.dirty(x, y))
+                    if (!_grid.dirty(x, y))
                     {
-                        rebuildChunk(x, y);
-                        rebuilt++;
+                        continue;
+                    }
+                    const float cx = (static_cast<float>(x) + 0.5f) * static_cast<float>(kSceneryChunkTiles);
+                    const float cy = (static_cast<float>(y) + 0.5f) * static_cast<float>(kSceneryChunkTiles);
+                    const float dx = cx - focusX;
+                    const float dy = cy - focusY;
+                    dirty.push_back(DirtyChunk{ x, y, dx * dx + dy * dy });
+                }
+            }
+            std::sort(
+                dirty.begin(), dirty.end(), [](const DirtyChunk& a, const DirtyChunk& b) { return a.distance2 < b.distance2; });
+            const size_t rebuilds = std::min(dirty.size(), static_cast<size_t>(kChunkRebuildsPerFrame));
+            for (size_t i = 0; i < rebuilds; i++)
+            {
+                rebuildChunk(dirty[i].x, dirty[i].y);
+            }
+        }
+
+        uint32_t meshBytesOf(const CpuMesh& mesh)
+        {
+            uint32_t meshBytes = 0;
+            for (const MeshPrimitive& primitive : mesh.primitives)
+            {
+                meshBytes += static_cast<uint32_t>(primitive.vertices.size() * sizeof(MeshVertex));
+                meshBytes += static_cast<uint32_t>(primitive.indices.size() * sizeof(uint16_t));
+            }
+            for (const MeshImage& image : mesh.images)
+            {
+                if (!image.rgba.empty())
+                {
+                    meshBytes += static_cast<uint32_t>(image.rgba.size());
+                }
+            }
+            return meshBytes;
+        }
+
+        void releaseResident(uint32_t droppedId)
+        {
+            const auto gpu = _gpu.find(droppedId);
+            if (gpu != _gpu.end())
+            {
+                if (gpu->second >= 0)
+                {
+                    meshDrawReleaseModel(gpu->second);
+                }
+                _gpu.erase(gpu);
+            }
+            _held.erase(droppedId);
+            _retryAt.erase(droppedId);
+            _backoff.erase(droppedId);
+            if (droppedId < _typeIds.size())
+            {
+                _loads->forget(_typeIds[droppedId]);
+            }
+            _spaceFreed = true;
+        }
+
+        void notePermanent(uint32_t key, const std::string& identifier)
+        {
+            _gpu[key] = kGpuPermanent;
+            _held.erase(key);
+            _retryAt.erase(key);
+            _backoff.erase(key);
+            if (_loggedUploadFail.insert(identifier).second)
+            {
+                std::fprintf(stderr, "View3D: model %s failed to upload\n", identifier.c_str());
+            }
+        }
+
+        void noteSpace(uint32_t key, CpuMesh mesh)
+        {
+            _held[key] = std::move(mesh);
+            _gpu[key] = kGpuNeedsSpace;
+            uint32_t delay = 8;
+            const auto found = _backoff.find(key);
+            if (found != _backoff.end())
+            {
+                delay = std::min(64u, found->second * 2u);
+            }
+            _backoff[key] = delay;
+            _retryAt[key] = _frame + delay;
+        }
+
+        bool uploadOne(uint32_t key, const std::string& identifier, CpuMesh mesh, bool allowEvict)
+        {
+            const uint32_t meshBytes = meshBytesOf(mesh);
+            if (_vram.used() + meshBytes > _vram.budget())
+            {
+                if (allowEvict)
+                {
+                    for (uint32_t droppedId : _vram.evict(meshBytes, _pinned))
+                    {
+                        releaseResident(droppedId);
+                    }
+                }
+                if (_vram.used() + meshBytes > _vram.budget())
+                {
+                    noteSpace(key, std::move(mesh));
+                    return true;
+                }
+            }
+            bool geometryFits = true;
+            for (const MeshPrimitive& primitive : mesh.primitives)
+            {
+                if (primitive.vertices.size() > kSlabVertices || primitive.indices.size() > kSlabIndices)
+                {
+                    geometryFits = false;
+                }
+            }
+            MeshUpload uploaded{ MeshUploadStatus::rejected, -1 };
+            if (geometryFits)
+            {
+                uploaded = meshDrawUploadModel(mesh);
+                if (uploaded.status == MeshUploadStatus::capacity && allowEvict)
+                {
+                    const std::optional<uint32_t> dropped = _vram.evictOne(_pinned);
+                    if (dropped.has_value())
+                    {
+                        releaseResident(*dropped);
+                        uploaded = meshDrawUploadModel(mesh);
                     }
                 }
             }
-            (void)rebuilt;
+            if (uploaded.status == MeshUploadStatus::ready)
+            {
+                _gpu[key] = uploaded.id;
+                _vram.insert(key, meshBytes, _frame);
+                _held.erase(key);
+                _retryAt.erase(key);
+                _backoff.erase(key);
+                return false;
+            }
+            if (uploaded.status == MeshUploadStatus::rejected)
+            {
+                notePermanent(key, identifier);
+                _loads->forget(identifier);
+                return false;
+            }
+            noteSpace(key, std::move(mesh));
+            return true;
         }
 
-        void uploadReadyModels(const FrameCull& cull)
+        void uploadReadyModels()
         {
             ensureLoads();
-            const std::unordered_set<uint32_t> pinned = visibleModelKeys(cull);
+            for (;;)
+            {
+                const std::optional<std::string> failed = _loads->takeFailed();
+                if (!failed.has_value())
+                {
+                    break;
+                }
+                notePermanent(typeKeyFor(*failed), *failed);
+            }
+            if (_spaceFreed)
+            {
+                std::vector<uint32_t> keys;
+                keys.reserve(_held.size());
+                for (const auto& item : _held)
+                {
+                    keys.push_back(item.first);
+                }
+                for (uint32_t key : keys)
+                {
+                    if (_pinned.find(key) == _pinned.end())
+                    {
+                        _held.erase(key);
+                        _gpu.erase(key);
+                        _retryAt.erase(key);
+                        _backoff.erase(key);
+                        if (key < _typeIds.size())
+                        {
+                            _loads->forget(_typeIds[key]);
+                        }
+                        continue;
+                    }
+                    const auto when = _retryAt.find(key);
+                    if (when != _retryAt.end() && _frame < when->second)
+                    {
+                        continue;
+                    }
+                    const auto held = _held.find(key);
+                    if (held == _held.end())
+                    {
+                        continue;
+                    }
+                    CpuMesh mesh = std::move(held->second);
+                    _held.erase(held);
+                    const std::string identifier = key < _typeIds.size() ? _typeIds[key] : std::string();
+                    uploadOne(key, identifier, std::move(mesh), false);
+                }
+                _spaceFreed = false;
+            }
             uint32_t uploaded = 0;
             uint32_t bytes = 0;
             while (uploaded < kUploadsPerFrame && bytes < kUploadBytesPerFrame)
@@ -533,97 +755,14 @@ namespace OpenRCT2::View3D::Park
                     break;
                 }
                 const uint32_t key = typeKeyFor(identifier);
-                uint32_t meshBytes = 0;
-                for (const MeshPrimitive& primitive : mesh->primitives)
-                {
-                    meshBytes += static_cast<uint32_t>(primitive.vertices.size() * sizeof(MeshVertex));
-                    meshBytes += static_cast<uint32_t>(primitive.indices.size() * sizeof(uint16_t));
-                }
-                for (const MeshImage& image : mesh->images)
-                {
-                    if (!image.rgba.empty())
-                    {
-                        meshBytes += static_cast<uint32_t>(image.rgba.size());
-                    }
-                    else if (image.width > 0 && image.height > 0)
-                    {
-                        meshBytes += static_cast<uint32_t>(image.width) * static_cast<uint32_t>(image.height) * 4u;
-                    }
-                }
-                auto releaseId = [&](uint32_t droppedId) {
-                    const auto gpu = _gpu.find(droppedId);
-                    if (gpu != _gpu.end())
-                    {
-                        if (gpu->second >= 0)
-                        {
-                            meshDrawReleaseModel(gpu->second);
-                        }
-                        _gpu.erase(gpu);
-                    }
-                    if (droppedId < _typeIds.size())
-                    {
-                        _loads->forget(_typeIds[droppedId]);
-                    }
-                };
-                for (uint32_t droppedId : _vram.evict(meshBytes, pinned))
-                {
-                    releaseId(droppedId);
-                }
-                if (_vram.used() + meshBytes > _vram.budget())
-                {
-                    // Pinned set fills the budget. Do not upload past it, and do not
-                    // remember a permanent failure: a later frame may have room.
-                    _loads->forget(identifier);
-                    continue;
-                }
-                int32_t handle = -1;
-                bool canFit = true;
-                for (const MeshPrimitive& primitive : mesh->primitives)
-                {
-                    if (primitive.vertices.size() > kSlabVertices || primitive.indices.size() > kSlabIndices)
-                    {
-                        canFit = false;
-                    }
-                }
-                if (canFit)
-                {
-                    for (;;)
-                    {
-                        handle = meshDrawUploadModel(*mesh);
-                        if (handle >= 0)
-                        {
-                            break;
-                        }
-                        const std::optional<uint32_t> dropped = _vram.evictOne(pinned);
-                        if (!dropped.has_value())
-                        {
-                            break;
-                        }
-                        releaseId(*dropped);
-                    }
-                }
-                if (handle >= 0)
-                {
-                    _gpu[key] = handle;
-                    _spriteFallback.erase(key);
-                    _vram.insert(key, meshBytes, _frame);
-                    std::fprintf(
-                        stderr, "View3D: loaded scenery model %s (%zu primitives)\n", identifier.c_str(),
-                        mesh->primitives.size());
-                }
-                else
-                {
-                    // Not stored as _gpu[key] = -1. The next frame asks again, and the
-                    // placement draws the X-sprite until a retry fits.
-                    _spriteFallback.insert(key);
-                    _loads->forget(identifier);
-                    if (_loggedUploadFail.insert(identifier).second)
-                    {
-                        std::fprintf(stderr, "View3D: model %s failed to upload\n", identifier.c_str());
-                    }
-                }
+                const uint32_t meshBytes = meshBytesOf(*mesh);
+                const bool stop = uploadOne(key, identifier, std::move(*mesh), true);
                 uploaded++;
                 bytes += meshBytes;
+                if (stop)
+                {
+                    break;
+                }
             }
         }
 
@@ -632,7 +771,6 @@ namespace OpenRCT2::View3D::Park
             _batches.clear();
             _modelBatches.clear();
             _spriteBatches.clear();
-            std::vector<std::string> toLoad;
             for (int32_t y = 0; y < _grid.chunksY(); y++)
             {
                 for (int32_t x = 0; x < _grid.chunksX(); x++)
@@ -659,17 +797,23 @@ namespace OpenRCT2::View3D::Park
                                 modelHandle = gpu->second;
                                 _vram.touch(placement.typeKey, _frame);
                             }
-                            else if (placement.typeKey < _typeIds.size())
+                            else
                             {
-                                toLoad.push_back(_typeIds[placement.typeKey]);
+                                _pinned.insert(placement.typeKey);
+                                const bool blocked = gpu != _gpu.end()
+                                    && (gpu->second == kGpuPermanent || gpu->second == kGpuNeedsSpace);
+                                if (!blocked && _held.find(placement.typeKey) == _held.end()
+                                    && placement.typeKey < _typeIds.size())
+                                {
+                                    _loadKeys.insert(placement.typeKey);
+                                }
                             }
                         }
-                        const bool uploadFailed = _spriteFallback.find(placement.typeKey) != _spriteFallback.end();
-                        const PlacementDraw kind = placementDraw(placement.modelCandidate, resident, uploadFailed);
-                        if (kind == PlacementDraw::waiting)
+                        if (resident)
                         {
-                            continue;
+                            _pinned.insert(placement.typeKey);
                         }
+                        const PlacementDraw kind = placementDraw(placement.modelCandidate, resident, false);
                         if (kind == PlacementDraw::model)
                         {
                             const auto found = _modelBatches.find(placement.typeKey);
@@ -724,11 +868,6 @@ namespace OpenRCT2::View3D::Park
                     }
                 }
             }
-            if (!toLoad.empty())
-            {
-                ensureLoads();
-                _loads->requestAbsent(toLoad);
-            }
         }
 
         bool hideBatch(const Batch& batch)
@@ -764,7 +903,14 @@ namespace OpenRCT2::View3D::Park
         _typeIds.clear();
         _typeIndex.clear();
         _gpu.clear();
-        _spriteFallback.clear();
+        _held.clear();
+        _retryAt.clear();
+        _backoff.clear();
+        _spaceFreed = false;
+        _pinned.clear();
+        _loadKeys.clear();
+        _spriteLru.clear();
+        _spriteLruPos.clear();
         _vram = LruBudget(kDefaultVramBudgetBytes);
         _frame = 0;
         std::lock_guard<std::mutex> guard(_dirtyMutex);
@@ -784,17 +930,41 @@ namespace OpenRCT2::View3D::Park
             return;
         }
         _frame++;
-        if (_dropSprites)
+        _spriteUploads = 0;
+        bool dropSprites = false;
         {
+            std::lock_guard<std::mutex> guard(_dirtyMutex);
+            dropSprites = _dropSprites;
             _dropSprites = false;
+        }
+        if (dropSprites)
+        {
             _spriteHandles.clear();
+            _spriteLru.clear();
+            _spriteLruPos.clear();
             meshDrawClearSprites();
         }
-        syncChunks();
         FrameCull cull;
         readCamera(cull);
-        uploadReadyModels(cull);
+        syncChunks(cull.focusX, cull.focusY);
+        _pinned.clear();
+        _loadKeys.clear();
         composeVisible(cull);
+        if (!_loadKeys.empty())
+        {
+            ensureLoads();
+            std::vector<std::string> ids;
+            ids.reserve(_loadKeys.size());
+            for (uint32_t key : _loadKeys)
+            {
+                if (key < _typeIds.size())
+                {
+                    ids.push_back(_typeIds[key]);
+                }
+            }
+            _loads->requestAbsent(ids);
+        }
+        uploadReadyModels();
         for (const Batch& batch : _batches)
         {
             if (batch.instances.empty() || hideBatch(batch))

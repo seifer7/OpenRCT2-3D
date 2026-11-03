@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cgltf.h>
 #include <cmath>
+#include <cstring>
 #include <fstream>
 #if defined(_MSC_VER)
     #pragma warning(push)
@@ -486,8 +487,8 @@ namespace OpenRCT2::View3D
                 error = "png header is unreadable";
                 return false;
             }
-            if (width <= 0 || height <= 0 || static_cast<uint32_t>(width) > limits.maxImageEdge
-                || static_cast<uint32_t>(height) > limits.maxImageEdge)
+            if (width <= 0 || height <= 0 || static_cast<uint32_t>(width) > limits.hardImageEdge
+                || static_cast<uint32_t>(height) > limits.hardImageEdge)
             {
                 error = "png dimensions are over the limit";
                 return false;
@@ -505,9 +506,34 @@ namespace OpenRCT2::View3D
                 error = "png could not be decoded";
                 return false;
             }
-            image.width = static_cast<uint32_t>(width);
-            image.height = static_cast<uint32_t>(height);
-            image.rgba.assign(pixels, pixels + bytes);
+            int32_t storedW = width;
+            int32_t storedH = height;
+            if (static_cast<uint32_t>(width) > limits.maxImageEdge || static_cast<uint32_t>(height) > limits.maxImageEdge)
+            {
+                const float scale = static_cast<float>(limits.maxImageEdge) / static_cast<float>(std::max(width, height));
+                storedW = std::max(1, static_cast<int32_t>(static_cast<float>(width) * scale));
+                storedH = std::max(1, static_cast<int32_t>(static_cast<float>(height) * scale));
+                image.rgba.resize(static_cast<size_t>(storedW) * static_cast<size_t>(storedH) * 4u);
+                for (int32_t y = 0; y < storedH; y++)
+                {
+                    const int32_t sy = std::min(height - 1, y * height / storedH);
+                    for (int32_t x = 0; x < storedW; x++)
+                    {
+                        const int32_t sx = std::min(width - 1, x * width / storedW);
+                        const uint8_t* src = pixels
+                            + (static_cast<size_t>(sy) * static_cast<size_t>(width) + static_cast<size_t>(sx)) * 4u;
+                        uint8_t* dst = image.rgba.data()
+                            + (static_cast<size_t>(y) * static_cast<size_t>(storedW) + static_cast<size_t>(x)) * 4u;
+                        std::memcpy(dst, src, 4);
+                    }
+                }
+            }
+            else
+            {
+                image.rgba.assign(pixels, pixels + bytes);
+            }
+            image.width = static_cast<uint32_t>(storedW);
+            image.height = static_cast<uint32_t>(storedH);
             stbi_image_free(pixels);
             image.png.clear();
             image.png.shrink_to_fit();

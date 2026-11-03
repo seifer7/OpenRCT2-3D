@@ -146,10 +146,23 @@ namespace OpenRCT2::View3D
         return dx * dx + dy * dy + dz * dz > maxDistanceTiles * maxDistanceTiles;
     }
 
+    static float closestOnSegment(float value, float minValue, float maxValue)
+    {
+        if (value < minValue)
+        {
+            return minValue;
+        }
+        if (value > maxValue)
+        {
+            return maxValue;
+        }
+        return value;
+    }
+
     bool boxOutsideGroundDistance(const ChunkBox& box, float focusX, float focusY, float maxDistanceTiles)
     {
-        const float cx = (box.minX + box.maxX) * 0.5f;
-        const float cy = (box.minY + box.maxY) * 0.5f;
+        const float cx = closestOnSegment(focusX, box.minX, box.maxX);
+        const float cy = closestOnSegment(focusY, box.minY, box.maxY);
         const float dx = cx - focusX;
         const float dy = cy - focusY;
         return dx * dx + dy * dy > maxDistanceTiles * maxDistanceTiles;
@@ -160,7 +173,8 @@ namespace OpenRCT2::View3D
         const float dx = eyeX - focusX;
         const float dy = eyeY - focusY;
         const float zoomDistance = std::sqrt(dx * dx + dy * dy);
-        return std::max(sceneryViewDistanceTiles(), zoomDistance);
+        const float span = std::min(zoomDistance * 0.5f, kMaxCullTiles);
+        return std::max(sceneryViewDistanceTiles(), span);
     }
 
     int32_t cullSyntheticPlacements(int32_t count, float eyeX, float eyeY, float eyeZ, float maxDistance, int64_t& microseconds)

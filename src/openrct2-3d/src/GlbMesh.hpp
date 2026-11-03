@@ -81,6 +81,8 @@ namespace OpenRCT2::View3D
         uint32_t maxImageBytes = 16u * 1024u * 1024u;
         // Decode bound. A PNG header above this is rejected before the bitmap is allocated.
         uint32_t maxImageEdge = 256;
+        // Rejected before decode. Above the stored edge, below a PNG bomb.
+        uint32_t hardImageEdge = 4096;
     };
 
     // Decodes PNG images into RGBA and drops the PNG bytes. Rejects an image whose

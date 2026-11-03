@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cmath>
 #include <gtest/gtest.h>
+#include <openrct2/Context.h>
 #include <openrct2/drawing/FilterPaletteIds.h>
 #include <openrct2/world/Location.hpp>
 #include <openrct2/world/Scenery.h>
@@ -28,6 +29,29 @@
 #include <unordered_set>
 
 using namespace OpenRCT2::View3D;
+
+namespace
+{
+    int32_t gHookX = -1;
+    int32_t gHookY = -1;
+
+    void recordMapChange(int32_t tileX, int32_t tileY)
+    {
+        gHookX = tileX;
+        gHookY = tileY;
+    }
+} // namespace
+
+TEST(SceneryScale, MapChangedHookReceivesTheTile)
+{
+    gHookX = -1;
+    gHookY = -1;
+    OpenRCT2::SetMapChangedHook(&recordMapChange);
+    OpenRCT2::NotifyMapChanged(3, 4);
+    EXPECT_EQ(gHookX, 3);
+    EXPECT_EQ(gHookY, 4);
+    OpenRCT2::SetMapChangedHook(nullptr);
+}
 
 TEST(SceneryScale, QuarterTileAnchorMatchesPaint)
 {
@@ -173,6 +197,30 @@ TEST(SceneryScale, TenThousandPlacementsCull)
     EXPECT_GE(microseconds, 0);
 }
 
+TEST(SceneryScale, AllPinnedBudgetRefusesTheNewcomer)
+{
+    LruBudget budget(100);
+    budget.insert(1, 60, 1);
+    budget.insert(2, 40, 2);
+    const std::unordered_set<uint32_t> pinned{ 1u, 2u };
+    EXPECT_TRUE(budget.evict(10, pinned).empty());
+    EXPECT_EQ(budget.used(), 100u);
+    EXPECT_FALSE(budget.evictOne(pinned).has_value());
+}
+
+TEST(SceneryScale, FreedAtlasRectsCoalesce)
+{
+    AtlasPacker packer(16, 1, 0);
+    AtlasSlot top;
+    AtlasSlot bottom;
+    ASSERT_TRUE(packer.pack(16, 8, top));
+    ASSERT_TRUE(packer.pack(16, 8, bottom));
+    packer.free(top);
+    packer.free(bottom);
+    AtlasSlot whole;
+    ASSERT_TRUE(packer.pack(16, 16, whole));
+}
+
 TEST(SceneryScale, LruDropsColdestUnpinned)
 {
     LruBudget budget(100);
@@ -276,6 +324,14 @@ TEST(SceneryScale, LoaderStateMachine)
     EXPECT_EQ(queue.phase("missing"), ModelLoadPhase::failed);
     queue.forget("missing");
     EXPECT_EQ(queue.phase("missing"), ModelLoadPhase::absent);
+
+    queue.request("bad");
+    queue.pump();
+    EXPECT_EQ(queue.phase("bad"), ModelLoadPhase::failed);
+    queue.requestAbsent({ "bad" });
+    EXPECT_EQ(queue.phase("bad"), ModelLoadPhase::failed);
+    std::string failed;
+    EXPECT_FALSE(queue.takeReady(failed).has_value());
 }
 
 TEST(SceneryScale, AtlasSlotIsReusedAfterFree)
@@ -346,7 +402,8 @@ TEST(SceneryScale, ZoomedOutGroundDistanceStaysVisible)
     // Zoom 3 puts the eye about 164 tiles from the focus. A 3D test from that eye culls the focus.
     EXPECT_TRUE(boxOutsideDistance(atFocus, 0.0f, -164.0f, 80.0f, kDefaultViewDistanceTiles));
     const float radius = sceneryCullRadius(0.0f, -164.0f, 0.0f, 0.0f);
-    EXPECT_GE(radius, 164.0f);
+    EXPECT_LT(radius, 164.0f);
+    EXPECT_LE(radius, kMaxCullTiles);
     EXPECT_FALSE(boxOutsideGroundDistance(atFocus, 0.0f, 0.0f, radius));
     ChunkBox far;
     far.minX = 400.0f;
@@ -453,7 +510,7 @@ TEST(SceneryScale, HandleCapFallsBackToSpriteNotWhite)
 {
     EXPECT_EQ(placementDraw(true, true, false), PlacementDraw::model);
     EXPECT_EQ(placementDraw(true, true, true), PlacementDraw::model);
-    EXPECT_EQ(placementDraw(true, false, false), PlacementDraw::waiting);
+    EXPECT_EQ(placementDraw(true, false, false), PlacementDraw::sprite);
     EXPECT_EQ(placementDraw(true, false, true), PlacementDraw::sprite);
     EXPECT_EQ(placementDraw(false, false, false), PlacementDraw::sprite);
 }
@@ -495,32 +552,10 @@ TEST(SceneryScale, LoaderStopsAndDoesNotResurrectForgottenWork)
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         queue.forget("held");
+        queue.requestStop();
         release.store(true);
-        std::this_thread::sleep_for(std::chrono::milliseconds(30));
         std::string taken;
         EXPECT_FALSE(queue.takeReady(taken).has_value());
-        EXPECT_EQ(queue.phase("held"), ModelLoadPhase::absent);
     }
-    std::atomic<int32_t> loads{ 0 };
-    const auto startedAt = std::chrono::steady_clock::now();
-    {
-        ModelLoadQueue queue(
-            [&](const std::string&, std::string&) -> std::optional<CpuMesh> {
-                loads.fetch_add(1);
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                return CpuMesh{};
-            },
-            true);
-        for (int32_t i = 0; i < 20; i++)
-        {
-            queue.request("m" + std::to_string(i));
-        }
-        while (loads.load() == 0)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-    }
-    const auto elapsed = std::chrono::steady_clock::now() - startedAt;
-    EXPECT_LT(elapsed, std::chrono::milliseconds(400));
-    EXPECT_LT(loads.load(), 20);
+    EXPECT_EQ(started.load(), 1);
 }

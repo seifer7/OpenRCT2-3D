@@ -46,7 +46,11 @@ namespace OpenRCT2::View3D
         void requestAbsent(const std::vector<std::string>& identifiers);
         ModelLoadPhase phase(const std::string& identifier) const;
         std::optional<CpuMesh> takeReady(std::string& identifier);
+        // A load that returned no mesh. It is not put back on the work queue.
+        std::optional<std::string> takeFailed();
         void forget(const std::string& identifier);
+        // Leave the queue after the load that is already running. The destructor still joins.
+        void requestStop();
         void pump();
 
     private:

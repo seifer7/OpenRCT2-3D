@@ -22,8 +22,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
-#include <filesystem>
-#include <fstream>
+#include <cstdlib>
 #include <gtest/gtest.h>
 #include <openrct2/Context.h>
 #include <openrct2/Game.h>
@@ -31,7 +30,9 @@
 #include <openrct2/OpenRCT2.h>
 #include <openrct2/actions/GameActionRunner.h>
 #include <openrct2/actions/scenery/SmallSceneryPlaceAction.h>
+#include <openrct2/core/File.h>
 #include <openrct2/core/Path.hpp>
+#include <openrct2/core/String.hpp>
 #include <openrct2/drawing/Drawing.h>
 #include <openrct2/drawing/FilterPaletteIds.h>
 #include <openrct2/object/Object.h>
@@ -45,6 +46,16 @@
 #include <thread>
 #include <unordered_set>
 #include <vector>
+
+#ifdef _WIN32
+    #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
+    #endif
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
+    #include <windows.h>
+#endif
 
 using namespace OpenRCT2::View3D;
 
@@ -668,24 +679,43 @@ namespace
         }
     }
 
-    void writeSceneryObject(const std::filesystem::path& path, const std::string& id)
+    void writeSceneryObject(const std::string& path, const std::string& id)
     {
-        std::ofstream out(path);
-        out << "{\n"
-            << "  \"id\": \"" << id << "\",\n"
-            << "  \"authors\": [\"OpenRCT2 3D test\"],\n"
-            << "  \"version\": \"1.0\",\n"
-            << "  \"sourceGame\": \"custom\",\n"
-            << "  \"objectType\": \"scenery_small\",\n"
-            << "  \"properties\": {\n"
-            << "    \"height\": 32,\n"
-            << "    \"price\": 10,\n"
-            << "    \"removalPrice\": 10,\n"
-            << "    \"cursor\": \"treeDown\",\n"
-            << "    \"isTree\": true,\n"
-            << "    \"shape\": \"4/4\"\n"
-            << "  }\n"
-            << "}\n";
+        const std::string json = "{\n"
+                                 "  \"id\": \""
+            + id
+            + "\",\n"
+              "  \"authors\": [\"OpenRCT2 3D test\"],\n"
+              "  \"version\": \"1.0\",\n"
+              "  \"sourceGame\": \"custom\",\n"
+              "  \"objectType\": \"scenery_small\",\n"
+              "  \"properties\": {\n"
+              "    \"height\": 32,\n"
+              "    \"price\": 10,\n"
+              "    \"removalPrice\": 10,\n"
+              "    \"cursor\": \"treeDown\",\n"
+              "    \"isTree\": true,\n"
+              "    \"shape\": \"4/4\"\n"
+              "  }\n"
+              "}\n";
+        OpenRCT2::File::WriteAllBytes(path, json.data(), json.size());
+    }
+
+    std::string tempRoot()
+    {
+#ifdef _WIN32
+        wchar_t buffer[MAX_PATH + 1] = {};
+        const DWORD length = GetTempPathW(MAX_PATH, buffer);
+        std::string path = length == 0 ? "." : OpenRCT2::String::toUtf8(std::wstring_view(buffer, length));
+#else
+        const char* env = std::getenv("TMPDIR");
+        std::string path = (env != nullptr && env[0] != '\0') ? env : "/tmp";
+#endif
+        while (!path.empty() && (path.back() == '/' || path.back() == '\\'))
+        {
+            path.pop_back();
+        }
+        return path;
     }
 
     void placeScenery(OpenRCT2::IObjectManager& objects, std::string_view id, const CoordsXYZD& loc)
@@ -717,27 +747,33 @@ TEST(SceneryScale, DefaultCameraDrawsParkScenery)
     const std::string modelId = "rct2.scenery_small.tcrp";
     const std::string spriteId = "test.scenery_small.bush";
 
-    const std::filesystem::path dataRoot = std::filesystem::temp_directory_path() / "o3d-default-camera-data";
-    const std::filesystem::path source = std::filesystem::temp_directory_path() / "o3d-default-camera-src";
-    const std::filesystem::path cache = std::filesystem::temp_directory_path() / "o3d-default-camera-cache";
-    std::filesystem::remove_all(dataRoot);
-    std::filesystem::remove_all(source);
-    std::filesystem::remove_all(cache);
-    std::filesystem::create_directories(dataRoot / "object");
-    std::filesystem::create_directories(source);
-    std::filesystem::create_directories(cache);
-    std::filesystem::path language = std::filesystem::absolute("../data/language");
-    if (!std::filesystem::exists(language))
+    const std::string root = tempRoot();
+    const std::string dataRoot = OpenRCT2::Path::Combine(root, "o3d-default-camera-data");
+    const std::string source = OpenRCT2::Path::Combine(root, "o3d-default-camera-src");
+    const std::string cache = OpenRCT2::Path::Combine(root, "o3d-default-camera-cache");
+    OpenRCT2::Path::DeleteDirectory(dataRoot);
+    OpenRCT2::Path::DeleteDirectory(source);
+    OpenRCT2::Path::DeleteDirectory(cache);
+    OpenRCT2::Path::CreateDirectory(OpenRCT2::Path::Combine(dataRoot, "object"));
+    OpenRCT2::Path::CreateDirectory(OpenRCT2::Path::Combine(dataRoot, "language"));
+    OpenRCT2::Path::CreateDirectory(source);
+    OpenRCT2::Path::CreateDirectory(cache);
+    std::string language = "../data/language";
+    if (!OpenRCT2::File::Exists(OpenRCT2::Path::Combine(language, "en-US.txt")))
     {
-        language = std::filesystem::absolute("data/language");
+        language = "data/language";
     }
-    std::filesystem::create_directory_symlink(language, dataRoot / "language");
-    writeSceneryObject(dataRoot / "object" / (modelId + ".json"), modelId);
-    writeSceneryObject(dataRoot / "object" / (spriteId + ".json"), spriteId);
+    for (const char* name : { "en-US.txt", "en-GB.txt" })
+    {
+        const auto bytes = OpenRCT2::File::ReadAllBytes(OpenRCT2::Path::Combine(language, name));
+        OpenRCT2::File::WriteAllBytes(OpenRCT2::Path::Combine(dataRoot, "language", name), bytes.data(), bytes.size());
+    }
+    writeSceneryObject(OpenRCT2::Path::Combine(dataRoot, "object", modelId + ".json"), modelId);
+    writeSceneryObject(OpenRCT2::Path::Combine(dataRoot, "object", spriteId + ".json"), spriteId);
 
     gOpenRCT2Headless = true;
     gOpenRCT2NoGraphics = true;
-    gCustomOpenRCT2DataPath = dataRoot.string();
+    gCustomOpenRCT2DataPath = dataRoot;
     auto context = OpenRCT2::CreateContext();
     ASSERT_NE(context, nullptr);
     ASSERT_TRUE(context->Initialise());
@@ -751,10 +787,10 @@ TEST(SceneryScale, DefaultCameraDrawsParkScenery)
     // and the override supplies the X-sprite pixels.
     gOpenRCT2NoGraphics = false;
 
-    const std::filesystem::path glb = std::filesystem::path(TestData::GetBasePath()) / "object-models"
-        / "rct2.scenery_small.tcrp.glb";
-    std::filesystem::copy_file(glb, source / (modelId + ".glb"));
-    const ModelCacheStats prepared = prepareModelCache({ source.string() }, cache.string(), nullptr);
+    const std::string glb = OpenRCT2::Path::Combine(TestData::GetBasePath(), "object-models", "rct2.scenery_small.tcrp.glb");
+    const auto glbBytes = OpenRCT2::File::ReadAllBytes(glb);
+    OpenRCT2::File::WriteAllBytes(OpenRCT2::Path::Combine(source, modelId + ".glb"), glbBytes.data(), glbBytes.size());
+    const ModelCacheStats prepared = prepareModelCache({ source }, cache, nullptr);
     EXPECT_EQ(prepared.converted + prepared.skipped, 1);
     EXPECT_TRUE(modelIsValidated(modelId));
     EXPECT_FALSE(modelIsValidated(spriteId));
@@ -815,7 +851,7 @@ TEST(SceneryScale, DefaultCameraDrawsParkScenery)
     Park::setScenerySpriteOverride(nullptr);
     Park::releaseScenery();
     Park::shutdownSceneryTestDevice();
-    std::filesystem::remove_all(dataRoot);
-    std::filesystem::remove_all(source);
-    std::filesystem::remove_all(cache);
+    OpenRCT2::Path::DeleteDirectory(dataRoot);
+    OpenRCT2::Path::DeleteDirectory(source);
+    OpenRCT2::Path::DeleteDirectory(cache);
 }

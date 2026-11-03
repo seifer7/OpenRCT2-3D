@@ -146,6 +146,7 @@
     </ClCompile>
     <ClCompile Include="..\..\src\openrct2-3d\src\MeshDraw.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <ForcedIncludeFiles></ForcedIncludeFiles>
       <TreatWarningAsError>false</TreatWarningAsError>
       <AdditionalOptions>/Zc:__cplusplus /Zc:preprocessor %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\src;$(SolutionDir)src\openrct2-3d\third_party\cgltf;$(SolutionDir)src\openrct2-3d\third_party\bimg\3rdparty\stb;$(SolutionDir)src\openrct2-3d\third_party\bgfx\include;$(SolutionDir)src\openrct2-3d\third_party\bgfx\3rdparty;$(SolutionDir)src\openrct2-3d\third_party\bx\include;$(SolutionDir)src\openrct2-3d\third_party\bx\3rdparty;$(SolutionDir)src\openrct2-3d\third_party\bx\include\compat\msvc;$(SolutionDir)src\openrct2-3d\third_party\bimg\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -153,6 +154,7 @@
     </ClCompile>
     <ClCompile Include="..\..\src\openrct2-3d\src\SceneryDraw.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <ForcedIncludeFiles></ForcedIncludeFiles>
       <TreatWarningAsError>false</TreatWarningAsError>
       <AdditionalOptions>/Zc:__cplusplus /Zc:preprocessor %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\src;$(SolutionDir)src\openrct2-3d\third_party\bgfx\include;$(SolutionDir)src\openrct2-3d\third_party\bx\include;$(SolutionDir)src\openrct2-3d\third_party\bx\include\compat\msvc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -160,6 +162,7 @@
     </ClCompile>
     <ClCompile Include="..\..\src\openrct2-3d\src\ParkView.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <ForcedIncludeFiles></ForcedIncludeFiles>
       <TreatWarningAsError>false</TreatWarningAsError>
       <AdditionalOptions>/Zc:__cplusplus /Zc:preprocessor %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\src;$(SolutionDir)src\openrct2-3d\third_party\bgfx\include;$(SolutionDir)src\openrct2-3d\third_party\bx\include;$(SolutionDir)src\openrct2-3d\third_party\bx\include\compat\msvc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -167,6 +170,7 @@
     </ClCompile>
     <ClCompile Include="..\..\src\openrct2-3d\third_party\bimg\src\image.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <ForcedIncludeFiles></ForcedIncludeFiles>
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
       <TreatWarningAsError>false</TreatWarningAsError>
       <AdditionalOptions>/Zc:__cplusplus /Zc:preprocessor /bigobj %(AdditionalOptions)</AdditionalOptions>
@@ -175,6 +179,7 @@
     </ClCompile>
     <ClCompile Include="..\..\src\openrct2-3d\third_party\bgfx\src\amalgamated.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <ForcedIncludeFiles></ForcedIncludeFiles>
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
       <TreatWarningAsError>false</TreatWarningAsError>
       <ObjectFileName>$(IntDir)bgfx_amalgamated_tests.obj</ObjectFileName>
@@ -184,6 +189,7 @@
     </ClCompile>
     <ClCompile Include="..\..\src\openrct2-3d\third_party\bx\src\amalgamated.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <ForcedIncludeFiles></ForcedIncludeFiles>
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
       <TreatWarningAsError>false</TreatWarningAsError>
       <ObjectFileName>$(IntDir)bx_amalgamated_tests.obj</ObjectFileName>

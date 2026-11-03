@@ -55,6 +55,8 @@
         #define NOMINMAX
     #endif
     #include <windows.h>
+    #undef CreateDirectory
+    #undef DeleteDirectory
 #endif
 
 using namespace OpenRCT2::View3D;

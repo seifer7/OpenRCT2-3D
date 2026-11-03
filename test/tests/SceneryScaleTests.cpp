@@ -672,15 +672,6 @@ namespace
         return true;
     }
 
-    void pumpScenery(int32_t frames)
-    {
-        for (int32_t frame = 0; frame < frames; frame++)
-        {
-            Park::drawScenery();
-            Park::sceneryTestFrame();
-        }
-    }
-
     void writeSceneryObject(const std::string& path, const std::string& id)
     {
         const std::string json = "{\n"
@@ -877,7 +868,13 @@ TEST(SceneryScale, DefaultCameraDrawsParkScenery)
     }
     EXPECT_GT(sceneryTiles, 0) << mapSize.x << "x" << mapSize.y;
 
-    pumpScenery(48);
+    // The model load is a worker thread. A tight frame loop can finish before it is scheduled.
+    for (int32_t frame = 0; frame < 200 && Park::sceneryFrameStats().modelSubmits == 0; frame++)
+    {
+        Park::drawScenery();
+        Park::sceneryTestFrame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
     const Park::SceneryFrameStats drawn = Park::sceneryFrameStats();
     EXPECT_GT(drawn.placements, 0);
     EXPECT_GT(drawn.modelInstances, 0);

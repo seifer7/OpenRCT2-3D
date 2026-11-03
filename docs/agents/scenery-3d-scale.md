@@ -8,7 +8,7 @@ The first milestone (one GLB, one sprite cross, a startup cache) is `scenery-3d-
 
 1. Drain tile edits into the chunk grid. A 16×16 tile chunk (`kSceneryChunkTiles`) is rebuilt only when it is dirty. The first 3D frame, a map-size change, and `NotifyMapChanged(-1, -1)` mark every chunk.
 2. Ask the load queue for models that are in view and not on the GPU yet. The queue's worker reads a validated `.o3d`. It does not touch `GameState` and it does not convert a GLB.
-3. Upload at most `kUploadsPerFrame` (2) models or `kUploadBytesPerFrame` (1 MB) of mesh bytes, whichever comes first. While that load is in flight the object is not given sprite faces. If the upload cannot fit (handle cap or a full atlas), it is the X-sprite and the model is tried again later. It is not drawn white, and the miss is not stored as a permanent GPU failure.
+3. Upload at most `kUploadsPerFrame` (2) models or `kUploadBytesPerFrame` (1 MB) of mesh bytes, whichever comes first. While a model is loading, and when it cannot be uploaded, the object is the X-sprite. A broken model is recorded and not requested again. A model that does not fit is retried only after an eviction frees space, with a backoff. The ready queue is not drained in one frame.
 4. Build one instanced batch per model type, and one per sprite image, from the chunks that pass the view-distance and frustum tests.
 5. Evict GPU meshes that do not fit `kDefaultVramBudgetBytes` (256 MB). Visible types are pinned for that frame. A dropped type is loaded again the next time it is in view.
 
@@ -16,7 +16,7 @@ Sprite blits (`GfxDrawSpriteSoftware`) stay on the thread that rebuilds the chun
 
 ## Change signal
 
-`MapInvalidateTileUnderZoom` calls `NotifyMapChanged(x / 32, y / 32)` before the headless return, so a tile edit still marks a chunk when viewports are not updating. `GameLoadInit` and `GameNotifyMapChanged` pass `-1, -1`, which rebuilds every chunk (load, network, editor).
+Ride and guest invalidations do not mark chunks. The calls that do are small-scenery place, remove, and recolour, clearance removal, land height, the tile inspector, scripted tile removal and property edits, scenery ageing and withering, and staff watering. `GameLoadInit` and `GameNotifyMapChanged` pass `-1, -1`, which rebuilds every chunk (load, network, editor).
 
 The hook is registered from `SceneryDraw.cpp` next to the startup cache hook. Headless mode ignores it, and the pending-tile list collapses to "whole map" after 8192 entries so a long 2D session cannot grow it without bound.
 
@@ -28,9 +28,9 @@ Startup (`prepareModelCache`) is the only validation:
 
 - Header magic, format version, converter version, and `MeshLoadLimits`.
 - Size and nanosecond mtime against the GLB. If both match, the cache is trusted and nothing is hashed.
-- If the size or the mtime differs, or there is no cache yet, the GLB is hashed. A matching hash rewrites the stored size and mtime and does not reconvert. A different hash reconverts. Files that need that hash are processed in parallel.
+- If the size or the mtime differs, or there is no cache yet, the GLB is hashed. A matching hash rewrites the 16 stamp bytes in place and does not reconvert. A different hash reconverts. A cache from any other format version is reconverted; there is no old-format reader. Files that need a hash are processed in parallel. Progress is reported on the thread that called `prepareModelCache`.
 
-King Grok timed the previous policy (a full body checksum on every launch) on 10,000 real caches, 698 MB: cold 2.6–2.9 s, warm about 1.0 s, first conversion 3.9 s. On this policy the same shape of set, 10,000 synthetic caches padded to 70 KB (about 683 MB), warm-started in 43 ms with zero checksum passes (`ModelCache.WarmStartSizeAndMtimeOfTenThousand`, `O3D_WARM_BENCH=1`). The warm path reads the header only, so the body size is not hashed. That 43 ms is a page-cache warm run on this machine, not a replacement for King Grok's cold figure.
+King Grok measured `dd1d952d` on 10,000 synthetic models (8 cores, 658 MB of source GLBs): first conversion 4.43 s, cold startup 0.18–0.21 s, warm startup 0.045–0.085 s with zero hashes, in-game load of all 10,000 0.54 s warm and 2.39 s cold, every mtime changed 2.1–3.2 s. The decoded RGBA cache was 1.34 GB, against 698 MB when the caches still stored compressed images. Size and mtime now sit outside the checksum, so an mtime-only pass rewrites the header instead of those 1.34 GB. On this machine, after that change, 10,000 synthetic caches padded to 70 KB (about 683 MB) warm-started in 62 ms with zero checksum passes (`ModelCache.WarmStartSizeAndMtimeOfTenThousand`, `O3D_WARM_BENCH=1`). That is a page-cache warm run, not a cold remeasure of King Grok's source set.
 
 An id that passes is stored under its case-folded name. The data directory is scanned first, so the first file wins and the later spelling is not converted and does not get its own cache. `MyTree.glb` and `mytree.glb` do not both get a cache. Lookup ignores case, so either spelling reads the one file the first name produced. The cache stem is folded so a case-insensitive disk cannot hold two copies. A failed conversion, or a cache that fails and cannot be rebuilt from its GLB, is left out of the set.
 

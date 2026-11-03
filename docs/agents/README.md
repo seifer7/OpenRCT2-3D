@@ -16,6 +16,7 @@ Project notes, memories, decisions, surveys, and other working documents live in
 
 - Keep the work and the report short. Do the change in one pass.
 - The 3D view does not keep compatibility with its own earlier formats or behaviour. A cache from another version is reconverted.
+- In-game tests go to SeiferX7. Do not run or simulate an in-game test (no headless or offscreen game run to verify). Unit tests and CI stay as they are.
 
 ## CI
 

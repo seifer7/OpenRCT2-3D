@@ -21,6 +21,7 @@
 #include "ViewerScale.hpp"
 
 #include <algorithm>
+#include <bgfx/bgfx.h>
 #include <cstdio>
 #include <cstring>
 #include <list>
@@ -174,6 +175,8 @@ namespace OpenRCT2::View3D::Park
         bool _dirtyAll = true;
         uint64_t _frame = 0;
         LruBudget _vram(kDefaultVramBudgetBytes);
+        SceneryFrameStats _stats;
+        ScenerySpriteOverride _spriteOverride = nullptr;
 
         void onMapChanged(int32_t tileX, int32_t tileY)
         {
@@ -442,15 +445,25 @@ namespace OpenRCT2::View3D::Park
                 return -1;
             }
             const G1Element* g1 = GfxGetG1Element(image);
-            if (g1 == nullptr || g1->width <= 0 || g1->height <= 0 || g1->width > kMaxSpriteEdge || g1->height > kMaxSpriteEdge)
+            int32_t overrideWidth = 0;
+            int32_t overrideHeight = 0;
+            const uint8_t* overrideRgba = nullptr;
+            const bool useOverride = (g1 == nullptr || g1->width <= 0 || g1->height <= 0 || g1->width > kMaxSpriteEdge
+                                      || g1->height > kMaxSpriteEdge)
+                && _spriteOverride != nullptr && _spriteOverride(overrideWidth, overrideHeight, overrideRgba)
+                && overrideRgba != nullptr && overrideWidth > 0 && overrideHeight > 0 && overrideWidth <= kMaxSpriteEdge
+                && overrideHeight <= kMaxSpriteEdge;
+            if (!useOverride
+                && (g1 == nullptr || g1->width <= 0 || g1->height <= 0 || g1->width > kMaxSpriteEdge
+                    || g1->height > kMaxSpriteEdge))
             {
                 SpriteResident failed;
                 failed.lastUsed = _frame;
                 _spriteResidents.emplace(key, failed);
                 return -1;
             }
-            const int32_t width = g1->width;
-            const int32_t height = g1->height;
+            const int32_t width = useOverride ? overrideWidth : g1->width;
+            const int32_t height = useOverride ? overrideHeight : g1->height;
             const uint32_t texels = static_cast<uint32_t>(width) * static_cast<uint32_t>(height);
             while (!spriteFits(texels, false))
             {
@@ -459,41 +472,54 @@ namespace OpenRCT2::View3D::Park
                     return -1;
                 }
             }
-            _blit.assign(static_cast<size_t>(width) * static_cast<size_t>(height), Drawing::PaletteIndex::transparent);
-            Drawing::RenderTarget rt;
-            rt.bits = _blit.data();
-            rt.width = width;
-            rt.height = height;
-            rt.pitch = 0;
-            rt.zoom_level = ZoomLevel{ 0 };
-            GfxDrawSpriteSoftware(rt, image, { -g1->xOffset, -g1->yOffset });
-
-            _rgba.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
-            const Drawing::GamePalette& palette = texturePalette();
-            for (size_t i = 0; i < _blit.size(); i++)
+            const uint8_t* rgba = nullptr;
+            int16_t xOffset = 0;
+            int16_t yOffset = 0;
+            if (useOverride)
             {
-                uint8_t* dst = _rgba.data() + i * 4;
-                const Drawing::PaletteIndex index = _blit[i];
-                if (index == Drawing::PaletteIndex::transparent)
-                {
-                    dst[0] = 0;
-                    dst[1] = 0;
-                    dst[2] = 0;
-                    dst[3] = 0;
-                    continue;
-                }
-                const Drawing::BGRAColour colour = palette[static_cast<uint8_t>(index)];
-                dst[0] = colour.red;
-                dst[1] = colour.green;
-                dst[2] = colour.blue;
-                dst[3] = 255;
+                rgba = overrideRgba;
             }
-            const SpriteQuad quad = makeDirectionSpriteQuad(face, g1->width, g1->height, g1->xOffset, g1->yOffset);
+            else
+            {
+                xOffset = g1->xOffset;
+                yOffset = g1->yOffset;
+                _blit.assign(static_cast<size_t>(width) * static_cast<size_t>(height), Drawing::PaletteIndex::transparent);
+                Drawing::RenderTarget rt;
+                rt.bits = _blit.data();
+                rt.width = width;
+                rt.height = height;
+                rt.pitch = 0;
+                rt.zoom_level = ZoomLevel{ 0 };
+                GfxDrawSpriteSoftware(rt, image, { -g1->xOffset, -g1->yOffset });
+
+                _rgba.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
+                const Drawing::GamePalette& palette = texturePalette();
+                for (size_t i = 0; i < _blit.size(); i++)
+                {
+                    uint8_t* dst = _rgba.data() + i * 4;
+                    const Drawing::PaletteIndex index = _blit[i];
+                    if (index == Drawing::PaletteIndex::transparent)
+                    {
+                        dst[0] = 0;
+                        dst[1] = 0;
+                        dst[2] = 0;
+                        dst[3] = 0;
+                        continue;
+                    }
+                    const Drawing::BGRAColour colour = palette[static_cast<uint8_t>(index)];
+                    dst[0] = colour.red;
+                    dst[1] = colour.green;
+                    dst[2] = colour.blue;
+                    dst[3] = 255;
+                }
+                rgba = _rgba.data();
+            }
+            const SpriteQuad quad = makeDirectionSpriteQuad(face, width, height, xOffset, yOffset);
             const bool allowDedicated = _spriteDedicated < kMaxSpriteDedicated;
-            SpritePlace place = meshDrawUploadSprite(quad, _rgba.data(), width, height, allowDedicated);
+            SpritePlace place = meshDrawUploadSprite(quad, rgba, width, height, allowDedicated);
             if (place.id < 0 && evictColdSprite(false))
             {
-                place = meshDrawUploadSprite(quad, _rgba.data(), width, height, _spriteDedicated < kMaxSpriteDedicated);
+                place = meshDrawUploadSprite(quad, rgba, width, height, _spriteDedicated < kMaxSpriteDedicated);
             }
             if (place.id < 0)
             {
@@ -514,10 +540,10 @@ namespace OpenRCT2::View3D::Park
             resident.uvScaleY = place.uvScaleY;
             resident.uvOffX = place.uvOffX;
             resident.uvOffY = place.uvOffY;
-            resident.left = static_cast<float>(g1->xOffset) * kSpritePixelAcross;
-            resident.right = static_cast<float>(g1->xOffset + g1->width) * kSpritePixelAcross;
-            resident.top = -static_cast<float>(g1->yOffset) * kViewerZPerSimUnit;
-            resident.bottom = -static_cast<float>(g1->yOffset + g1->height) * kViewerZPerSimUnit;
+            resident.left = static_cast<float>(xOffset) * kSpritePixelAcross;
+            resident.right = static_cast<float>(xOffset + width) * kSpritePixelAcross;
+            resident.top = -static_cast<float>(yOffset) * kViewerZPerSimUnit;
+            resident.bottom = -static_cast<float>(yOffset + height) * kViewerZPerSimUnit;
             _spriteCount++;
             if (resident.dedicated)
             {
@@ -1206,9 +1232,52 @@ namespace OpenRCT2::View3D::Park
         _distantPages.clear();
         _vram = LruBudget(kDefaultVramBudgetBytes);
         _frame = 0;
+        _stats = {};
+        _spriteOverride = nullptr;
         std::lock_guard<std::mutex> guard(_dirtyMutex);
         _dirtyTiles.clear();
         _dirtyAll = true;
+    }
+
+    void setScenerySpriteOverride(ScenerySpriteOverride fn)
+    {
+        _spriteOverride = fn;
+    }
+
+    void resetSceneryFrameStats()
+    {
+        _stats = {};
+    }
+
+    SceneryFrameStats sceneryFrameStats()
+    {
+        return _stats;
+    }
+
+    void markAllSceneryDirty()
+    {
+        std::lock_guard<std::mutex> guard(_dirtyMutex);
+        _dirtyAll = true;
+        _dirtyTiles.clear();
+    }
+
+    bool initSceneryTestDevice(uint16_t width, uint16_t height)
+    {
+        bgfx::Init device;
+        device.type = bgfx::RendererType::Noop;
+        device.swapChain.width = width;
+        device.swapChain.height = height;
+        return bgfx::init(device);
+    }
+
+    void sceneryTestFrame()
+    {
+        bgfx::frame();
+    }
+
+    void shutdownSceneryTestDevice()
+    {
+        bgfx::shutdown();
     }
 
     void drawScenery()
@@ -1246,6 +1315,19 @@ namespace OpenRCT2::View3D::Park
         readCamera(cull);
         syncChunks(cull.focusX, cull.focusY);
         capSpriteRadius(cull);
+        int32_t placements = 0;
+        for (int32_t y = 0; y < _grid.chunksY(); y++)
+        {
+            for (int32_t x = 0; x < _grid.chunksX(); x++)
+            {
+                const SceneryChunk* chunk = _grid.at(x, y);
+                if (chunk != nullptr && chunk->built)
+                {
+                    placements += static_cast<int32_t>(chunk->placements.size());
+                }
+            }
+        }
+        _stats.placements = placements;
         _pinned.clear();
         _loadKeys.clear();
         composeVisible(cull);
@@ -1277,14 +1359,20 @@ namespace OpenRCT2::View3D::Park
                 meshDrawDistantSprites(
                     batch.page, batch.face, batch.distantInstances.data(),
                     static_cast<uint32_t>(batch.distantInstances.size()));
+                _stats.distantSpriteSubmits++;
+                _stats.distantSpriteInstances += static_cast<int32_t>(batch.distantInstances.size());
             }
             else if (batch.model)
             {
                 meshDrawModel(batch.handle, batch.instances.data(), static_cast<uint32_t>(batch.instances.size()));
+                _stats.modelSubmits++;
+                _stats.modelInstances += static_cast<int32_t>(batch.instances.size());
             }
             else
             {
                 meshDrawSprite(batch.handle, batch.instances.data(), static_cast<uint32_t>(batch.instances.size()));
+                _stats.spriteSubmits++;
+                _stats.spriteInstances += static_cast<int32_t>(batch.instances.size());
             }
         }
     }

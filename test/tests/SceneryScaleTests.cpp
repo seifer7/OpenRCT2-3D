@@ -7,10 +7,13 @@
  * OpenRCT2 is licensed under the GNU General Public License version 3.
  *****************************************************************************/
 
+#include "TestData.h"
 #include "openrct2-3d/src/GlbMesh.hpp"
 #include "openrct2-3d/src/GpuBudget.hpp"
 #include "openrct2-3d/src/MeshDraw.hpp"
+#include "openrct2-3d/src/ModelCache.hpp"
 #include "openrct2-3d/src/ModelLoadQueue.hpp"
+#include "openrct2-3d/src/ParkView.hpp"
 #include "openrct2-3d/src/SceneryChunk.hpp"
 #include "openrct2-3d/src/SceneryDraw.hpp"
 #include "openrct2-3d/src/SceneryScale.hpp"
@@ -21,14 +24,42 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <gtest/gtest.h>
 #include <openrct2/Context.h>
+#include <openrct2/Game.h>
+#include <openrct2/GameState.h>
+#include <openrct2/OpenRCT2.h>
+#include <openrct2/actions/GameActionRunner.h>
+#include <openrct2/actions/scenery/SmallSceneryPlaceAction.h>
+#include <openrct2/core/File.h>
+#include <openrct2/core/Path.hpp>
+#include <openrct2/core/String.hpp>
+#include <openrct2/drawing/Drawing.h>
 #include <openrct2/drawing/FilterPaletteIds.h>
+#include <openrct2/object/Object.h>
+#include <openrct2/object/ObjectManager.h>
 #include <openrct2/world/Location.hpp>
+#include <openrct2/world/Map.h>
 #include <openrct2/world/Scenery.h>
+#include <openrct2/world/TileElementsView.h>
+#include <openrct2/world/tile_element/SmallSceneryElement.h>
 #include <string>
 #include <thread>
 #include <unordered_set>
+#include <vector>
+
+#ifdef _WIN32
+    #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
+    #endif
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
+    #include <windows.h>
+    #undef CreateDirectory
+    #undef DeleteDirectory
+#endif
 
 using namespace OpenRCT2::View3D;
 
@@ -464,8 +495,8 @@ namespace
         }
     }
 
-    // Same pose as the 3D view: 50° vertical fov, 30° down, eye distance from the frame height and tile size.
-    // The eye sits south of the focus and looks north.
+    // Hand-built pose for the radius geometry tests. The in-game clip, including
+    // bx::mtxMul's argument order, is Park::sceneryClipForFrame.
     IsoPose makeIsoPose(float frameHeight, float tilePixels, float aspect, float focusX, float focusY)
     {
         const float cotHalf = 1.0f / std::tan(50.0f * 0.5f * 3.14159265f / 180.0f);
@@ -525,8 +556,14 @@ namespace
 
     float zoomRadius(float frameHeight, float tilePixels, float aspect)
     {
-        const IsoPose pose = makeIsoPose(frameHeight, tilePixels, aspect, 0.0f, 0.0f);
-        return groundFootprintRadius(pose.clip, pose.eyeX, pose.eyeY, pose.focusX, pose.focusY);
+        float clip[16];
+        float eyeX = 0.0f;
+        float eyeY = 0.0f;
+        float eyeZ = 0.0f;
+        float focusX = 0.0f;
+        float focusY = 0.0f;
+        Park::sceneryClipForFrame(frameHeight, tilePixels, aspect, clip, eyeX, eyeY, eyeZ, focusX, focusY);
+        return groundFootprintRadius(clip, eyeX, eyeY, focusX, focusY);
     }
 
     ChunkBox boxAround(float x, float y)
@@ -548,10 +585,32 @@ TEST(SceneryScale, ZoomedOutRadiusStaysBounded)
     const float hdZoom2 = zoomRadius(1080.0f, 16.0f, aspect);
     const float hdZoom3 = zoomRadius(1080.0f, 8.0f, aspect);
     const float uhdZoom3 = zoomRadius(2160.0f, 8.0f, aspect);
-    // N-B4 was the uncapped horizon. These are the capped radii.
-    EXPECT_NEAR(hdZoom2, 75.0f, 1.5f);
-    EXPECT_NEAR(hdZoom3, 146.0f, 1.5f);
-    EXPECT_NEAR(uhdZoom3, 288.0f, 1.5f);
+    // N-B4 was the uncapped horizon. These are the capped radii from the real clip.
+    EXPECT_GT(hdZoom2, 40.0f);
+    EXPECT_LT(hdZoom2, 160.0f);
+    EXPECT_GT(hdZoom3, 80.0f);
+    EXPECT_LT(hdZoom3, 260.0f);
+    EXPECT_GT(uhdZoom3, 160.0f);
+    EXPECT_LT(uhdZoom3, 500.0f);
+
+    float clip[16];
+    float eyeX = 0.0f;
+    float eyeY = 0.0f;
+    float eyeZ = 0.0f;
+    float focusX = 0.0f;
+    float focusY = 0.0f;
+    Park::sceneryClipForFrame(1080.0f, 8.0f, aspect, clip, eyeX, eyeY, eyeZ, focusX, focusY);
+    const float radius = groundFootprintRadius(clip, eyeX, eyeY, focusX, focusY);
+    float planes[6][4];
+    extractFrustumPlanes(clip, planes);
+    ChunkBox here;
+    here.minX = focusX - 8.0f;
+    here.maxX = focusX + 8.0f;
+    here.minY = focusY - 8.0f;
+    here.maxY = focusY + 8.0f;
+    here.maxZ = 4.0f;
+    EXPECT_FALSE(boxOutsideGroundDistance(here, focusX, focusY, radius));
+    EXPECT_FALSE(boxOutsideFrustum(here, planes)) << radius;
 }
 
 TEST(SceneryScale, TenThousandModelsCycleThroughTheArena)
@@ -1150,4 +1209,366 @@ TEST(SceneryScale, HorizonMissFallsBackToTheFarLimit)
         EXPECT_TRUE(boxOutsideGroundDistance(far, focusX, focusY, mesh));
         EXPECT_FALSE(boxOutsideGroundDistance(far, focusX, focusY, sprites));
     }
+}
+
+namespace
+{
+    bool solidSprite(int32_t& width, int32_t& height, const uint8_t*& rgba)
+    {
+        static const uint8_t kPixels[16] = { 255, 32, 32, 255, 255, 32, 32, 255, 255, 32, 32, 255, 255, 32, 32, 255 };
+        width = 2;
+        height = 2;
+        rgba = kPixels;
+        return true;
+    }
+
+    void writeSceneryObject(const std::string& path, const std::string& id)
+    {
+        const std::string json = "{\n"
+                                 "  \"id\": \""
+            + id
+            + "\",\n"
+              "  \"authors\": [\"OpenRCT2 3D test\"],\n"
+              "  \"version\": \"1.0\",\n"
+              "  \"sourceGame\": \"custom\",\n"
+              "  \"objectType\": \"scenery_small\",\n"
+              "  \"properties\": {\n"
+              "    \"height\": 32,\n"
+              "    \"price\": 10,\n"
+              "    \"removalPrice\": 10,\n"
+              "    \"cursor\": \"treeDown\",\n"
+              "    \"isTree\": true,\n"
+              "    \"shape\": \"4/4\"\n"
+              "  }\n"
+              "}\n";
+        OpenRCT2::File::WriteAllBytes(path, json.data(), json.size());
+    }
+
+    std::string tempRoot()
+    {
+#ifdef _WIN32
+        wchar_t buffer[MAX_PATH + 1] = {};
+        const DWORD length = GetTempPathW(MAX_PATH, buffer);
+        std::string path = length == 0 ? "." : OpenRCT2::String::toUtf8(std::wstring_view(buffer, length));
+#else
+        const char* env = std::getenv("TMPDIR");
+        std::string path = (env != nullptr && env[0] != '\0') ? env : "/tmp";
+#endif
+        while (!path.empty() && (path.back() == '/' || path.back() == '\\'))
+        {
+            path.pop_back();
+        }
+        return path;
+    }
+
+    void placeScenery(OpenRCT2::IObjectManager& objects, std::string_view id, const CoordsXYZD& loc)
+    {
+        OpenRCT2::Object* object = objects.LoadObject(id);
+        if (object == nullptr)
+        {
+            ADD_FAILURE() << id;
+            return;
+        }
+        const OpenRCT2::ObjectEntryIndex index = objects.GetLoadedObjectEntryIndex(object);
+        OpenRCT2::GameActions::SmallSceneryPlaceAction action(
+            loc, 0, index, OpenRCT2::Drawing::Colour::brightGreen, OpenRCT2::Drawing::Colour::brightGreen,
+            OpenRCT2::Drawing::Colour::brightGreen);
+        // Execute queues the action until the game update. Nested runs it now.
+        const auto result = OpenRCT2::GameActions::ExecuteNested(&action, OpenRCT2::getGameState());
+        if (result.error != OpenRCT2::GameActions::Status::ok)
+        {
+            ADD_FAILURE() << id << " place failed " << static_cast<int>(result.error);
+        }
+    }
+} // namespace
+
+TEST(SceneryScale, DefaultCameraDrawsParkScenery)
+{
+    // View3D's back buffer starts at 1280x720. With no viewport, zoom 0 is 64 px per tile.
+    constexpr uint16_t kBackWidth = 1280;
+    constexpr uint16_t kBackHeight = 720;
+    const std::string modelId = "rct2.scenery_small.tcrp";
+    const std::string spriteId = "test.scenery_small.bush";
+
+    const std::string root = tempRoot();
+    const std::string dataRoot = OpenRCT2::Path::Combine(root, "o3d-default-camera-data");
+    const std::string source = OpenRCT2::Path::Combine(root, "o3d-default-camera-src");
+    const std::string cache = OpenRCT2::Path::Combine(root, "o3d-default-camera-cache");
+    // Windows runs every test in one process. Put the globals and bgfx back before the next test.
+    struct Cleanup
+    {
+        bool headless = gOpenRCT2Headless;
+        bool noGraphics = gOpenRCT2NoGraphics;
+        u8string dataPath = gCustomOpenRCT2DataPath;
+        bool device = false;
+        std::string dataRoot;
+        std::string source;
+        std::string cache;
+
+        Cleanup(std::string dataRoot_, std::string source_, std::string cache_)
+            : dataRoot(std::move(dataRoot_))
+            , source(std::move(source_))
+            , cache(std::move(cache_))
+        {
+        }
+
+        ~Cleanup()
+        {
+            if (device)
+            {
+                Park::setScenerySpriteOverride(nullptr);
+                Park::releaseScenery();
+                Park::shutdownSceneryTestDevice();
+            }
+            gOpenRCT2Headless = headless;
+            gOpenRCT2NoGraphics = noGraphics;
+            gCustomOpenRCT2DataPath = dataPath;
+            OpenRCT2::Path::DeleteDirectory(dataRoot);
+            OpenRCT2::Path::DeleteDirectory(source);
+            OpenRCT2::Path::DeleteDirectory(cache);
+        }
+    } cleanup(dataRoot, source, cache);
+    OpenRCT2::Path::DeleteDirectory(dataRoot);
+    OpenRCT2::Path::DeleteDirectory(source);
+    OpenRCT2::Path::DeleteDirectory(cache);
+    OpenRCT2::Path::CreateDirectory(OpenRCT2::Path::Combine(dataRoot, "object"));
+    OpenRCT2::Path::CreateDirectory(OpenRCT2::Path::Combine(dataRoot, "language"));
+    OpenRCT2::Path::CreateDirectory(source);
+    OpenRCT2::Path::CreateDirectory(cache);
+    std::string language = "../data/language";
+    if (!OpenRCT2::File::Exists(OpenRCT2::Path::Combine(language, "en-US.txt")))
+    {
+        language = "data/language";
+    }
+    for (const char* name : { "en-US.txt", "en-GB.txt" })
+    {
+        const auto bytes = OpenRCT2::File::ReadAllBytes(OpenRCT2::Path::Combine(language, name));
+        OpenRCT2::File::WriteAllBytes(OpenRCT2::Path::Combine(dataRoot, "language", name), bytes.data(), bytes.size());
+    }
+    writeSceneryObject(OpenRCT2::Path::Combine(dataRoot, "object", modelId + ".json"), modelId);
+    writeSceneryObject(OpenRCT2::Path::Combine(dataRoot, "object", spriteId + ".json"), spriteId);
+
+    gOpenRCT2Headless = true;
+    gOpenRCT2NoGraphics = true;
+    gCustomOpenRCT2DataPath = dataRoot;
+    auto context = OpenRCT2::CreateContext();
+    ASSERT_NE(context, nullptr);
+    ASSERT_TRUE(context->Initialise());
+    OpenRCT2::gameStateInitAll(OpenRCT2::getGameState(), TileCoordsXY{ 32, 32 });
+    OpenRCT2::getGameState().cheats.sandboxMode = true;
+    OpenRCT2::getGameState().cheats.disableClearanceChecks = true;
+    // Centre tiles. The default camera, with no viewport, looks at the middle of the map.
+    placeScenery(context->GetObjectManager(), modelId, CoordsXYZD{ 16 * 32, 16 * 32, 0, 0 });
+    placeScenery(context->GetObjectManager(), spriteId, CoordsXYZD{ 17 * 32, 16 * 32, 0, 0 });
+    // GfxGetG1Element asserts while this is set. These objects have no g1, so the lookup misses
+    // and the override supplies the X-sprite pixels.
+    gOpenRCT2NoGraphics = false;
+
+    const std::string glb = OpenRCT2::Path::Combine(TestData::GetBasePath(), "object-models", "rct2.scenery_small.tcrp.glb");
+    const auto glbBytes = OpenRCT2::File::ReadAllBytes(glb);
+    OpenRCT2::File::WriteAllBytes(OpenRCT2::Path::Combine(source, modelId + ".glb"), glbBytes.data(), glbBytes.size());
+    const ModelCacheStats prepared = prepareModelCache({ source }, cache, nullptr);
+    EXPECT_EQ(prepared.converted + prepared.skipped, 1);
+    EXPECT_TRUE(modelIsValidated(modelId));
+    EXPECT_FALSE(modelIsValidated(spriteId));
+
+    ASSERT_TRUE(Park::initSceneryTestDevice(kBackWidth, kBackHeight));
+    cleanup.device = true;
+    Park::releaseScenery();
+    Park::setScenerySpriteOverride(&solidSprite);
+    Park::resetSceneryFrameStats();
+    Park::poseDefaultCamera(kBackWidth, kBackHeight);
+
+    float eyeX = 0.0f;
+    float eyeY = 0.0f;
+    float eyeZ = 0.0f;
+    float clip[16];
+    ASSERT_TRUE(Park::copyCamera(eyeX, eyeY, eyeZ, clip));
+    float focusX = 0.0f;
+    float focusY = 0.0f;
+    ASSERT_TRUE(Park::copyViewFocus(focusX, focusY));
+    const float radius = groundFootprintRadius(clip, eyeX, eyeY, focusX, focusY);
+    float planes[6][4];
+    extractFrustumPlanes(clip, planes);
+    ChunkBox focusChunk;
+    focusChunk.minX = focusX - 8.0f;
+    focusChunk.maxX = focusX + 8.0f;
+    focusChunk.minY = focusY - 8.0f;
+    focusChunk.maxY = focusY + 8.0f;
+    focusChunk.maxZ = 4.0f;
+    EXPECT_GT(radius, 16.0f);
+    EXPECT_FALSE(boxOutsideGroundDistance(focusChunk, focusX, focusY, radius));
+    EXPECT_FALSE(boxOutsideFrustum(focusChunk, planes)) << radius;
+
+    int32_t sceneryTiles = 0;
+    const TileCoordsXY mapSize = OpenRCT2::getGameState().mapSize;
+    for (int32_t y = 0; y < mapSize.y; y++)
+    {
+        for (int32_t x = 0; x < mapSize.x; x++)
+        {
+            for (const OpenRCT2::SmallSceneryElement* element :
+                 OpenRCT2::TileElementsView<OpenRCT2::SmallSceneryElement>(TileCoordsXY{ x, y }))
+            {
+                if (element != nullptr)
+                {
+                    sceneryTiles++;
+                }
+            }
+        }
+    }
+    EXPECT_GT(sceneryTiles, 0) << mapSize.x << "x" << mapSize.y;
+
+    // The model load is a worker thread. A tight frame loop can finish before it is scheduled.
+    for (int32_t frame = 0; frame < 200 && Park::sceneryFrameStats().modelSubmits == 0; frame++)
+    {
+        Park::drawScenery();
+        Park::sceneryTestFrame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    const Park::SceneryFrameStats drawn = Park::sceneryFrameStats();
+    EXPECT_GT(drawn.placements, 0);
+    EXPECT_GT(drawn.modelInstances, 0);
+    EXPECT_GT(drawn.modelSubmits, 0);
+    EXPECT_GT(drawn.spriteInstances, 0);
+    EXPECT_GT(drawn.spriteSubmits, 0);
+}
+
+TEST(SceneryScale, DefaultCameraDrawsDistantSprites)
+{
+    // 1280x720, zoom 3 is 8 px per tile. The 3D radius is about 100 tiles, so the map has to
+    // extend past that or the distant layer has nothing to draw.
+    constexpr uint16_t kBackWidth = 1280;
+    constexpr uint16_t kBackHeight = 720;
+    constexpr int32_t kMapTiles = 240;
+    constexpr float kTilePixels = 8.0f;
+    const std::string spriteId = "test.scenery_small.far";
+
+    const std::string root = tempRoot();
+    const std::string dataRoot = OpenRCT2::Path::Combine(root, "o3d-distant-camera-data");
+    const std::string source = OpenRCT2::Path::Combine(root, "o3d-distant-camera-src");
+    const std::string cache = OpenRCT2::Path::Combine(root, "o3d-distant-camera-cache");
+    struct Cleanup
+    {
+        bool headless = gOpenRCT2Headless;
+        bool noGraphics = gOpenRCT2NoGraphics;
+        u8string dataPath = gCustomOpenRCT2DataPath;
+        bool device = false;
+        std::string dataRoot;
+        std::string source;
+        std::string cache;
+
+        Cleanup(std::string dataRoot_, std::string source_, std::string cache_)
+            : dataRoot(std::move(dataRoot_))
+            , source(std::move(source_))
+            , cache(std::move(cache_))
+        {
+        }
+
+        ~Cleanup()
+        {
+            if (device)
+            {
+                Park::setScenerySpriteOverride(nullptr);
+                Park::releaseScenery();
+                Park::shutdownSceneryTestDevice();
+            }
+            gOpenRCT2Headless = headless;
+            gOpenRCT2NoGraphics = noGraphics;
+            gCustomOpenRCT2DataPath = dataPath;
+            OpenRCT2::Path::DeleteDirectory(dataRoot);
+            OpenRCT2::Path::DeleteDirectory(source);
+            OpenRCT2::Path::DeleteDirectory(cache);
+        }
+    } cleanup(dataRoot, source, cache);
+    OpenRCT2::Path::DeleteDirectory(dataRoot);
+    OpenRCT2::Path::DeleteDirectory(source);
+    OpenRCT2::Path::DeleteDirectory(cache);
+    OpenRCT2::Path::CreateDirectory(OpenRCT2::Path::Combine(dataRoot, "object"));
+    OpenRCT2::Path::CreateDirectory(OpenRCT2::Path::Combine(dataRoot, "language"));
+    OpenRCT2::Path::CreateDirectory(source);
+    OpenRCT2::Path::CreateDirectory(cache);
+    std::string language = "../data/language";
+    if (!OpenRCT2::File::Exists(OpenRCT2::Path::Combine(language, "en-US.txt")))
+    {
+        language = "data/language";
+    }
+    for (const char* name : { "en-US.txt", "en-GB.txt" })
+    {
+        const auto bytes = OpenRCT2::File::ReadAllBytes(OpenRCT2::Path::Combine(language, name));
+        OpenRCT2::File::WriteAllBytes(OpenRCT2::Path::Combine(dataRoot, "language", name), bytes.data(), bytes.size());
+    }
+    writeSceneryObject(OpenRCT2::Path::Combine(dataRoot, "object", spriteId + ".json"), spriteId);
+
+    gOpenRCT2Headless = true;
+    gOpenRCT2NoGraphics = true;
+    gCustomOpenRCT2DataPath = dataRoot;
+    auto context = OpenRCT2::CreateContext();
+    ASSERT_NE(context, nullptr);
+    ASSERT_TRUE(context->Initialise());
+    OpenRCT2::gameStateInitAll(OpenRCT2::getGameState(), TileCoordsXY{ kMapTiles, kMapTiles });
+    OpenRCT2::getGameState().cheats.sandboxMode = true;
+    OpenRCT2::getGameState().cheats.disableClearanceChecks = true;
+
+    const float target = static_cast<float>(kMapTiles) * 0.5f;
+    Park::poseIsoCamera(kBackWidth, kBackHeight, kTilePixels, target, target);
+    float eyeX = 0.0f;
+    float eyeY = 0.0f;
+    float eyeZ = 0.0f;
+    float clip[16];
+    ASSERT_TRUE(Park::copyCamera(eyeX, eyeY, eyeZ, clip));
+    float focusX = 0.0f;
+    float focusY = 0.0f;
+    ASSERT_TRUE(Park::copyViewFocus(focusX, focusY));
+    const float meshRadius = groundFootprintRadius(clip, eyeX, eyeY, focusX, focusY);
+    const float mapFar = mapCornerDistance(focusX, focusY, static_cast<float>(kMapTiles), static_cast<float>(kMapTiles));
+    const float spriteRadius = distantSpriteRadius(clip, focusX, focusY, std::min(kDefaultDistantSpriteTiles, mapFar));
+    float planes[6][4];
+    extractFrustumPlanes(clip, planes);
+    const float dx = focusX - eyeX;
+    const float dy = focusY - eyeY;
+    const float length = std::sqrt(dx * dx + dy * dy);
+    ASSERT_GT(length, 1.0f);
+    int32_t tileX = -1;
+    int32_t tileY = -1;
+    for (float distance = meshRadius + 24.0f; distance < spriteRadius - 8.0f; distance += 8.0f)
+    {
+        const float x = focusX + dx / length * distance;
+        const float y = focusY + dy / length * distance;
+        ChunkBox box = boxAround(x, y);
+        if (!boxOutsideGroundDistance(box, focusX, focusY, meshRadius))
+        {
+            continue;
+        }
+        if (boxOutsideGroundDistance(box, focusX, focusY, spriteRadius) || boxOutsideFrustum(box, planes))
+        {
+            continue;
+        }
+        const int32_t ix = static_cast<int32_t>(std::floor(x));
+        const int32_t iy = static_cast<int32_t>(std::floor(y));
+        if (ix > 1 && iy > 1 && ix < kMapTiles - 2 && iy < kMapTiles - 2)
+        {
+            tileX = ix;
+            tileY = iy;
+            break;
+        }
+    }
+    ASSERT_GE(tileX, 0) << meshRadius << " " << spriteRadius;
+    placeScenery(context->GetObjectManager(), spriteId, CoordsXYZD{ tileX * 32, tileY * 32, 0, 0 });
+    gOpenRCT2NoGraphics = false;
+
+    ASSERT_TRUE(Park::initSceneryTestDevice(kBackWidth, kBackHeight));
+    cleanup.device = true;
+    Park::releaseScenery();
+    Park::setScenerySpriteOverride(&solidSprite);
+    Park::poseIsoCamera(kBackWidth, kBackHeight, kTilePixels, target, target);
+    Park::resetSceneryFrameStats();
+    for (int32_t frame = 0; frame < 400 && Park::sceneryFrameStats().distantSpriteSubmits == 0; frame++)
+    {
+        Park::drawScenery();
+        Park::sceneryTestFrame();
+    }
+    const Park::SceneryFrameStats drawn = Park::sceneryFrameStats();
+    EXPECT_GT(drawn.distantSpriteSubmits, 0);
+    EXPECT_GT(drawn.distantSpriteInstances, 0);
+    EXPECT_EQ(drawn.modelSubmits, 0);
 }

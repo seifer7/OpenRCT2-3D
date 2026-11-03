@@ -39,6 +39,31 @@ namespace OpenRCT2::View3D
     // One face. The quad is in local space and instances only translate it (yaw 0).
     int32_t meshDrawUploadSprite(const SpriteQuad& quad, const uint8_t* rgba, int32_t width, int32_t height);
 
+    // Clamp folds an interpolated UV into 0..1 before the atlas rect. Repeat leaves
+    // the interpolated value alone so a GL_REPEAT texture wraps it. fract() on the
+    // vertices collapses a 0..2 face to a single texel.
+    inline float wrapTexcoord(float uv, bool clampToEdge)
+    {
+        if (!clampToEdge)
+        {
+            return uv;
+        }
+        if (uv < 0.0f)
+        {
+            return 0.0f;
+        }
+        if (uv > 1.0f)
+        {
+            return 1.0f;
+        }
+        return uv;
+    }
+
+    inline float mapAtlasUv(float uv, bool clampToEdge, float scale, float offset)
+    {
+        return wrapTexcoord(uv, clampToEdge) * scale + offset;
+    }
+
     void meshDrawModel(int32_t id, const MeshInstance* instances, uint32_t count);
     void meshDrawSprite(int32_t id, const MeshInstance* instances, uint32_t count);
 } // namespace OpenRCT2::View3D

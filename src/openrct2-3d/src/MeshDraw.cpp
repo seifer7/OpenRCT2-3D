@@ -23,7 +23,7 @@ namespace OpenRCT2::View3D
 {
     namespace
     {
-        constexpr uint32_t kVaryingHash = 0x5C3E91A4u;
+        constexpr uint32_t kVaryingHash = 0x5C3E91B1u;
         constexpr uint8_t kShaderVersion = 0x0c;
         constexpr uint16_t kInstanceStride = 16;
         constexpr const char kSamplerName[] = "s_albedo";
@@ -31,8 +31,6 @@ namespace OpenRCT2::View3D
         constexpr const char kUvRectName[] = "u_uvRect";
 
         constexpr const char kVertexShader[] = "uniform mat4 u_modelViewProj;\n"
-                                               "uniform vec4 u_uvRect;\n"
-                                               "uniform vec4 u_params;\n"
                                                "in vec3 a_position;\n"
                                                "in vec3 a_normal;\n"
                                                "in vec2 a_texcoord0;\n"
@@ -47,21 +45,26 @@ namespace OpenRCT2::View3D
                                                "    vec3 rotated = vec3(c * p.x - s * p.y, s * p.x + c * p.y, p.z);\n"
                                                "    vec3 n = a_normal;\n"
                                                "    v_normal = vec3(c * n.x - s * n.y, s * n.x + c * n.y, n.z);\n"
-                                               "    vec2 uv = u_params.w > 0.5 ? clamp(a_texcoord0, vec2(0.0), vec2(1.0)) : "
-                                               "fract(a_texcoord0);\n"
-                                               "    v_uv = uv * u_uvRect.xy + u_uvRect.zw;\n"
+                                               "    v_uv = a_texcoord0;\n"
                                                "    vec3 world = rotated + i_data0.xyz;\n"
                                                "    gl_Position = u_modelViewProj * vec4(world, 1.0);\n"
                                                "}\n";
 
         constexpr const char kFragmentShader[] = "uniform sampler2D s_albedo;\n"
                                                  "uniform vec4 u_params;\n"
+                                                 "uniform vec4 u_uvRect;\n"
                                                  "in vec3 v_normal;\n"
                                                  "in vec2 v_uv;\n"
                                                  "layout(location = 0) out vec4 bgfx_FragColor;\n"
                                                  "void main()\n"
                                                  "{\n"
-                                                 "    vec4 colour = texture(s_albedo, v_uv);\n"
+                                                 "    vec2 uv = v_uv;\n"
+                                                 "    if (u_params.w > 0.5)\n"
+                                                 "    {\n"
+                                                 "        uv = clamp(uv, vec2(0.0), vec2(1.0));\n"
+                                                 "        uv = uv * u_uvRect.xy + u_uvRect.zw;\n"
+                                                 "    }\n"
+                                                 "    vec4 colour = texture(s_albedo, uv);\n"
                                                  "    if (colour.a < u_params.x)\n"
                                                  "    {\n"
                                                  "        discard;\n"
@@ -200,15 +203,14 @@ namespace OpenRCT2::View3D
             appendU32(out, 0);
             if (fragment)
             {
-                appendU16(out, 2);
+                appendU16(out, 3);
                 appendSampler(out, kSamplerName);
                 appendVec4(out, kParamsName);
+                appendVec4(out, kUvRectName);
             }
             else
             {
-                appendU16(out, 2);
-                appendVec4(out, kUvRectName);
-                appendVec4(out, kParamsName);
+                appendU16(out, 0);
             }
             const auto sourceSize = static_cast<uint32_t>(std::strlen(source) + 1);
             appendU32(out, sourceSize);
@@ -564,7 +566,9 @@ namespace OpenRCT2::View3D
                 }
                 clampUv = image.clamp;
                 const uint32_t padded = kAtlasGutter * 2u;
-                const bool atlasFit = image.nearest
+                // Repeat is a dedicated GL_REPEAT texture. An atlas rect cannot wrap
+                // an interpolated UV without sampling the neighbour or the gutter.
+                const bool atlasFit = image.clamp && image.nearest
                     && image.width + static_cast<int32_t>(padded) <= static_cast<int32_t>(kAtlasSize)
                     && image.height + static_cast<int32_t>(padded) <= static_cast<int32_t>(kAtlasSize);
                 if (atlasFit)
@@ -601,7 +605,7 @@ namespace OpenRCT2::View3D
                     }
                     texture = uploadRgba(
                         image.rgba.data(), static_cast<uint16_t>(image.width), static_cast<uint16_t>(image.height),
-                        image.nearest, true);
+                        image.nearest, image.clamp);
                     if (!bgfx::isValid(texture))
                     {
                         return abandon();

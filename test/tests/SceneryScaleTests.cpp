@@ -9,6 +9,7 @@
 
 #include "openrct2-3d/src/GlbMesh.hpp"
 #include "openrct2-3d/src/GpuBudget.hpp"
+#include "openrct2-3d/src/MeshDraw.hpp"
 #include "openrct2-3d/src/ModelLoadQueue.hpp"
 #include "openrct2-3d/src/SceneryChunk.hpp"
 #include "openrct2-3d/src/SceneryDraw.hpp"
@@ -432,6 +433,20 @@ TEST(SceneryScale, PngBombIsRejectedBeforeDecode)
     EXPECT_FALSE(decodeMeshImages(mesh, error));
     EXPECT_NE(error.find("dimensions"), std::string::npos) << error;
     EXPECT_TRUE(mesh.images[0].rgba.empty());
+}
+
+TEST(SceneryScale, RepeatUvWrapsAfterInterpolation)
+{
+    // A 0..2 edge. The fragment at 25% interpolates to 0.5, so GL_REPEAT samples
+    // the middle of the texture. Per-vertex fract() stores 0 at both ends.
+    const float interpolated = 0.0f + (2.0f - 0.0f) * 0.25f;
+    EXPECT_FLOAT_EQ(interpolated, 0.5f);
+    EXPECT_FLOAT_EQ(wrapTexcoord(interpolated, false), 0.5f);
+    const float collapsed = 0.0f + (0.0f - 0.0f) * 0.25f;
+    EXPECT_FLOAT_EQ(collapsed, 0.0f);
+    EXPECT_NEAR(mapAtlasUv(0.25f, true, 0.2f, 0.1f), 0.15f, 1.0e-5f);
+    EXPECT_FLOAT_EQ(wrapTexcoord(-0.2f, true), 0.0f);
+    EXPECT_FLOAT_EQ(wrapTexcoord(1.4f, true), 1.0f);
 }
 
 TEST(SceneryScale, HandleCapFallsBackToSpriteNotWhite)

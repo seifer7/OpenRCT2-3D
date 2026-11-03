@@ -831,13 +831,13 @@ TEST(SceneryScale, DistantSpritesCoverTheFarSide)
         float farX = 0.0f;
         float farY = 0.0f;
         ASSERT_TRUE(groundPlanePoint(pose.clip, 0.0f, 1.0f, farX, farY));
-        const float far = std::sqrt(farX * farX + farY * farY);
+        const float farDistance = std::sqrt(farX * farX + farY * farY);
         const float capped = distantSpriteRadius(pose.clip, pose.focusX, pose.focusY, 200.0f);
         EXPECT_LE(capped, 200.0f);
-        const float beyond = 280.0f / far;
+        const float beyond = 280.0f / farDistance;
         const ChunkBox past = boxAround(farX * beyond, farY * beyond);
         EXPECT_FALSE(chunkInDistantSprites(past, pose.focusX, pose.focusY, mesh, capped, pose.planes));
-        const float between = 170.0f / far;
+        const float between = 170.0f / farDistance;
         const ChunkBox ring = boxAround(farX * between, farY * between);
         if (170.0f > mesh)
         {
@@ -1203,11 +1203,11 @@ TEST(SceneryScale, HorizonMissFallsBackToTheFarLimit)
     const float along = std::min(600.0f, sprites - 20.0f);
     const float nx = forwardX / std::sqrt(forwardX * forwardX + forwardY * forwardY);
     const float ny = forwardY / std::sqrt(forwardX * forwardX + forwardY * forwardY);
-    ChunkBox far = boxAround(focusX + nx * along, focusY + ny * along);
+    ChunkBox farBox = boxAround(focusX + nx * along, focusY + ny * along);
     if (along > mesh)
     {
-        EXPECT_TRUE(boxOutsideGroundDistance(far, focusX, focusY, mesh));
-        EXPECT_FALSE(boxOutsideGroundDistance(far, focusX, focusY, sprites));
+        EXPECT_TRUE(boxOutsideGroundDistance(farBox, focusX, focusY, mesh));
+        EXPECT_FALSE(boxOutsideGroundDistance(farBox, focusX, focusY, sprites));
     }
 }
 

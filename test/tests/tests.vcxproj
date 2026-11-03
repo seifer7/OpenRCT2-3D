@@ -175,7 +175,7 @@
       <TreatWarningAsError>false</TreatWarningAsError>
       <AdditionalOptions>/Zc:__cplusplus /Zc:preprocessor /bigobj %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>$(SolutionDir)src\openrct2-3d\third_party\bimg\include;$(SolutionDir)src\openrct2-3d\third_party\bimg\3rdparty;$(SolutionDir)src\openrct2-3d\third_party\bx\include;$(SolutionDir)src\openrct2-3d\third_party\bx\include\compat\msvc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>BX_CONFIG_DEBUG=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>BX_CONFIG_DEBUG=0;BIMG_CONFIG_DECODE_ASTC=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\..\src\openrct2-3d\third_party\bgfx\src\amalgamated.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>

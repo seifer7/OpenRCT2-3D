@@ -288,7 +288,7 @@ int main(int argc, char** argv)
         std::vector<uint8_t> rgba;
         fillSprite(rgba, colours[face][0], colours[face][1], colours[face][2]);
         const OpenRCT2::View3D::SpriteQuad quad = OpenRCT2::View3D::makeDirectionSpriteQuad(face, 64, 64, -32, -64);
-        sprites[face] = OpenRCT2::View3D::meshDrawUploadSprite(quad, rgba.data(), 64, 64);
+        sprites[face] = OpenRCT2::View3D::meshDrawUploadSprite(quad, rgba.data(), 64, 64, true).id;
     }
     if (model < 0 || ground < 0 || sprites[0] < 0)
     {

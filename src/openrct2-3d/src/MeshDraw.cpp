@@ -305,9 +305,10 @@ namespace OpenRCT2::View3D
             while (_atlasPages.size() <= page)
             {
                 const uint64_t flags = BGFX_SAMPLER_UVW_CLAMP | BGFX_SAMPLER_POINT;
-                _atlasPages.push_back(bgfx::createTexture2D(
-                    static_cast<uint16_t>(kAtlasSize), static_cast<uint16_t>(kAtlasSize), false, 1, bgfx::TextureFormat::RGBA8,
-                    flags, nullptr));
+                _atlasPages.push_back(
+                    bgfx::createTexture2D(
+                        static_cast<uint16_t>(kAtlasSize), static_cast<uint16_t>(kAtlasSize), false, 1,
+                        bgfx::TextureFormat::RGBA8, flags, nullptr));
             }
             return _atlasPages[page];
         }

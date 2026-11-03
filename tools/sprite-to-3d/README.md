@@ -59,7 +59,7 @@ The review PNG pastes the original sprites beside the renders. It is gitignored 
 
 What the validator checks per size class, all read from `conventions.SIZE_CLASSES`:
 
-- **IoU.** Closed-mask IoU gates (`IOU_CLOSE_KERNEL` 3, `IOU_CLOSED_MIN_PER_VIEW` 0.70, `IOU_CLOSED_MIN_MEAN` 0.75). Raw IoU and the 0.9–1.3 area ratio are reported; the area ratio gates.
+- **IoU.** Closed-mask IoU gates (`IOU_CLOSE_KERNEL` 3, `IOU_CLOSED_MIN_PER_VIEW` 0.70, `IOU_CLOSED_MIN_MEAN` 0.75). Raw IoU and the 0.9–1.3 area ratio are reported; the area ratio gates. `"crown": "sparse"` in `object.json` adds the sparse-crown gate (area ratio ≤ 1.10 and raw IoU ≥ 0.50 on every view).
 - **Empty render.** Each view needs `min_render_px` opaque pixels: prop_quarter 100, prop_tile 250, tree_quarter 150, otherwise 500.
 - **Triangles.** Over `soft_max_tris` warns, over `hard_tris` fails, under `tree_warn_below` warns (trees only). A meta `triangle_justification` is shown on the soft-cap warning.
 - **Footprint.** The whole mesh within `footprint_bu`; for `tree_quarter` also the trunk base (bottom `TRUNK_BASE_BAND_SIM` = 4 sim) within `trunk_base_bu` 0.25.
@@ -78,7 +78,20 @@ The archetype inputs. `rebuild.py` copies them into the meta's `params`, minus h
 | `atlas.size`, `atlas.tiles` | atlas size and tile layout |
 | `hist`, `*_hist` (`sprite_hist`, `top_hist`, `side_hist`, `bark_hist`, `rim_hist`, ...) | palette-index histograms that tint the atlas. Counts derived locally from the extracted sprite; no pixel data stored. At most 16 entries each (`MAX_HIST_ENTRIES`; `rebuild.py` refuses more). Not copied into the meta. |
 
-`object.json` may also carry `approved_iou` (the reviewed raw figures, kept in `iou.views`) and `triangle_justification` (copied to the meta's top level).
+Opt-in archetype and atlas keys added in batch 1 (absent means off, so existing examples are unchanged):
+
+| Key | Meaning |
+| --- | --- |
+| clump `tilt` | tilts a clump pad outward (drooping tiers) |
+| `leaders` | crossed triangle cards that make a single-leader point |
+| clump `lump` (true or a dict; defaults `DEFAULT_LUMP_PROFILE`) | builds a closed foliage lump (`add_lump`) instead of a flat pad |
+| `quality.limb_reach` (default 0.6) | how far a limb runs into its clump, as a share of the clump's larger radius |
+| atlas `shade: "clumped"` | smooth clump shading, no texel speckle |
+| atlas `side_cap` (`keys`, `depth`) | a light band along the top edge of pad skirts (snow caps) |
+| atlas `lump_fill` (`rows`, `key`) | fills transparent texels in the lump rows, so lumps are not see-through |
+| atlas `pinholes` (0–1) | clears that share of pad texels to show sky through sparse crowns |
+
+`object.json` may also carry `approved_iou` (the reviewed closed-mask figures, written to `iou.views` / `iou.mean`), `triangle_justification` (copied to the meta's top level) and `crown` (`"sparse"` turns on the sparse-crown gate; copied to the meta).
 
 ```bash
 python3 -m pytest tools/sprite-to-3d

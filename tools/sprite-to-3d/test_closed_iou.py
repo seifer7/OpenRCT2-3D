@@ -43,8 +43,8 @@ class CloseMaskTest(unittest.TestCase):
         self.assertEqual(C.IOU_CLOSE_KERNEL, 3)
         self.assertEqual(C.IOU_CLOSED_MIN_MEAN, 0.75)
         self.assertEqual(C.IOU_CLOSED_MIN_PER_VIEW, 0.70)
-        # The raw figures stay as the reported reference.
-        self.assertEqual((C.IOU_MIN_PER_VIEW, C.IOU_MIN_MEAN), (0.65, 0.70))
+        # Raw IoU is reported only; there is no raw threshold.
+        self.assertFalse(hasattr(C, "IOU_MIN_PER_VIEW") or hasattr(C, "IOU_MIN_MEAN"))
 
     def test_fills_single_pixel_holes(self):
         mask = np.zeros((12, 12), bool)
@@ -91,28 +91,33 @@ class GateTest(unittest.TestCase):
             "render_px": [1000] * 4,
         }
 
-    def test_iou_block_keeps_approved_raw_figures(self):
-        approved = {"views": [0.733, 0.712, 0.766, 0.687], "mean": 0.725, "source": "approved fit"}
-        block = rebuild.iou_block(approved, self._scores([0.78, 0.737, 0.787, 0.734], [0.73, 0.71, 0.77, 0.69]))
+    def test_iou_block_keeps_approved_figures(self):
+        approved = {"views": [0.78, 0.74, 0.79, 0.73], "mean": 0.76, "source": "approved fit"}
+        block = rebuild.iou_block(approved, self._scores([0.781, 0.737, 0.787, 0.734], [0.73, 0.71, 0.77, 0.69]))
         self.assertEqual(block["views"], approved["views"])
-        self.assertEqual(block["mean"], 0.725)
+        self.assertEqual(block["mean"], 0.76)
         self.assertEqual(block["source"], "approved fit")
-        self.assertEqual(block["closed"]["views"], [0.78, 0.737, 0.787, 0.734])
-        self.assertEqual(block["closed"]["kernel_px"], 3)
-        self.assertEqual(block["closed"]["threshold_mean"], 0.75)
-        self.assertEqual(block["raw_measured"]["views"], [0.73, 0.71, 0.77, 0.69])
+        self.assertEqual(block["raw"]["views"], [0.73, 0.71, 0.77, 0.69])
 
-    def test_iou_block_without_approval_records_the_measurement(self):
+    def test_iou_block_without_approval_records_the_closed_measurement(self):
         block = rebuild.iou_block(None, self._scores([0.8] * 4, [0.62] * 4))
-        self.assertEqual(block["views"], [0.62] * 4)
-        self.assertEqual(block["mean"], 0.62)
+        self.assertEqual(block["views"], [0.8] * 4)
+        self.assertEqual(block["mean"], 0.8)
+        self.assertEqual(block["kernel_px"], 3)
+        self.assertEqual((block["threshold_per_view"], block["threshold_mean"]), (0.70, 0.75))
+        self.assertEqual(block["raw"], {"views": [0.62] * 4, "mean": 0.62})
         self.assertIsNotNone(block["source"])
 
-    def test_iou_block_without_sprites_is_unchanged(self):
-        approved = {"views": [0.7] * 4, "mean": 0.7, "source": "s"}
+    def test_iou_block_has_no_legacy_fields(self):
+        block = rebuild.iou_block(None, self._scores([0.8] * 4))
+        self.assertEqual(set(block), {"views", "mean", "kernel_px", "threshold_per_view", "threshold_mean", "source", "raw"})
+        self.assertEqual(set(block["raw"]), {"views", "mean"})
+
+    def test_iou_block_without_sprites(self):
+        approved = {"views": [0.75] * 4, "mean": 0.75, "source": "s"}
         self.assertEqual(
             set(rebuild.iou_block(approved, None)),
-            {"views", "mean", "threshold_per_view", "threshold_mean", "source"},
+            {"views", "mean", "kernel_px", "threshold_per_view", "threshold_mean", "source"},
         )
 
     def test_score_silhouettes_reports_both(self):
@@ -126,11 +131,11 @@ class GateTest(unittest.TestCase):
 
 
 class DeclaredClosedIouTest(unittest.TestCase):
-    """The meta's recorded iou.closed block is held to the gate: views and mean."""
+    """The meta's recorded closed-mask iou.views / iou.mean are held to the gate."""
 
-    def _errors(self, closed):
+    def _errors(self, iou):
         report = validate.Report()
-        validate.check_declared_closed_iou({"iou": {"closed": closed}}, report)
+        validate.check_declared_closed_iou({"iou": iou}, report)
         return report.errors
 
     def test_passing_block(self):
@@ -152,6 +157,37 @@ class DeclaredClosedIouTest(unittest.TestCase):
         report = validate.Report()
         validate.check_declared_closed_iou({}, report)
         self.assertEqual(report.errors, [])
+
+    def test_checked_without_sprites(self):
+        import os
+
+        if not os.path.isfile(validate.FLAT_GLB):
+            self.skipTest("committed pine GLB not in this checkout")
+        import json
+
+        meta = json.load(open(validate.FLAT_META))
+        meta["iou"]["views"] = [0.78, 0.60, 0.79, 0.73]
+        report = validate.Report()
+        validate.render_and_score(validate.load_mesh(validate.FLAT_GLB), meta, None, None, report, False)
+        self.assertTrue(any("iou.views" in e for e in report.errors), report.errors)
+
+
+class SparseCrownTest(unittest.TestCase):
+    """crown: "sparse" adds area <= 1.10 and raw >= 0.50 in every view."""
+
+    def test_pass(self):
+        self.assertEqual(validate.sparse_crown_status([1.09, 1.08, 1.10, 1.0], [0.51, 0.52, 0.5, 0.6])[0], "PASS")
+
+    def test_area_over_fails(self):
+        self.assertEqual(validate.sparse_crown_status([1.11, 1.0, 1.0, 1.0], [0.6] * 4)[0], "FAIL")
+
+    def test_raw_under_floor_fails(self):
+        self.assertEqual(validate.sparse_crown_status([1.0] * 4, [0.6, 0.49, 0.6, 0.6])[0], "FAIL")
+
+    def test_unknown_crown_kind_is_a_schema_error(self):
+        report = validate.Report()
+        validate.check_meta_schema({"crown": "dense"}, report)
+        self.assertTrue(any("crown" in e for e in report.errors), report.errors)
 
 
 class UvsWithoutImageTest(unittest.TestCase):

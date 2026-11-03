@@ -1,0 +1,460 @@
+{
+ "schema": "openrct2-3d.object-model.v1",
+ "tool_version": "sprite-to-3d 1",
+ "object_id": "rct2.scenery_small.tcn",
+ "dat_name": "TCN",
+ "display_name": "Cannon",
+ "archetype": "prop",
+ "size_class": "prop_quarter",
+ "source_sprites": {
+  "image_indices": [
+   0,
+   1,
+   2,
+   3
+  ],
+  "offsets": [
+   {
+    "index": 0,
+    "width": 23,
+    "height": 23,
+    "x_offset": -11,
+    "y_offset": -18
+   },
+   {
+    "index": 1,
+    "width": 23,
+    "height": 18,
+    "x_offset": -12,
+    "y_offset": -14
+   },
+   {
+    "index": 2,
+    "width": 23,
+    "height": 17,
+    "x_offset": -12,
+    "y_offset": -13
+   },
+   {
+    "index": 3,
+    "width": 23,
+    "height": 22,
+    "x_offset": -10,
+    "y_offset": -17
+   }
+  ]
+ },
+ "alignment": {
+  "sprite_shift": [
+   0,
+   -1
+  ],
+  "sprite_y_nudge": -1
+ },
+ "units": {
+  "blender_unit_per_tile": 1,
+  "sim_units_per_tile": 32,
+  "origin": "tile centre, z=0 at the element base",
+  "authored_up": "Z",
+  "exported_up": "Y",
+  "z_squash_in_file": false
+ },
+ "bounds_blender": {
+  "min": [
+   -0.24458917655391613,
+   -0.15978124999999999,
+   0.0
+  ],
+  "max": [
+   0.22252043071560215,
+   0.15978124999999999,
+   0.47579617785236106
+  ],
+  "size": [
+   0.4671096072695183,
+   0.31956249999999997,
+   0.47579617785236106
+  ]
+ },
+ "height_sim": 15,
+ "footprint_tiles": [
+  0.5,
+  0.5
+ ],
+ "max_overhang_tiles": 0,
+ "base_sink_sim": 0,
+ "triangles": 320,
+ "texture": {
+  "embedded": true,
+  "width": 64,
+  "height": 64,
+  "alpha_mode": "MASK",
+  "alpha_cutoff": 0.5,
+  "filter": "NEAREST",
+  "mipmaps": false,
+  "double_sided": true,
+  "tiles": {
+   "metal": [
+    0,
+    0,
+    20,
+    16
+   ],
+   "metal_lip": [
+    20,
+    0,
+    20,
+    2
+   ],
+   "bore": [
+    40,
+    0,
+    6,
+    6
+   ],
+   "wood": [
+    0,
+    16,
+    16,
+    4
+   ],
+   "tyre": [
+    0,
+    20,
+    26,
+    2
+   ],
+   "wheel": [
+    46,
+    0,
+    12,
+    12
+   ]
+  },
+  "justification": "",
+  "palette_source": "Data/g1.dat"
+ },
+ "export": {
+  "exporter": "blender-4.2",
+  "reference": "The approved rct2.scenery_small.tcrp.glb next to the loader is the Blender 4.2 LTS export (Khronos glTF Blender I/O v4.2.83), patched to nearest filtering and alpha MASK. --no-blender uses the Python writer, which welds vertices and writes u16 indices so the structure matches that file. The game does not read this meta."
+ },
+ "iou": {
+  "views": [
+   0.785,
+   0.783,
+   0.738,
+   0.731
+  ],
+  "mean": 0.759,
+  "kernel_px": 3,
+  "threshold_per_view": 0.7,
+  "threshold_mean": 0.75,
+  "source": "Closed-mask (3px) IoU of the approved Blender 4.2 export, measured 2026-11-03 by validate.py against the four TCN direction sprites.",
+  "raw": {
+   "views": [
+    0.717,
+    0.705,
+    0.675,
+    0.688
+   ],
+   "mean": 0.696
+  }
+ },
+ "params": {
+  "atlas": {
+   "size": [
+    64,
+    64
+   ],
+   "seed": 1601,
+   "tiles": [
+    {
+     "name": "metal",
+     "rect": [
+      0,
+      0,
+      20,
+      16
+     ],
+     "kind": "metal",
+     "grad": -0.4,
+     "streak": 1.8,
+     "bands": [
+      {
+       "v": [
+        0.06,
+        0.16
+       ]
+      },
+      {
+       "v": [
+        0.84,
+        0.92
+       ]
+      }
+     ]
+    },
+    {
+     "name": "metal_lip",
+     "rect": [
+      20,
+      0,
+      20,
+      2
+     ],
+     "kind": "solid",
+     "grad": 0.3
+    },
+    {
+     "name": "bore",
+     "rect": [
+      40,
+      0,
+      6,
+      6
+     ],
+     "kind": "solid",
+     "grad": 0.2
+    },
+    {
+     "name": "wood",
+     "rect": [
+      0,
+      16,
+      16,
+      4
+     ],
+     "kind": "grain",
+     "grad": 0.6
+    },
+    {
+     "name": "tyre",
+     "rect": [
+      0,
+      20,
+      26,
+      2
+     ],
+     "kind": "solid",
+     "grad": 0.3
+    },
+    {
+     "name": "wheel",
+     "rect": [
+      46,
+      0,
+      12,
+      12
+     ],
+     "kind": "wheel",
+     "spokes": 6,
+     "rim": 1.2,
+     "hub": 1.5,
+     "spoke_width": 0.7
+    }
+   ]
+  },
+  "parts": [
+   {
+    "kind": "lathe",
+    "tile": "metal",
+    "origin": [
+     1.402,
+     0,
+     6.373
+    ],
+    "axis": [
+     -0.727,
+     0.0,
+     0.686
+    ],
+    "sides": 10,
+    "phase": 0.0,
+    "profile": [
+     [
+      -2.929,
+      0.0
+     ],
+     [
+      -2.529,
+      0.9
+     ],
+     [
+      -1.929,
+      1.3
+     ],
+     [
+      -1.729,
+      3.29
+     ],
+     [
+      -0.729,
+      3.871
+     ],
+     [
+      5.753,
+      3.8
+     ],
+     [
+      8.329,
+      3.728
+     ],
+     [
+      9.029,
+      3.145
+     ],
+     [
+      9.729,
+      3.145
+     ],
+     [
+      9.729,
+      1.887
+     ],
+     [
+      8.229,
+      1.887
+     ]
+    ],
+    "seg_tiles": {
+     "9": "bore",
+     "8": "metal_lip"
+    },
+    "cap_end": "bore"
+   },
+   {
+    "kind": "beam",
+    "tile": "wood",
+    "p0": [
+     -3.567,
+     3.263,
+     6.0
+    ],
+    "p1": [
+     6.833,
+     2.267,
+     0.75
+    ],
+    "size0": [
+     0.55,
+     1.5
+    ],
+    "size1": [
+     0.55,
+     0.75
+    ],
+    "up": [
+     0,
+     0,
+     1
+    ],
+    "mirror": "y"
+   },
+   {
+    "kind": "beam",
+    "tile": "wood",
+    "p0": [
+     5.933,
+     -2.817,
+     0.7
+    ],
+    "p1": [
+     5.933,
+     2.817,
+     0.7
+    ],
+    "size0": [
+     0.7,
+     0.7
+    ],
+    "up": [
+     0,
+     0,
+     1
+    ],
+    "ends": true
+   },
+   {
+    "kind": "beam",
+    "tile": "wood",
+    "p0": [
+     -1.967,
+     -4.013,
+     3.8
+    ],
+    "p1": [
+     -1.967,
+     4.013,
+     3.8
+    ],
+    "size0": [
+     0.6,
+     0.6
+    ],
+    "up": [
+     0,
+     0,
+     1
+    ]
+   },
+   {
+    "kind": "lathe",
+    "tile": "tyre",
+    "origin": [
+     -1.967,
+     4.563,
+     3.8
+    ],
+    "axis": [
+     0,
+     -1,
+     0
+    ],
+    "sides": 12,
+    "phase": 0.262,
+    "profile": [
+     [
+      -0.55,
+      3.8
+     ],
+     [
+      0.55,
+      3.8
+     ]
+    ],
+    "mirror": "y"
+   },
+   {
+    "kind": "disc",
+    "tile": "wheel",
+    "centre": [
+     -1.967,
+     4.563,
+     3.8
+    ],
+    "axis": [
+     0,
+     1,
+     0
+    ],
+    "radius": 3.78,
+    "sides": 12,
+    "phase": 0.262,
+    "mirror": "y"
+   }
+  ],
+  "offset": [
+   -0.1,
+   0.0,
+   0.0
+  ]
+ },
+ "review": {
+  "status": "approved",
+  "note": "Approved by the repo owner in batch 1 (2026-11-03)."
+ },
+ "files": {
+  "glb": "rct2.scenery_small.tcn.glb"
+ },
+ "triangle_justification": "320 tris (70 over the 250 prop soft cap): 10-sided barrel lathe with muzzle lip and bore, two 12-sided tyre lathes plus spoke discs and a 5-beam carriage; fewer sides facets the barrel and wheel outlines at 64 px."
+}

@@ -1,0 +1,50 @@
+{
+  "object_id": "rct2.scenery_small.tap",
+  "dat_name": "TAP",
+  "display_name": "Aleppo Pine",
+  "archetype": "conifer",
+  "size_class": "tree_small",
+  "footprint_tiles": [
+    1,
+    1
+  ],
+  "height_sim": 74,
+  "base_sink_sim": 3,
+  "max_overhang_tiles": 0.4,
+  "direction_images": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "alignment": {
+    "sprite_shift": [
+      0,
+      0
+    ],
+    "sprite_y_nudge": -1
+  },
+  "recolour": {
+    "primary": false,
+    "secondary": false,
+    "tertiary": false,
+    "checked": "No pixel in any of the four sprites uses the remap ranges 243-254, 202-213 or 46-57."
+  },
+  "expected_triangles": 892,
+  "texture_justification": "",
+  "approved_iou": {
+    "views": [
+      0.882,
+      0.863,
+      0.863,
+      0.885
+    ],
+    "mean": 0.873,
+    "source": "Closed-mask (3px) IoU of the approved Blender 4.2 export, measured 2026-11-03 by validate.py against the four TAP direction sprites."
+  },
+  "review": {
+    "status": "approved",
+    "note": "Approved by the repo owner in batch 1 (2026-11-03)."
+  },
+  "notes": "Full tile, conifer archetype. Wider, flatter dome than the Corsican Pine; three forked limbs (stems) carry the crown. sprite_y_nudge -1 is the full-tile (15, 15) anchor pixel, as for the pine. height_sim 74 is the model's geometric top (vertex max z); the DAT/object height is 80, and the rendered tip (79 sim above the anchor, from the back of the dome) matches the sprite tip of 80 within the \u00b12 tolerance. Clump positions fitted against the four TAP sprites."
+}

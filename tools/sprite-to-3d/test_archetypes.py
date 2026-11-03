@@ -379,7 +379,8 @@ class SmokeBuildTest(unittest.TestCase):
         mesh.f((0, 1, 2, 3), "a")
         mesh.f((0, 1, 2, 3, 4), "a")
         self.assertEqual(archetypes.triangle_count(mesh), 1 + 2 + 3)
-        self.assertEqual(archetypes.triangle_count(mesh), conifer.triangle_count(mesh))
+        self.assertFalse(hasattr(conifer, "triangle_count"))
+        self.assertIs(prop.triangle_count, archetypes.triangle_count)
 
     def _sane(self, mesh, tiles):
         V = np.asarray(mesh.V, float)

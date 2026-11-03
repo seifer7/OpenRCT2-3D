@@ -49,6 +49,9 @@ DEFAULT_QUALITY = dict(
     # Added for later objects; the defaults are the pine's construction.
     limbs=1,  # 0 hides the per-clump drooping branch and its twigs (dense columnar crowns)
     trunk_sides=8,
+    # Each clump's limb runs to the clump centre plus limb_reach x its larger
+    # radius. 0 ends the limb under the pad (pads sit on the branch ends).
+    limb_reach=0.6,
 )
 
 
@@ -175,10 +178,28 @@ def add_foliage(mesh, tiles, clump, index, rng, quality):
     tile = tiles[("pad_top_L%d" if big else "pad_top_S%d") % (index % 4)]
     tx, ty = rng.uniform(-0.06, 0.06), rng.uniform(-0.06, 0.06)
     ts = quality["top_scale"]
-    corners = [
-        loc(su * a * ts, sv * b * ts, zt + (su * tx * a + sv * ty * b))
-        for su, sv in ((-1, -1), (1, -1), (1, 1), (-1, 1))
-    ]
+    # Optional "tilt": [dz/dx, dz/dy] in world axes tips the whole pad (top,
+    # skirt, under, crown, tufts) as one plane, e.g. outward droop or a pad
+    # tilted at a branch end. Without it the pad keeps the small random tilt
+    # of the top card only, so clumps without "tilt" build exactly as before.
+    tilt = clump.get("tilt")
+    if tilt:
+        tlx = float(tilt[0]) * ca + float(tilt[1]) * sa
+        tly = -float(tilt[0]) * sa + float(tilt[1]) * ca
+
+        def zf(u, v, z):
+            return z + tlx * u + tly * v
+
+        corners = [loc(su * a * ts, sv * b * ts, zf(su * a * ts, sv * b * ts, zt)) for su, sv in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+    else:
+
+        def zf(u, v, z):
+            return z
+
+        corners = [
+            loc(su * a * ts, sv * b * ts, zt + (su * tx * a + sv * ty * b))
+            for su, sv in ((-1, -1), (1, -1), (1, 1), (-1, 1))
+        ]
     add_card(mesh, tile, corners, [(0, 1), (1, 1), (1, 0), (0, 0)], "pad_top")
 
     z0 = clump["z"] - quality["skirt_lo"] * clump["hb"]
@@ -204,10 +225,10 @@ def add_foliage(mesh, tiles, clump, index, rng, quality):
         ka, kb = [1 - lean / max(math.hypot(xx, yy), 1) for xx, yy in ((xa, ya), (xb, yb))]
         ja, jb = [1 + lean / max(math.hypot(xx, yy), 1) for xx, yy in ((xa, ya), (xb, yb))]
         corners = [
-            loc(xa * ka, ya * ka, z0 + dz),
-            loc(xb * kb, yb * kb, z0 + dz),
-            loc(xb * jb, yb * jb, z1 + dz),
-            loc(xa * ja, ya * ja, z1 + dz),
+            loc(xa * ka, ya * ka, zf(xa * ka, ya * ka, z0 + dz)),
+            loc(xb * kb, yb * kb, zf(xb * kb, yb * kb, z0 + dz)),
+            loc(xb * jb, yb * jb, zf(xb * jb, yb * jb, z1 + dz)),
+            loc(xa * ja, ya * ja, zf(xa * ja, ya * ja, z1 + dz)),
         ]
         add_card(mesh, side_tile, corners, [(ucur, 1), (ucur + uw, 1), (ucur + uw, 0), (ucur, 0)], "pad_side")
         ucur += uw
@@ -217,7 +238,7 @@ def add_foliage(mesh, tiles, clump, index, rng, quality):
     add_card(
         mesh,
         under,
-        [loc(au * a * su, bv * b * su, z0 + 0.6) for au, bv in ((-1, -1), (1, -1), (1, 1), (-1, 1))],
+        [loc(au * a * su, bv * b * su, zf(au * a * su, bv * b * su, z0 + 0.6)) for au, bv in ((-1, -1), (1, -1), (1, 1), (-1, 1))],
         [(0, 1), (1, 1), (1, 0), (0, 0)],
         "pad_under",
     )
@@ -229,7 +250,7 @@ def add_foliage(mesh, tiles, clump, index, rng, quality):
     add_card(
         mesh,
         crown,
-        [loc(ox + su_ * a * s2, oy + sv * b * s2, zc) for su_, sv in ((-1, -1), (1, -1), (1, 1), (-1, 1))],
+        [loc(ox + su_ * a * s2, oy + sv * b * s2, zf(ox + su_ * a * s2, oy + sv * b * s2, zc)) for su_, sv in ((-1, -1), (1, -1), (1, 1), (-1, 1))],
         [(0, 1), (1, 1), (1, 0), (0, 0)],
         "pad_top",
     )
@@ -244,7 +265,7 @@ def add_foliage(mesh, tiles, clump, index, rng, quality):
         tangent = (-ey, ex)
         elevation = rng.uniform(0.35, 0.8)
         up = (ex * math.cos(elevation), ey * math.cos(elevation), math.sin(elevation))
-        base = loc(cx, cy, zt - rng.uniform(0.5, 2.5))
+        base = loc(cx, cy, zf(cx, cy, zt - rng.uniform(0.5, 2.5)))
 
         def corner(au, bv, base=base, tangent=tangent, up=up, size=size):
             uu = au * size
@@ -260,6 +281,91 @@ def add_foliage(mesh, tiles, clump, index, rng, quality):
             [(0, 1), (1, 1), (1, 0), (0, 0)],
             "tuft",
         )
+
+
+DEFAULT_LUMP_PROFILE = ((0.0, 0.0), (0.12, 0.7), (0.42, 1.0), (0.78, 0.78), (1.0, 0.0))
+
+
+def add_lump(mesh, tiles, clump, index, rng, spec):
+    """Opt-in rounded foliage lump: a closed, faceted body instead of cards.
+
+    Used when a clump carries "lump" (true or a dict); clumps without it go
+    through add_foliage unchanged. The body is an N-sided (default 7) lathe
+    around the clump centre, from z - hb to z + ht, through the "profile" rows
+    [[t, k], ...] (t 0..1 up the height, k times the clump's a/b ellipse; k = 0
+    closes the end in a single apex). Each lump gets a random yaw, a random
+    per-column radius jitter and a random xy offset (fraction of a/b), so
+    stacked lumps overlap into irregular bulging lobes. Sides sample the
+    opaque core of the pad_side tiles (a different tile per band); bands with
+    t >= "cap_from" (off by default) use a pad_top tile projected from above.
+    """
+    spec = spec if isinstance(spec, dict) else {}
+    sides = int(spec.get("sides", 7))
+    profile = [(float(t), float(k)) for t, k in spec.get("profile", DEFAULT_LUMP_PROFILE)]
+    jitter = float(spec.get("jitter", 0.12))
+    off = float(spec.get("offset", 0.08))
+    cap_from = float(spec.get("cap_from", 2.0))
+    v_core = spec.get("v_core", (0.2, 0.8))
+    tpu = float(spec.get("side_tpu", 1.0))
+    yaw = rng.uniform(0, 2 * math.pi)
+    ox = clump["x"] + rng.uniform(-off, off) * clump["a"]
+    oy = clump["y"] + rng.uniform(-off, off) * clump["b"]
+    kj = [1.0 + rng.uniform(-jitter, jitter) for _ in range(sides)]
+    tip = spec.get("tip", (0.0, 0.0))
+    ca, sa = math.cos(clump["th"]), math.sin(clump["th"])
+    a, b = clump["a"], clump["b"]
+    z0 = clump["z"] - clump["hb"]
+    z1 = clump["z"] + clump["ht"]
+    top_tile = tiles[("pad_top_L%d" if max(a, b) >= 9 else "pad_top_S%d") % (index % 4)]
+    kmax = max(k for _t, k in profile)
+    perimeter = 2 * math.pi * max(a, b) * kmax
+    side_w = tiles["pad_side0"][2]
+    uspan = min(1.0, perimeter * tpu / side_w)
+    u0 = rng.uniform(0, 1.0 - uspan)
+
+    def point(t, k, j):
+        z = z0 + t * (z1 - z0)
+        if k <= 0:
+            dx, dy = (float(tip[0]), float(tip[1])) if t >= 1.0 else (0.0, 0.0)
+            return (ox + dx, oy + dy, z)
+        ang = yaw + 2 * math.pi * j / sides
+        u = k * kj[j % sides] * a * math.cos(ang)
+        v = k * kj[j % sides] * b * math.sin(ang)
+        return (ox + u * ca - v * sa, oy + u * sa + v * ca, z)
+
+    rmax = max(a, b) * kmax * (1 + jitter)
+
+    def cap_uv(p):
+        return tile_uv(top_tile, 0.5 + 0.42 * (p[0] - ox) / rmax, 0.5 + 0.42 * (p[1] - oy) / rmax)
+
+    # Each band between two profile rows gets its own pad_side tile and its own
+    # stretch of the tile's opaque core, at side_tpu texels per sim unit along the
+    # band's slant (squeezed only if a band is taller than the core).
+    for band, ((t0, k0), (t1, k1)) in enumerate(zip(profile, profile[1:])):
+        cap = t0 >= cap_from
+        kind = "pad_top" if cap else "pad_side"
+        side_tile = tiles["pad_side%d" % ((index + band) % 4)]
+        core = (v_core[1] - v_core[0]) * side_tile[3]
+        slant = math.hypot((t1 - t0) * (z1 - z0), (k1 - k0) * 0.5 * (a + b))
+        span = min(core, slant * tpu)
+        vstart = v_core[0] * side_tile[3] + rng.uniform(0, core - span)
+        rows = []
+        for t, k in ((t0, k0), (t1, k1)):
+            vv = (vstart + (span if t == t0 else 0.0)) / side_tile[3]
+            row = []
+            for j in range(sides + 1):
+                p = point(t, k, j)
+                uv = cap_uv(p) if cap else tile_uv(side_tile, u0 + uspan * j / sides, vv)
+                row.append(mesh.v(p, uv))
+            rows.append(row)
+        r0, r1 = rows
+        for j in range(sides):
+            if k0 <= 0:
+                mesh.f((r0[j], r1[j + 1], r1[j]), kind)
+            elif k1 <= 0:
+                mesh.f((r0[j], r0[j + 1], r1[j]), kind)
+            else:
+                mesh.f((r0[j], r0[j + 1], r1[j + 1], r1[j]), kind)
 
 
 def add_stem(mesh, tiles, stem):
@@ -314,6 +420,33 @@ def add_stem(mesh, tiles, stem):
                 mesh.f((row0[i], row0[i + 1], row1[i + 1], row1[i]), kind)
 
 
+def add_leader(mesh, tiles, leader):
+    """Optional single-leader point: crossed triangle cards from a base width to a tip.
+
+    leader: {"base": [x, y, z], "tip": [x, y, z], "r": half width at the base,
+    "cards": 3, "tile": "pad_side0", "uv": [u0, v0, u1, v1], "phase": 0.3}.
+    The uv rect should sit in an opaque band of the tile so the triangle edge,
+    not the alpha, shapes the point. Not used by the Corsican Pine.
+    """
+    tile = tiles[leader.get("tile", "pad_side0")]
+    base = tuple(float(c) for c in leader["base"])
+    tip = tuple(float(c) for c in leader["tip"])
+    r = float(leader["r"])
+    n = int(leader.get("cards", 3))
+    u0, v0, u1, v1 = (float(c) for c in leader.get("uv", [0.1, 0.25, 0.4, 0.75]))
+    phase = float(leader.get("phase", 0.3))
+    for k in range(n):
+        ang = phase + math.pi * k / n
+        dx, dy = r * math.cos(ang), r * math.sin(ang)
+        add_card(
+            mesh,
+            tile,
+            [(base[0] - dx, base[1] - dy, base[2]), (base[0] + dx, base[1] + dy, base[2]), tip],
+            [(u0, v1), (u1, v1), ((u0 + u1) / 2, v0)],
+            leader.get("kind", "tuft"),
+        )
+
+
 def build(params, tiles, quality=None):
     rings = trunk_rings(params)
     q = dict(DEFAULT_QUALITY)
@@ -333,7 +466,7 @@ def build(params, tiles, quality=None):
             distance = math.hypot(clump["x"] - rx, clump["y"] - ry)
             angle = math.atan2(clump["y"] - ry, clump["x"] - rx) if distance > 2 else clump["th"]
             ux, uy = math.cos(angle), math.sin(angle)
-            length = min(max(distance + 0.6 * max(clump["a"], clump["b"]), 6.0), 24.0)
+            length = min(max(distance + q["limb_reach"] * max(clump["a"], clump["b"]), 6.0), 24.0)
             z0 = clump["z"] - 3.0
             r0 = float(root[2]) * 0.8
             p0 = (rx + ux * r0, ry + uy * r0, z0)
@@ -343,7 +476,7 @@ def build(params, tiles, quality=None):
             distance = math.hypot(clump["x"], clump["y"])
             angle = math.atan2(clump["y"], clump["x"]) if distance > 2 else clump["th"]
             ux, uy = math.cos(angle), math.sin(angle)
-            length = min(max(distance + 0.6 * max(clump["a"], clump["b"]), 6.0), 24.0)
+            length = min(max(distance + q["limb_reach"] * max(clump["a"], clump["b"]), 6.0), 24.0)
             z0 = clump["z"] - 3.0
             r0 = trunk_radius(z0, rings) * 0.8
             p0 = (ux * r0, uy * r0, z0)
@@ -357,7 +490,10 @@ def build(params, tiles, quality=None):
             l2 = length * rng.uniform(0.35, 0.5)
             tip = (p1[0] + math.cos(a2) * l2, p1[1] + math.sin(a2) * l2, p1[2] + rng.uniform(-1.0, 0.8))
             add_limb(mesh, tiles, [p1, tip], [0.35, 0], 3)
-        add_foliage(mesh, tiles, clump, i, rng, q)
+        if clump.get("lump"):
+            add_lump(mesh, tiles, clump, i, rng, clump["lump"])
+        else:
+            add_foliage(mesh, tiles, clump, i, rng, q)
     for twig in params.get("branches", []):
         ux, uy = math.cos(twig["ang"]), math.sin(twig["ang"])
         r0 = trunk_radius(twig["z"], rings) * 0.8
@@ -370,8 +506,6 @@ def build(params, tiles, quality=None):
         add_limb(mesh, tiles, points, [q["twig_r"], q["twig_r"] * 0.6, 0], 4)
     for stem in params.get("stems", []):
         add_stem(mesh, tiles, stem)
+    for leader in params.get("leaders", []):
+        add_leader(mesh, tiles, leader)
     return mesh
-
-
-def triangle_count(mesh):
-    return sum(len(face) - 2 for face in mesh.F)

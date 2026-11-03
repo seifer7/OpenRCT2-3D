@@ -1,0 +1,51 @@
+{
+  "object_id": "rct2.scenery_small.tcj",
+  "dat_name": "TCJ",
+  "display_name": "Common Juniper",
+  "archetype": "conifer",
+  "size_class": "tree_quarter",
+  "footprint_tiles": [
+    0.5,
+    0.5
+  ],
+  "height_sim": 65,
+  "base_sink_sim": 2,
+  "max_overhang_tiles": 0.15,
+  "direction_images": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "alignment": {
+    "sprite_shift": [
+      0,
+      0
+    ],
+    "sprite_y_nudge": -1,
+    "anchor": "quarter tile: SceneryQuadrantOffsets[(quadrant + rotation) & 3] - 1 = (7,7)/(7,23)/(23,23)/(23,7)",
+    "model_origin": "quadrant centre (8,8)/(8,24)/(24,24)/(24,8), i.e. tile centre +/-8 sim on x and y",
+    "loader": "translate to the element's quadrant centre (from the stored quadrant, not view-rotated) and rotate about it"
+  },
+  "recolour": {
+    "primary": false,
+    "secondary": false,
+    "tertiary": false
+  },
+  "expected_triangles": 372,
+  "approved_iou": {
+    "views": [
+      0.868,
+      0.846,
+      0.86,
+      0.843
+    ],
+    "mean": 0.854,
+    "source": "Closed-mask (3px) IoU of the approved Blender 4.2 export, measured 2026-11-03 by validate.py against the four TCJ direction sprites."
+  },
+  "review": {
+    "status": "approved",
+    "note": "Approved by the repo owner in batch 1 (2026-11-03)."
+  },
+  "notes": "Quarter-tile tree: the DAT flags are vOffsetCentre only (no occupiesFullTile). OpenRCT2 reads vOffsetCentre only inside the occupiesFullTile branch of PaintSmallScenery (Paint.SmallScenery.cpp), so it has no effect on this object. A quarter-tile element is painted at SceneryQuadrantOffsets[(quadrant + rotation) & 3] - 1, i.e. (7,7), (7,23), (23,23) or (23,7) inside the tile (Scenery.cpp; the -1 keeps old custom objects aligned, issue #17616), and placed at tile corner + SceneryQuadrantOffsets[quadrant] = the quadrant centre (8,8)/(8,24)/(24,24)/(24,8) (SmallSceneryPlaceAction.cpp). The anchor is therefore one sim unit toward the tile corner from the quadrant centre, the same relation as the full-tile anchor (15,15) to the tile centre (16,16). So the model origin is the quadrant centre, the mesh is centred on it and kept inside the 16x16-sim quadrant (footprint_tiles [0.5, 0.5]; foliage cards overhang by at most max_overhang_tiles), and the comparison paste uses the same sprite_y_nudge -1 as a full tile. The sprites are centred on the anchor (x_offset = -width/2), and the fitted sprite_shift is [0, 0]: shifting by 1 px scored the same or lower, and nudge 0 / -2 scored lower than -1. A loader has to place this model at the quadrant centre (tile centre +/-8 sim on x and y from the stored quadrant, which is not rotated by the view) and rotate it by its direction about that point, not about the tile centre. size_class tree_quarter (trunk base within +/-0.25, canopy within +/-0.40; max_overhang_tiles 0.15). Shape (round 2): 8 overlapping closed foliage lumps from the conifer archetype's opt-in clump \"lump\" builder (7-sided, random yaw, per-column radius jitter and xy offset, lumps 16.5 sim tall at 5.7 sim spacing so they overlap), widest at about a third of the height and tapering to a closed foliage point (the top lump's apex, 3 sim off-axis to match the per-view tips). No trunk spire: a 6-sided trunk stub to z 18, visible only at the base. ~336 of 372 tris are lobe geometry. height_sim 65 is the measured GLB tip (64.9 sim; DAT height 64). The pad_side tiles use the tree128 painter's opt-in atlas.lump_fill (rows 0.18-0.82, key 83) so the closed lumps have no see-through holes. Atlas: tree128 painter with the sprite's foliage (82-91) and wood (22-26, 12) index counts."
+}

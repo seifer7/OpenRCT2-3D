@@ -47,9 +47,12 @@ class Report:
         self.warnings = []
         self.notes = []
         self.rows = []
+        self.messages = []
 
-    def error(self, message):
+    def error(self, message, from_row=False):
         self.errors.append(message)
+        if not from_row:
+            self.messages.append(message)
 
     def warn(self, message):
         self.warnings.append(message)
@@ -60,7 +63,7 @@ class Report:
     def row(self, name, status, detail=""):
         self.rows.append((name, status, detail))
         if status == "FAIL":
-            self.error(f"{name}: {detail}" if detail else name)
+            self.error(f"{name}: {detail}" if detail else name, from_row=True)
         elif status == "WARN":
             self.warn(f"{name}: {detail}" if detail else name)
 
@@ -121,8 +124,6 @@ def _object_id(meta, glb_path):
 def triangle_justification(meta):
     """The meta's written reason for standing over the soft triangle cap, or ""."""
     value = meta.get("triangle_justification")
-    if value is None:
-        value = (meta.get("geometry") or {}).get("triangle_justification")
     return str(value).strip() if value and str(value).strip() else ""
 
 
@@ -246,20 +247,13 @@ def compare_tip_heights(render_masks, sprite_masks, shift, nudge):
 
 
 def _height_sim(meta):
-    if meta.get("height_sim") is not None:
-        return float(meta["height_sim"])
-    box = (meta.get("units_and_scale") or {}).get("bbox_sim") or {}
-    if box.get("max"):
-        return float(box["max"][2])
-    return None
+    value = meta.get("height_sim")
+    return float(value) if value is not None else None
 
 
 def _justification(meta):
-    texture = meta.get("texture") or {}
-    for value in (texture.get("justification"), texture.get("atlas_justification"), meta.get("texture_justification")):
-        if value and str(value).strip():
-            return str(value).strip()
-    return ""
+    value = (meta.get("texture") or {}).get("justification")
+    return str(value).strip() if value and str(value).strip() else ""
 
 
 def _identifier_safe(name):
@@ -369,6 +363,9 @@ def check_meta_schema(meta, report):
     sprites = meta.get("source_sprites") or {}
     if not sprites.get("image_indices"):
         report.error("meta source_sprites.image_indices is empty")
+    crown = meta.get("crown")
+    if crown is not None and crown not in C.CROWN_KINDS:
+        report.error(f"meta crown {crown!r} is not one of {', '.join(C.CROWN_KINDS)}")
     review = meta.get("review") or {}
     if review.get("status") not in ("approved", "pending"):
         report.error("meta review.status must be 'approved' or 'pending'")
@@ -464,23 +461,35 @@ def per_view_tip_status(deltas):
 
 
 def check_declared_closed_iou(meta, report):
-    """Hold the meta's recorded iou.closed block to the closed-mask gate.
+    """Hold the meta's recorded closed-mask iou.views / iou.mean to the gate.
 
-    Stored figures are a recorded measurement. A fresh rasteriser will not hit
-    them exactly; this only catches a meta that claims a pass it didn't earn,
-    per view (IOU_CLOSED_MIN_PER_VIEW) and on the mean (IOU_CLOSED_MIN_MEAN).
+    Runs with or without --sprites. Stored figures are a recorded measurement;
+    a fresh rasteriser will not hit them exactly, so this only catches a meta
+    that claims a pass it didn't earn, per view (IOU_CLOSED_MIN_PER_VIEW) and
+    on the mean (IOU_CLOSED_MIN_MEAN).
     """
-    closed = (meta.get("iou") or {}).get("closed") or {}
-    declared = closed.get("views")
+    iou = meta.get("iou") or {}
+    declared = iou.get("views")
     if declared and len(declared) == 4:
         if any(float(v) < C.IOU_CLOSED_MIN_PER_VIEW for v in declared):
-            report.error("meta iou.closed.views records a view under the closed-mask threshold")
-    mean = closed.get("mean")
+            report.error("meta iou.views records a view under the closed-mask threshold")
+    mean = iou.get("mean")
     if mean is not None and float(mean) < C.IOU_CLOSED_MIN_MEAN:
         report.error(
-            f"meta iou.closed.mean {float(mean):.3f} is under the closed-mask mean threshold "
+            f"meta iou.mean {float(mean):.3f} is under the closed-mask mean threshold "
             f"{C.IOU_CLOSED_MIN_MEAN:.2f}"
         )
+
+
+def sparse_crown_status(ratios, raw_views):
+    """PASS/FAIL for a sparse-crown tree: area ratio and raw IoU per view."""
+    area_ok = all(r <= C.SPARSE_CROWN_MAX_AREA_RATIO for r in ratios)
+    raw_ok = all(v >= C.SPARSE_CROWN_MIN_RAW_IOU for v in raw_views)
+    detail = (
+        f"area max {max(ratios):.2f} (<= {C.SPARSE_CROWN_MAX_AREA_RATIO:.2f}), "
+        f"raw min {min(raw_views):.3f} (>= {C.SPARSE_CROWN_MIN_RAW_IOU:.2f})"
+    )
+    return ("PASS" if area_ok and raw_ok else "FAIL"), detail
 
 
 def score_silhouettes(renders, placed, kernel=None):
@@ -550,6 +559,7 @@ def render_and_score(mesh, meta, sprites_dir, out_path, report, require_iou):
                 f"view {view} rendered {count} opaque pixels (floor {floor} for "
                 f"{meta.get('size_class')}); the projection or the alpha cut is empty"
             )
+    check_declared_closed_iou(meta, report)
     placed = None
     ious = None
     if sprites_dir:
@@ -587,13 +597,7 @@ def render_and_score(mesh, meta, sprites_dir, out_path, report, require_iou):
             f"(gate: each >= {C.IOU_CLOSED_MIN_PER_VIEW:.2f}, mean >= {C.IOU_CLOSED_MIN_MEAN:.2f})",
         )
         # Raw IoU is reported, not gated, so a stippled sprite stays visible.
-        raw_low = any(s < C.IOU_MIN_PER_VIEW for s in ious) or mean < C.IOU_MIN_MEAN
-        report.row(
-            "silhouette IoU (raw, reported)",
-            "INFO",
-            f"views {[round(s, 3) for s in ious]} mean {mean:.3f}"
-            + (f" (under the old raw bar {C.IOU_MIN_PER_VIEW:.2f}/{C.IOU_MIN_MEAN:.2f})" if raw_low else ""),
-        )
+        report.row("silhouette IoU (raw, reported)", "INFO", f"views {[round(s, 3) for s in ious]} mean {mean:.3f}")
         ratios = []
         for view in range(4):
             sprite_px = int(np.count_nonzero(placed[view][..., 3] > 0))
@@ -605,6 +609,9 @@ def render_and_score(mesh, meta, sprites_dir, out_path, report, require_iou):
             "PASS" if ratio_ok else "FAIL",
             ", ".join(f"{r:.2f}" for r in ratios),
         )
+        if meta.get("crown") == "sparse":
+            status, detail = sparse_crown_status(ratios, ious)
+            report.row("sparse crown", status, detail)
         ok, model_tip, tallest, rows = compare_tip_heights(renders, placed, shift, nudge)
         for view, (sprite_tip, render_tip, delta) in enumerate(rows):
             report.note(
@@ -622,7 +629,6 @@ def render_and_score(mesh, meta, sprites_dir, out_path, report, require_iou):
             )
             status, detail = per_view_tip_status([row[2] for row in rows])
             report.row("per-view tip delta", status, detail)
-        check_declared_closed_iou(meta, report)
     elif require_iou:
         report.error("IoU was required but no --sprites directory was given")
     else:
@@ -835,6 +841,7 @@ def validate_files(glb_path, meta_path, sprites_dir, out_path, require_iou):
         return report
     if mesh["gltf"].get("asset", {}).get("version") != "2.0":
         report.row("glTF 2.0", "FAIL", str(mesh["gltf"].get("asset")))
+    check_meta_schema(meta, report)
     apply_checklist(report, glb_path, meta, mesh)
     render_and_score(mesh, meta, sprites_dir, out_path, report, require_iou)
     return report
@@ -848,6 +855,8 @@ def _print_report(report, title=None):
         for name, status, detail in report.rows:
             extra = f"  {detail}" if detail else ""
             print(f"  {status:<4}  {name:<{width}}{extra}")
+    for line in report.messages:
+        print(f"  FAIL  {line}")
     for line in report.notes:
         print(f"  note  {line}")
     if report.ok():

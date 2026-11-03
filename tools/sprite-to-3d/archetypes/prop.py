@@ -36,7 +36,8 @@ from __future__ import annotations
 
 import math
 
-from .conifer import Mesh, triangle_count  # noqa: F401  (re-exported for callers)
+from . import triangle_count  # noqa: F401  (re-exported for callers)
+from .conifer import Mesh
 
 UV_INSET = 0.25
 

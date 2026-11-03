@@ -300,6 +300,53 @@ def _speckle(idx, speckle, rng):
     return idx
 
 
+def _clumped_lump(canvas, cx, cy, rad, lightdir=(0, 1), base=0.0, squash=1.0):
+    """Canvas.lump without the per-texel noise and pin-point highlights.
+
+    Each lump is one smooth light-to-dark dome with a broad lit cap, so after
+    histogram matching the shades read as clumps of needles rather than
+    scattered single texels. Used only with atlas "shade": "clumped".
+    """
+    c = canvas
+    yy, xx = np.mgrid[0 : c.h, 0 : c.w]
+    dy = (yy - cy) / squash
+    ang = np.arctan2(dy, xx - cx)
+    k = c.rng.integers(5, 8)
+    ph = c.rng.random() * 6.28
+    rr = rad * (1 + 0.13 * np.sin(k * ang + ph) + 0.06 * np.sin((k + 3) * ang + 2 * ph))
+    d = np.hypot(xx - cx, dy)
+    m = d <= rr
+    q = d / np.maximum(rr, 1e-3)
+    sh = ((yy - cy) * lightdir[1] + (xx - cx) * lightdir[0]) / max(rad, 1)
+    v = base - 0.7 * sh - 0.45 * q * q
+    cap = (sh < -0.15) & (q < 0.8)
+    v = np.where(cap, v + 0.25, v)
+    c.n += 1
+    c.S[m] = v[m]
+    c.L[m] = c.n
+    c.Q[m] = q[m]
+
+
+def _snow_cap(idx, cap_keys, depth, rng):
+    """Repaint the top `depth` opaque texels of each column with cap_keys
+    (light to dark from the top edge down), for snow lying on a skirt card.
+    Only the first opaque run of a column is capped, so no snow streaks run
+    down through holes in the strip."""
+    out = idx.copy()
+    h, w = idx.shape
+    keys = list(cap_keys)
+    for x in range(w):
+        col = np.nonzero(idx[:, x] > 0)[0]
+        if not col.size:
+            continue
+        runs = np.split(col, np.nonzero(np.diff(col) > 1)[0] + 1)
+        for run in runs[:1]:
+            dd = int(depth + rng.integers(-1, 2))
+            for j, y in enumerate(run[: max(dd, 0)]):
+                out[y, x] = keys[min(len(keys) - 1, int(j * len(keys) / max(dd, 1)))]
+    return out
+
+
 def paint_compact128(spec, palette):
     width, height = spec.get("size", [128, 128])
     if (width, height) != (128, 128):
@@ -313,6 +360,17 @@ def paint_compact128(spec, palette):
     top_keys = _shade_keys(top_hist, palette)
     side_keys = _shade_keys(side_hist, palette)
     sprite_keys = _shade_keys(sprite_hist, palette)
+    # Optional "shade": "clumped" paints smooth lumps (no texel noise or pin
+    # highlights). Optional "side_cap": {"keys": [light..dark], "depth": 3}
+    # lays a snow band along the top edge of the skirt strips. Both default off.
+    if spec.get("shade") == "clumped":
+        lump = _clumped_lump
+    else:
+
+        def lump(c, *args, **kwargs):
+            c.lump(*args, **kwargs)
+
+    side_cap = spec.get("side_cap")
 
     indices = np.zeros((height, width), np.int32)
     tiles = {}
@@ -334,7 +392,7 @@ def paint_compact128(spec, palette):
         pts.sort(key=lambda p: p[1])
         for u, v in pts:
             rad = rng.uniform(0.2, 0.27) * w * (1 - 0.25 * (u * u + v * v))
-            c.lump((u * 0.62 + 1) * w / 2, (v * 0.62 + 1) * h / 2, rad, (0.4, 0.9), base=0.0)
+            lump(c, (u * 0.62 + 1) * w / 2, (v * 0.62 + 1) * h / 2, rad, (0.4, 0.9), base=0.0)
         return _speckle(_finish_ranked(c, top_hist, top_keys, (1, 1)), speckle, rng)
 
     def pad_side(w, h):
@@ -345,8 +403,11 @@ def paint_compact128(spec, palette):
             for x in xs:
                 e = np.sin(np.pi * np.clip(x / w, 0, 1)) ** 0.4
                 rad = rng.uniform(rlo, rhi) * (0.65 + 0.35 * e)
-                c.lump(x, h * cyf + rng.uniform(-0.8, 0.8), rad, (0, 1), base=base, squash=0.7)
-        return _speckle(_finish_ranked(c, side_hist, side_keys, (0, 1)), speckle, rng)
+                lump(c, x, h * cyf + rng.uniform(-0.8, 0.8), rad, (0, 1), base=base, squash=0.7)
+        idx = _speckle(_finish_ranked(c, side_hist, side_keys, (0, 1)), speckle, rng)
+        if side_cap:
+            idx = _snow_cap(idx, side_cap["keys"], int(side_cap.get("depth", 3)), rng)
+        return idx
 
     for name, (_x, _y, w, h) in COMPACT128_TILES.items():
         if name.startswith("pad_top"):
@@ -356,7 +417,7 @@ def paint_compact128(spec, palette):
         elif name.startswith("tuft"):
             c = Canvas(h, w, rng)
             for _ in range(3):
-                c.lump(rng.uniform(5, 11), rng.uniform(6, 10), rng.uniform(3.5, 5), (0, 1))
+                lump(c, rng.uniform(5, 11), rng.uniform(6, 10), rng.uniform(3.5, 5), (0, 1))
             put(name, _speckle(_finish_ranked(c, sprite_hist, sprite_keys, (0, 1)), speckle, rng))
 
     # Bark: vertical streaks, matched in the given key order (default shade order).

@@ -54,9 +54,10 @@ Written 2026-11-01 AEST. **Must** items are hard requirements. **Target** items 
 - [ ] **Must:** GLB ≤ **128 KB**. **Target:** ≤ 100 KB. TCRP is 85.4 KB, with a 17.7 KB PNG and 1.5 KB of JSON.
 
 ## 8. Match to the 2D sprite (all 4 directions, rotation 0)
-- [ ] **Must:** closed-mask silhouette IoU against the sprite (3×3 morphological close on **both** masks, `IOU_CLOSE_KERNEL` = 3) has a **mean ≥ 0.75** and is **≥ 0.70 for each view**. Raw IoU is reported beside it (the old raw reference was mean ≥ 0.70, each ≥ 0.65) but does not gate. **Only closed IoU is gated**, both the fresh measurement and the meta's recorded `iou.closed` block (views and mean); the meta's raw `iou.views` / `iou.mean` and `iou.raw_measured` are records and are not checked against any threshold. TCRP: closed 0.780 / 0.737 / 0.787 / 0.734, mean 0.759; raw mean 0.725.
+- [ ] **Must:** closed-mask silhouette IoU against the sprite (3×3 morphological close on **both** masks, `IOU_CLOSE_KERNEL` = 3) has a **mean ≥ 0.75** and is **≥ 0.70 for each view**. Raw IoU is reported beside it but has no threshold and does not gate. TCRP: closed 0.780 / 0.737 / 0.787 / 0.734, mean 0.759; raw mean 0.725.
 - [ ] **Must:** each view renders at least the class `min_render_px` opaque pixels (prop_quarter 100, prop_tile 250, tree_quarter 150, otherwise 500).
 - [ ] **Must:** the render/sprite pixel-area ratio (raw masks) is **0.9-1.3** for each view.
+- [ ] **Must (sparse crowns):** an object with `"crown": "sparse"` has an area ratio **≤ 1.10** and raw IoU **≥ 0.50** on every view. Mark any tree whose sprite shows open foliage on visible branches.
 - [ ] **Must:** palette histograms stay in `params.json` (≤ 16 entries each; counts derived locally from the extracted sprite, no pixel data stored) and are not copied into the meta.
 - [ ] **Target:** a visual check next to the sprite fallback in the 3D view and in the 2D game.
 

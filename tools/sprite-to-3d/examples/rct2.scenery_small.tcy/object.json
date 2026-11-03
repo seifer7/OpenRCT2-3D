@@ -1,0 +1,48 @@
+{
+  "object_id": "rct2.scenery_small.tcy",
+  "dat_name": "TCY",
+  "display_name": "Common Yew",
+  "archetype": "conifer",
+  "size_class": "tree_small",
+  "footprint_tiles": [
+    1,
+    1
+  ],
+  "height_sim": 72,
+  "base_sink_sim": 3,
+  "max_overhang_tiles": 0.33,
+  "direction_images": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "alignment": {
+    "sprite_shift": [
+      0,
+      0
+    ],
+    "sprite_y_nudge": -1
+  },
+  "recolour": {
+    "primary": false,
+    "secondary": false,
+    "tertiary": false
+  },
+  "expected_triangles": 672,
+  "approved_iou": {
+    "views": [
+      0.875,
+      0.851,
+      0.869,
+      0.864
+    ],
+    "mean": 0.865,
+    "source": "Closed-mask (3px) IoU of the approved Blender 4.2 export, measured 2026-11-03 by validate.py against the four TCY direction sprites."
+  },
+  "review": {
+    "status": "approved",
+    "note": "Approved by the repo owner in batch 1 (2026-11-03)."
+  },
+  "notes": "Full-tile tree (DAT flags occupiesFullTile + vOffsetCentre), so the full-tile anchor (15,15) and sprite_y_nudge -1 apply as for the pine. Shape (round 2): a dense, rounded yew dome built from 12 overlapping closed foliage lumps (the conifer archetype's opt-in clump \"lump\" builder, 8-sided, random yaw, radius jitter and xy offset): one central 8-sided core lump from z 12.9 to a rounded closed crown at z 72 (6-band profile that stays wide to 80% of its height), a ring of 6 lumps (z 12.8-41.6) and a ring of 5 lumps (z 30.7-53.9) that overlap each other and the core vertically, so there are no tiers or gaps. No limbs, sub-twigs or loose cards (quality.limbs 0, sub 0). The short thick 8-sided trunk (radius 4.6 sim at the root) ends at z 20 inside the lower ring, so it shows only at the base. The pad_side tiles use the tree128 painter's opt-in atlas.lump_fill (rows 0.18-0.82, key 144) so the closed lumps have no see-through holes. The fitted sprite_shift is [0, 0]; the yew sprites are symmetric about the anchor. height_sim 72 is the measured model top (the DAT height is 72; the tallest sprite tip is 73 sim). Atlas: 128 x 128 tree128 painter (archetypes/tree_atlas.py) with the sprite's own dark green (143-150) and bark index counts."
+}

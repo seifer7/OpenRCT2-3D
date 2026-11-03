@@ -1,0 +1,50 @@
+{
+  "object_id": "rct2.scenery_small.tcf",
+  "dat_name": "TCF",
+  "display_name": "Caucasian Fir",
+  "archetype": "conifer",
+  "size_class": "tree_1tile",
+  "footprint_tiles": [
+    1,
+    1
+  ],
+  "height_sim": 122,
+  "base_sink_sim": 3,
+  "max_overhang_tiles": 0.35,
+  "direction_images": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "alignment": {
+    "sprite_shift": [
+      0,
+      0
+    ],
+    "sprite_y_nudge": -1
+  },
+  "recolour": {
+    "primary": false,
+    "secondary": false,
+    "tertiary": false,
+    "checked": "No pixel in any of the four sprites uses the remap ranges 243-254, 202-213 or 46-57."
+  },
+  "expected_triangles": 1140,
+  "texture_justification": "",
+  "review": {
+    "status": "approved",
+    "note": "Approved by the repo owner in batch 1 (2026-11-03)."
+  },
+  "notes": "Full tile, conifer archetype. Cone of drooping tiers: tier radius falls linearly from the lowest (widest, most tilted) tier to a single-leader point (crossed triangle cards, \"leaders\"); every tier pad is tilted outward (\"tilt\") and the trunk ends inside the crown, so no bare spire shows. Trunk visible below the lowest tier. Clump-shaded atlas (\"shade\": \"clumped\", no speckle). Clumps are generated per tier; rct2.scenery_small.tcfs shares this geometry.",
+  "approved_iou": {
+    "views": [
+      0.757,
+      0.787,
+      0.758,
+      0.772
+    ],
+    "mean": 0.768,
+    "source": "Closed-mask (3px) IoU of the approved Blender 4.2 export, measured 2026-11-03 by validate.py against the four TCF direction sprites."
+  }
+}

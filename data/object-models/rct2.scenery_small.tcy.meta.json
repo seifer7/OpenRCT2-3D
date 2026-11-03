@@ -1,0 +1,548 @@
+{
+ "schema": "openrct2-3d.object-model.v1",
+ "tool_version": "sprite-to-3d 1",
+ "object_id": "rct2.scenery_small.tcy",
+ "dat_name": "TCY",
+ "display_name": "Common Yew",
+ "archetype": "conifer",
+ "size_class": "tree_small",
+ "source_sprites": {
+  "image_indices": [
+   0,
+   1,
+   2,
+   3
+  ],
+  "offsets": [
+   {
+    "index": 0,
+    "width": 64,
+    "height": 76,
+    "x_offset": -32,
+    "y_offset": -72
+   },
+   {
+    "index": 1,
+    "width": 61,
+    "height": 77,
+    "x_offset": -31,
+    "y_offset": -73
+   },
+   {
+    "index": 2,
+    "width": 61,
+    "height": 77,
+    "x_offset": -30,
+    "y_offset": -73
+   },
+   {
+    "index": 3,
+    "width": 64,
+    "height": 76,
+    "x_offset": -32,
+    "y_offset": -72
+   }
+  ]
+ },
+ "alignment": {
+  "sprite_shift": [
+   0,
+   0
+  ],
+  "sprite_y_nudge": -1
+ },
+ "units": {
+  "blender_unit_per_tile": 1,
+  "sim_units_per_tile": 32,
+  "origin": "tile centre, z=0 at the element base",
+  "authored_up": "Z",
+  "exported_up": "Y",
+  "z_squash_in_file": false
+ },
+ "bounds_blender": {
+  "min": [
+   -0.6950258429559476,
+   -0.6322387898274083,
+   -0.09375
+  ],
+  "max": [
+   0.6443756451215088,
+   0.6563062802687429,
+   2.2490625
+  ],
+  "size": [
+   1.3394014880774563,
+   1.2885450700961512,
+   2.3428125
+  ]
+ },
+ "height_sim": 72,
+ "footprint_tiles": [
+  1,
+  1
+ ],
+ "max_overhang_tiles": 0.33,
+ "base_sink_sim": 3,
+ "triangles": 672,
+ "texture": {
+  "embedded": true,
+  "width": 128,
+  "height": 128,
+  "alpha_mode": "MASK",
+  "alpha_cutoff": 0.5,
+  "filter": "NEAREST",
+  "mipmaps": false,
+  "double_sided": true,
+  "tiles": {
+   "pad_top_L0": [
+    0,
+    0,
+    32,
+    32
+   ],
+   "pad_top_L1": [
+    32,
+    0,
+    32,
+    32
+   ],
+   "pad_top_L2": [
+    0,
+    32,
+    32,
+    32
+   ],
+   "pad_top_L3": [
+    32,
+    32,
+    32,
+    32
+   ],
+   "pad_top_S0": [
+    64,
+    0,
+    16,
+    16
+   ],
+   "pad_top_S1": [
+    80,
+    0,
+    16,
+    16
+   ],
+   "pad_top_S2": [
+    64,
+    16,
+    16,
+    16
+   ],
+   "pad_top_S3": [
+    80,
+    16,
+    16,
+    16
+   ],
+   "tuft0": [
+    64,
+    32,
+    16,
+    16
+   ],
+   "tuft1": [
+    80,
+    32,
+    16,
+    16
+   ],
+   "tuft2": [
+    64,
+    48,
+    16,
+    16
+   ],
+   "tuft3": [
+    80,
+    48,
+    16,
+    16
+   ],
+   "tuft4": [
+    64,
+    64,
+    16,
+    16
+   ],
+   "tuft5": [
+    80,
+    64,
+    16,
+    16
+   ],
+   "tuft6": [
+    64,
+    80,
+    16,
+    16
+   ],
+   "tuft7": [
+    80,
+    80,
+    16,
+    16
+   ],
+   "pad_side0": [
+    0,
+    64,
+    64,
+    16
+   ],
+   "pad_side1": [
+    0,
+    80,
+    64,
+    16
+   ],
+   "pad_side2": [
+    0,
+    96,
+    64,
+    16
+   ],
+   "pad_side3": [
+    0,
+    112,
+    64,
+    16
+   ],
+   "bark": [
+    112,
+    0,
+    16,
+    128
+   ],
+   "branch": [
+    104,
+    0,
+    8,
+    64
+   ]
+  },
+  "justification": "",
+  "palette_source": "Data/g1.dat"
+ },
+ "export": {
+  "exporter": "blender-4.2",
+  "reference": "The approved rct2.scenery_small.tcrp.glb next to the loader is the Blender 4.2 LTS export (Khronos glTF Blender I/O v4.2.83), patched to nearest filtering and alpha MASK. --no-blender uses the Python writer, which welds vertices and writes u16 indices so the structure matches that file. The game does not read this meta."
+ },
+ "iou": {
+  "views": [
+   0.875,
+   0.851,
+   0.869,
+   0.864
+  ],
+  "mean": 0.865,
+  "kernel_px": 3,
+  "threshold_per_view": 0.7,
+  "threshold_mean": 0.75,
+  "source": "Closed-mask (3px) IoU of the approved Blender 4.2 export, measured 2026-11-03 by validate.py against the four TCY direction sprites.",
+  "raw": {
+   "views": [
+    0.834,
+    0.803,
+    0.822,
+    0.813
+   ],
+   "mean": 0.818
+  }
+ },
+ "params": {
+  "trunk_rings": [
+   [
+    -3,
+    4.6
+   ],
+   [
+    0,
+    4.2
+   ],
+   [
+    4,
+    3.4
+   ],
+   [
+    12,
+    2.9
+   ],
+   [
+    20.0,
+    2.2
+   ]
+  ],
+  "trunk_v_denom": 24,
+  "foliage_seed": 720,
+  "quality": {
+   "side_tpu": 1.0,
+   "skirt_lean": 1.154,
+   "sub": 0,
+   "limbs": 0
+  },
+  "clumps": [
+   {
+    "x": 0.0,
+    "y": 0.0,
+    "z": 33.575,
+    "a": 11.57,
+    "b": 11.57,
+    "th": 0.0,
+    "hb": 20.674,
+    "ht": 38.395,
+    "lump": {
+     "sides": 8,
+     "jitter": 0.08,
+     "offset": 0.0,
+     "profile": [
+      [
+       0.0,
+       0.0
+      ],
+      [
+       0.1,
+       0.7
+      ],
+      [
+       0.35,
+       1.0
+      ],
+      [
+       0.6,
+       0.95
+      ],
+      [
+       0.8,
+       0.75
+      ],
+      [
+       0.93,
+       0.42
+      ],
+      [
+       1.0,
+       0.0
+      ]
+     ]
+    }
+   },
+   {
+    "x": 12.29,
+    "y": 0.0,
+    "z": 27.16,
+    "a": 9.284,
+    "b": 7.596,
+    "th": 0.0,
+    "hb": 14.39,
+    "ht": 14.39,
+    "lump": {
+     "sides": 8,
+     "jitter": 0.12,
+     "offset": 0.08
+    }
+   },
+   {
+    "x": 6.145,
+    "y": 10.643,
+    "z": 27.16,
+    "a": 7.596,
+    "b": 9.284,
+    "th": 1.047,
+    "hb": 14.39,
+    "ht": 14.39,
+    "lump": {
+     "sides": 8,
+     "jitter": 0.12,
+     "offset": 0.08
+    }
+   },
+   {
+    "x": -6.145,
+    "y": 10.643,
+    "z": 27.16,
+    "a": 9.284,
+    "b": 7.596,
+    "th": 2.094,
+    "hb": 14.39,
+    "ht": 14.39,
+    "lump": {
+     "sides": 8,
+     "jitter": 0.12,
+     "offset": 0.08
+    }
+   },
+   {
+    "x": -12.29,
+    "y": 0.0,
+    "z": 27.16,
+    "a": 7.596,
+    "b": 9.284,
+    "th": 3.142,
+    "hb": 14.39,
+    "ht": 14.39,
+    "lump": {
+     "sides": 8,
+     "jitter": 0.12,
+     "offset": 0.08
+    }
+   },
+   {
+    "x": -6.145,
+    "y": -10.643,
+    "z": 27.16,
+    "a": 9.284,
+    "b": 7.596,
+    "th": 4.189,
+    "hb": 14.39,
+    "ht": 14.39,
+    "lump": {
+     "sides": 8,
+     "jitter": 0.12,
+     "offset": 0.08
+    }
+   },
+   {
+    "x": 6.145,
+    "y": -10.643,
+    "z": 27.16,
+    "a": 7.596,
+    "b": 9.284,
+    "th": 5.236,
+    "hb": 14.39,
+    "ht": 14.39,
+    "lump": {
+     "sides": 8,
+     "jitter": 0.12,
+     "offset": 0.08
+    }
+   },
+   {
+    "x": 8.923,
+    "y": 6.483,
+    "z": 42.28,
+    "a": 11.198,
+    "b": 9.162,
+    "th": 0.628,
+    "hb": 11.6,
+    "ht": 11.6,
+    "lump": {
+     "sides": 8,
+     "jitter": 0.12,
+     "offset": 0.08
+    }
+   },
+   {
+    "x": -3.408,
+    "y": 10.49,
+    "z": 42.28,
+    "a": 9.162,
+    "b": 11.198,
+    "th": 1.885,
+    "hb": 11.6,
+    "ht": 11.6,
+    "lump": {
+     "sides": 8,
+     "jitter": 0.12,
+     "offset": 0.08
+    }
+   },
+   {
+    "x": -11.03,
+    "y": 0.0,
+    "z": 42.28,
+    "a": 11.198,
+    "b": 9.162,
+    "th": 3.142,
+    "hb": 11.6,
+    "ht": 11.6,
+    "lump": {
+     "sides": 8,
+     "jitter": 0.12,
+     "offset": 0.08
+    }
+   },
+   {
+    "x": -3.408,
+    "y": -10.49,
+    "z": 42.28,
+    "a": 9.162,
+    "b": 11.198,
+    "th": 4.398,
+    "hb": 11.6,
+    "ht": 11.6,
+    "lump": {
+     "sides": 8,
+     "jitter": 0.12,
+     "offset": 0.08
+    }
+   },
+   {
+    "x": 8.923,
+    "y": -6.483,
+    "z": 42.28,
+    "a": 11.198,
+    "b": 9.162,
+    "th": 5.655,
+    "hb": 11.6,
+    "ht": 11.6,
+    "lump": {
+     "sides": 8,
+     "jitter": 0.12,
+     "offset": 0.08
+    }
+   }
+  ],
+  "branches": [],
+  "atlas": {
+   "painter": "tree128",
+   "size": [
+    128,
+    128
+   ],
+   "seed": 72,
+   "lump_scale": 0.75,
+   "bark_key_order": [
+    11,
+    214,
+    22,
+    215,
+    12,
+    216,
+    23,
+    217,
+    218,
+    25,
+    219,
+    220
+   ],
+   "branch_keys": [
+    215,
+    216,
+    217,
+    218,
+    219
+   ],
+   "lump_fill": {
+    "rows": [
+     0.18,
+     0.82
+    ],
+    "key": 144
+   }
+  }
+ },
+ "review": {
+  "status": "approved",
+  "note": "Approved by the repo owner in batch 1 (2026-11-03)."
+ },
+ "files": {
+  "glb": "rct2.scenery_small.tcy.glb"
+ }
+}

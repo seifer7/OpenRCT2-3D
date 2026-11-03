@@ -1,0 +1,49 @@
+{
+  "object_id": "rct2.scenery_small.tcc",
+  "dat_name": "TCC",
+  "display_name": "Chinese Cedar",
+  "archetype": "conifer",
+  "size_class": "tree_1tile",
+  "footprint_tiles": [
+    1,
+    1
+  ],
+  "height_sim": 123,
+  "base_sink_sim": 1,
+  "max_overhang_tiles": 0.33,
+  "direction_images": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "alignment": {
+    "sprite_shift": [
+      0,
+      0
+    ],
+    "sprite_y_nudge": -1
+  },
+  "recolour": {
+    "primary": false,
+    "secondary": false,
+    "tertiary": false
+  },
+  "expected_triangles": 1073,
+  "review": {
+    "status": "approved",
+    "note": "Approved by the repo owner in batch 1 (2026-11-03)."
+  },
+  "notes": "Full tile, requiresFlatSurface. tree_1tile: broadleaf tree, ~127 sim tall. Conifer archetype used as a broadleaf: 24 leaf clumps each sit on the end of a limb off the trunk (quality.limb_reach 0.45: the limb and its side twig end inside the pad instead of running past it), and every limb longer than 13 sim also carries a smaller mid-limb clump, so foliage sits along branches rather than in tiers. The layout was fitted to the four TCC sprites by a local search over clump position/size/height/angle. The foliage atlas uses coverage 0.5 / lump_scale 0.8 plus atlas.pinholes 0.17 (single-texel holes in the pad tiles) so the crown reads as the sprite's sparse stipple and the trunk and limbs show through, keeping the raw area ratio near 1 while the 3px-closed silhouette holds. The top palette was darkened about 20% toward the sprite's foliage mean. quality tufts=0 and ring=5 keep exported verts <=2500.",
+  "approved_iou": {
+    "views": [
+      0.74,
+      0.758,
+      0.749,
+      0.757
+    ],
+    "mean": 0.751,
+    "source": "Closed-mask (3px) IoU of the approved Blender 4.2 export, measured 2026-11-03 by validate.py against the four TCC direction sprites."
+  },
+  "crown": "sparse"
+}

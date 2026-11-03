@@ -1,0 +1,590 @@
+{
+ "schema": "openrct2-3d.object-model.v1",
+ "tool_version": "sprite-to-3d 1",
+ "object_id": "rct2.scenery_small.tap",
+ "dat_name": "TAP",
+ "display_name": "Aleppo Pine",
+ "archetype": "conifer",
+ "size_class": "tree_small",
+ "source_sprites": {
+  "image_indices": [
+   0,
+   1,
+   2,
+   3
+  ],
+  "offsets": [
+   {
+    "index": 0,
+    "width": 62,
+    "height": 81,
+    "x_offset": -32,
+    "y_offset": -78
+   },
+   {
+    "index": 1,
+    "width": 56,
+    "height": 83,
+    "x_offset": -29,
+    "y_offset": -80
+   },
+   {
+    "index": 2,
+    "width": 61,
+    "height": 81,
+    "x_offset": -31,
+    "y_offset": -78
+   },
+   {
+    "index": 3,
+    "width": 62,
+    "height": 77,
+    "x_offset": -32,
+    "y_offset": -74
+   }
+  ]
+ },
+ "alignment": {
+  "sprite_shift": [
+   0,
+   0
+  ],
+  "sprite_y_nudge": -1
+ },
+ "units": {
+  "blender_unit_per_tile": 1,
+  "sim_units_per_tile": 32,
+  "origin": "tile centre, z=0 at the element base",
+  "authored_up": "Z",
+  "exported_up": "Y",
+  "z_squash_in_file": false
+ },
+ "bounds_blender": {
+  "min": [
+   -0.802176412845504,
+   -0.7611745200000537,
+   -0.09375
+  ],
+  "max": [
+   0.7893499621203488,
+   0.8029725699318861,
+   2.3093261593042937
+  ],
+  "size": [
+   1.5915263749658528,
+   1.5641470899319398,
+   2.4030761593042937
+  ]
+ },
+ "height_sim": 74,
+ "footprint_tiles": [
+  1,
+  1
+ ],
+ "max_overhang_tiles": 0.4,
+ "base_sink_sim": 3,
+ "triangles": 892,
+ "texture": {
+  "embedded": true,
+  "width": 128,
+  "height": 128,
+  "alpha_mode": "MASK",
+  "alpha_cutoff": 0.5,
+  "filter": "NEAREST",
+  "mipmaps": false,
+  "double_sided": true,
+  "tiles": {
+   "pad_top_L0": [
+    0,
+    0,
+    32,
+    32
+   ],
+   "pad_top_L1": [
+    32,
+    0,
+    32,
+    32
+   ],
+   "pad_top_L2": [
+    64,
+    0,
+    32,
+    32
+   ],
+   "pad_top_L3": [
+    0,
+    32,
+    32,
+    32
+   ],
+   "pad_top_S0": [
+    32,
+    32,
+    24,
+    24
+   ],
+   "pad_top_S1": [
+    56,
+    32,
+    24,
+    24
+   ],
+   "pad_top_S2": [
+    80,
+    32,
+    24,
+    24
+   ],
+   "pad_top_S3": [
+    32,
+    56,
+    24,
+    24
+   ],
+   "tuft0": [
+    96,
+    0,
+    16,
+    16
+   ],
+   "tuft1": [
+    96,
+    16,
+    16,
+    16
+   ],
+   "tuft2": [
+    56,
+    56,
+    16,
+    16
+   ],
+   "tuft3": [
+    72,
+    56,
+    16,
+    16
+   ],
+   "tuft4": [
+    88,
+    56,
+    16,
+    16
+   ],
+   "tuft5": [
+    0,
+    64,
+    16,
+    16
+   ],
+   "tuft6": [
+    16,
+    64,
+    16,
+    16
+   ],
+   "pad_side0": [
+    0,
+    80,
+    96,
+    16
+   ],
+   "pad_side1": [
+    0,
+    96,
+    96,
+    16
+   ],
+   "pad_side2": [
+    0,
+    112,
+    96,
+    16
+   ],
+   "bark": [
+    112,
+    0,
+    16,
+    128
+   ],
+   "branch": [
+    96,
+    72,
+    16,
+    56
+   ],
+   "tuft7": [
+    96,
+    0,
+    16,
+    16
+   ],
+   "pad_side3": [
+    0,
+    80,
+    96,
+    16
+   ]
+  },
+  "justification": "",
+  "palette_source": "Data/g1.dat"
+ },
+ "export": {
+  "exporter": "blender-4.2",
+  "reference": "The approved rct2.scenery_small.tcrp.glb next to the loader is the Blender 4.2 LTS export (Khronos glTF Blender I/O v4.2.83), patched to nearest filtering and alpha MASK. --no-blender uses the Python writer, which welds vertices and writes u16 indices so the structure matches that file. The game does not read this meta."
+ },
+ "iou": {
+  "views": [
+   0.882,
+   0.863,
+   0.863,
+   0.885
+  ],
+  "mean": 0.873,
+  "kernel_px": 3,
+  "threshold_per_view": 0.7,
+  "threshold_mean": 0.75,
+  "source": "Closed-mask (3px) IoU of the approved Blender 4.2 export, measured 2026-11-03 by validate.py against the four TAP direction sprites.",
+  "raw": {
+   "views": [
+    0.868,
+    0.864,
+    0.85,
+    0.868
+   ],
+   "mean": 0.862
+  }
+ },
+ "params": {
+  "trunk_rings": [
+   [
+    -3,
+    4.6
+   ],
+   [
+    0,
+    4.2
+   ],
+   [
+    3,
+    3.7
+   ],
+   [
+    8,
+    3.4
+   ],
+   [
+    20,
+    3.2
+   ],
+   [
+    32,
+    2.8
+   ],
+   [
+    45,
+    2.2
+   ],
+   [
+    58,
+    1.4
+   ],
+   [
+    68,
+    0.5
+   ]
+  ],
+  "trunk_v_denom": 136,
+  "foliage_seed": 700,
+  "quality": {
+   "pad_scale": 1.1,
+   "top_scale": 1.2,
+   "top_k": 0.35,
+   "skirt_lo": 0.5,
+   "skirt_hi": 1.5,
+   "skirt_w": 0.86,
+   "ring": 6,
+   "side_tpu": 1.6,
+   "skirt_lean": 1.2,
+   "crown_k": 0.6,
+   "crown_dz": 2.0,
+   "tufts": 4,
+   "tuft_size": 0.33,
+   "br_r0": 0.75,
+   "br_r1": 0.45,
+   "sub": 2,
+   "twig_r": 0.5
+  },
+  "clumps": [
+   {
+    "x": 6.795,
+    "y": 0.766,
+    "z": 43.492,
+    "a": 12.155,
+    "b": 8.378,
+    "th": 1.966,
+    "ht": 2.019,
+    "hb": 5.183
+   },
+   {
+    "x": -1.69,
+    "y": 9.024,
+    "z": 44.273,
+    "a": 8.744,
+    "b": 7.213,
+    "th": 3.532,
+    "ht": 3.592,
+    "hb": 1.522
+   },
+   {
+    "x": -11.086,
+    "y": 9.294,
+    "z": 46.077,
+    "a": 5.416,
+    "b": 8.122,
+    "th": 4.382,
+    "ht": 3.868,
+    "hb": 4.329
+   },
+   {
+    "x": -6.614,
+    "y": 0.135,
+    "z": 39.298,
+    "a": 9.867,
+    "b": 6.608,
+    "th": 4.945,
+    "ht": 3.963,
+    "hb": 3.803
+   },
+   {
+    "x": -5.758,
+    "y": -7.845,
+    "z": 44.33,
+    "a": 8.776,
+    "b": 6.825,
+    "th": 6.121,
+    "ht": 1.632,
+    "hb": 3.603
+   },
+   {
+    "x": 8.173,
+    "y": -9.234,
+    "z": 43.427,
+    "a": 5.277,
+    "b": 6.279,
+    "th": 6.959,
+    "ht": 2.065,
+    "hb": 2.445
+   },
+   {
+    "x": -11.508,
+    "y": 7.776,
+    "z": 50.422,
+    "a": 6.949,
+    "b": 10.862,
+    "th": 2.763,
+    "ht": 4.256,
+    "hb": 4.66
+   },
+   {
+    "x": -9.57,
+    "y": -4.257,
+    "z": 49.913,
+    "a": 9.933,
+    "b": 8.395,
+    "th": 5.227,
+    "ht": 4.291,
+    "hb": 4.753
+   },
+   {
+    "x": 1.344,
+    "y": -11.269,
+    "z": 49.1,
+    "a": 15.626,
+    "b": 9.166,
+    "th": 6.259,
+    "ht": 5.186,
+    "hb": 4.014
+   },
+   {
+    "x": 11.779,
+    "y": -1.42,
+    "z": 50.794,
+    "a": 11.883,
+    "b": 7.97,
+    "th": 8.058,
+    "ht": 3.129,
+    "hb": 2.132
+   },
+   {
+    "x": 4.744,
+    "y": 10.01,
+    "z": 47.253,
+    "a": 12.38,
+    "b": 10.155,
+    "th": 9.574,
+    "ht": 7.382,
+    "hb": 4.696
+   },
+   {
+    "x": -1.488,
+    "y": -6.84,
+    "z": 61.874,
+    "a": 9.302,
+    "b": 9.018,
+    "th": 6.163,
+    "ht": 3.276,
+    "hb": 4.176
+   },
+   {
+    "x": 7.318,
+    "y": -1.312,
+    "z": 62.589,
+    "a": 10.389,
+    "b": 7.982,
+    "th": 7.59,
+    "ht": 5.47,
+    "hb": 4.766
+   },
+   {
+    "x": 0.145,
+    "y": 6.84,
+    "z": 60.215,
+    "a": 10.31,
+    "b": 8.869,
+    "th": 9.277,
+    "ht": 3.859,
+    "hb": 3.734
+   },
+   {
+    "x": -7.002,
+    "y": 2.109,
+    "z": 60.02,
+    "a": 11.106,
+    "b": 6.228,
+    "th": 11.396,
+    "ht": 4.422,
+    "hb": 3.956
+   },
+   {
+    "x": 0.521,
+    "y": -3.492,
+    "z": 69.882,
+    "a": 6.097,
+    "b": 7.627,
+    "th": 8.015,
+    "ht": 4.26,
+    "hb": 1.902
+   }
+  ],
+  "branches": [],
+  "atlas": {
+   "layout": "compact128",
+   "seed": 3101,
+   "size": [
+    128,
+    128
+   ],
+   "branch_keys": [
+    34,
+    35,
+    36,
+    37
+   ]
+  },
+  "stems": [
+   {
+    "points": [
+     [
+      1.3163738428355591,
+      0.7191383079063045,
+      22
+     ],
+     [
+      5.2654953713422366,
+      2.876553231625218,
+      34
+     ],
+     [
+      9.6534081807941,
+      5.273680924646233,
+      46
+     ]
+    ],
+    "radii": [
+     1.8,
+     1.3,
+     0.6
+    ],
+    "sides": 5,
+    "tile": "branch",
+    "texels_per_sim": 1.0,
+    "kind": "branch"
+   },
+   {
+    "points": [
+     [
+      -1.285333130053421,
+      0.7732520577321962,
+      25
+     ],
+     [
+      -5.141332520213684,
+      3.0930082309287847,
+      36
+     ],
+     [
+      -9.42577628705842,
+      5.670515090036106,
+      46
+     ]
+    ],
+    "radii": [
+     1.8,
+     1.3,
+     0.6
+    ],
+    "sides": 5,
+    "tile": "branch",
+    "texels_per_sim": 1.0,
+    "kind": "branch"
+   },
+   {
+    "points": [
+     [
+      -0.16822879040258232,
+      -1.4905365054501967,
+      28
+     ],
+     [
+      -0.6729151616103293,
+      -5.962146021800787,
+      38
+     ],
+     [
+      -1.2336777962856036,
+      -10.930601039968108,
+      46
+     ]
+    ],
+    "radii": [
+     1.8,
+     1.3,
+     0.6
+    ],
+    "sides": 5,
+    "tile": "branch",
+    "texels_per_sim": 1.0,
+    "kind": "branch"
+   }
+  ]
+ },
+ "review": {
+  "status": "approved",
+  "note": "Approved by the repo owner in batch 1 (2026-11-03)."
+ },
+ "files": {
+  "glb": "rct2.scenery_small.tap.glb"
+ }
+}

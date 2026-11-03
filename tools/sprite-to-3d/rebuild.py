@@ -127,39 +127,34 @@ def strip_histograms(value):
     return value
 
 
-def iou_block(stored_iou, measured):
-    """The meta "iou" block.
+def iou_block(approved_iou, measured):
+    """The meta "iou" block: closed-mask IoU, the figure the gate holds.
 
-    views / mean / source: the approved raw-mask figures when object.json
-    carries approved_iou, otherwise this rebuild's raw measurement.
-    threshold_per_view / threshold_mean: the raw reference levels (reported,
-    not gated). closed: the closed-mask scores and the gate they are held to.
-    raw_measured: this rebuild's raw scores. Both measured blocks are omitted
-    when the rebuild had no local sprites.
+    views / mean / source: the approved closed-mask figures when object.json
+    carries approved_iou, otherwise this rebuild's closed-mask measurement.
+    kernel_px / threshold_per_view / threshold_mean: the close kernel and the
+    gate. raw: this rebuild's raw-mask IoU (reported, not gated). views and
+    mean are null and raw is omitted when there is neither an approval nor a
+    measurement with local sprites.
     """
     block = {
-        "views": stored_iou["views"] if stored_iou else None,
-        "mean": stored_iou["mean"] if stored_iou else None,
-        "threshold_per_view": C.IOU_MIN_PER_VIEW,
-        "threshold_mean": C.IOU_MIN_MEAN,
-        "source": stored_iou.get("source") if stored_iou else None,
+        "views": approved_iou["views"] if approved_iou else None,
+        "mean": approved_iou["mean"] if approved_iou else None,
+        "kernel_px": C.IOU_CLOSE_KERNEL,
+        "threshold_per_view": C.IOU_CLOSED_MIN_PER_VIEW,
+        "threshold_mean": C.IOU_CLOSED_MIN_MEAN,
+        "source": approved_iou.get("source") if approved_iou else None,
     }
     if measured is None:
         return block
-    raw_views = [round(v, 3) for v in measured["raw"]["views"]]
-    raw_mean = round(measured["raw"]["mean"], 3)
-    if not stored_iou:
-        block["views"] = raw_views
-        block["mean"] = raw_mean
+    if not approved_iou:
+        block["views"] = [round(v, 3) for v in measured["closed"]["views"]]
+        block["mean"] = round(measured["closed"]["mean"], 3)
         block["source"] = "rebuild.py measurement (validator rasteriser, local sprites)"
-    block["closed"] = {
-        "views": [round(v, 3) for v in measured["closed"]["views"]],
-        "mean": round(measured["closed"]["mean"], 3),
-        "kernel_px": measured["closed"]["kernel_px"],
-        "threshold_per_view": C.IOU_CLOSED_MIN_PER_VIEW,
-        "threshold_mean": C.IOU_CLOSED_MIN_MEAN,
+    block["raw"] = {
+        "views": [round(v, 3) for v in measured["raw"]["views"]],
+        "mean": round(measured["raw"]["mean"], 3),
     }
-    block["raw_measured"] = {"views": raw_views, "mean": raw_mean}
     return block
 
 
@@ -191,9 +186,8 @@ def write_meta(path, spec, params, tiles, mesh, palette_source, sprite_meta, glb
             for s in sprite_meta["sprites"]
             if s["index"] in spec["direction_images"]
         ]
-    # Keep the approved IoU on the reference object: iou.views and iou.mean
-    # stay the approved raw figures until a reviewer replaces them. A rebuild
-    # with local sprites adds its own raw and closed-mask measurement.
+    # iou.views and iou.mean are the approved closed-mask figures when
+    # object.json has approved_iou, otherwise this rebuild's measurement.
     stored_iou = spec.get("approved_iou")
     meta = {
         "schema": C.SCHEMA,
@@ -235,16 +229,6 @@ def write_meta(path, spec, params, tiles, mesh, palette_source, sprite_meta, glb
             "justification": spec.get("texture_justification") or "",
             "palette_source": palette_source,
         },
-        "units_and_scale": {
-            "convention": "1 Blender unit = 1 tile = 32 sim units on x, y and z",
-            "origin": "tile centre, z=0 at the element base",
-            "bbox_BU": {"min": bmin, "max": bmax, "size": size},
-            "bbox_sim": {
-                "min": [v * C.SIM_PER_UNIT for v in bmin],
-                "max": [v * C.SIM_PER_UNIT for v in bmax],
-            },
-        },
-        "geometry": {"triangles": triangle_count(mesh)},
         "export": {
             "exporter": exporter,
             "reference": (
@@ -262,8 +246,9 @@ def write_meta(path, spec, params, tiles, mesh, palette_source, sprite_meta, glb
     }
     reason = spec.get("triangle_justification")
     if reason:
-        # Written only when present, so metas without one are unchanged.
         meta["triangle_justification"] = reason
+    if spec.get("crown"):
+        meta["crown"] = spec["crown"]
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(meta, fh, indent=1)
         fh.write("\n")

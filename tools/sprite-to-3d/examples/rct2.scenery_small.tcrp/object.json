@@ -21,9 +21,9 @@
   "expected_triangles": 864,
   "texture_justification": "Reference 1-tile tree. The approved Corsican Pine atlas is 256\u00b2. New models default to 128\u00b2; a larger atlas needs a justification like this one.",
   "approved_iou": {
-    "views": [0.733, 0.712, 0.766, 0.687],
-    "mean": 0.725,
-    "source": "Approved Blender 4.2 Workbench fit measured on 2026-11-01 against the four TCRP direction sprites. Mean silhouette IoU 0.725. The validator recomputes this only when a local sprite folder is passed."
+    "views": [0.78, 0.737, 0.787, 0.734],
+    "mean": 0.759,
+    "source": "Closed-mask (3px) IoU of the approved Blender 4.2 export, measured 2026-11-03 by validate.py against the four TCRP direction sprites."
   },
   "review": {
     "status": "approved",

@@ -2,13 +2,21 @@
 
 Memory of the implementation plan for this fork. The goal is a 3D view of a park that OpenRCT2 is already simulating.
 
+## Filament branch scope
+
+The `Filament` branch was created from `develop` to test [Google Filament](https://github.com/google/filament) in place of bgfx. The aim is to evaluate its lighting, ambient occlusion, shadows, and reflections without replacing the existing OpenRCT2 game engine.
+
+Filament is not integrated yet. The current renderer, dependencies, and build instructions still use bgfx; descriptions of bgfx below document that baseline, not a requirement to retain it on this branch. Historical notes under `docs/agents/` may describe the earlier bgfx direction.
+
+The experiment is limited to the 3D rendering layer and its thin integration hooks. Preserve `gameStateTick()` as the sole simulation, the default 2D renderer, the View menu toggle, and the existing UI overlay. Keep Filament integration under `src/openrct2-3d/`. Evaluate the visual effects and window/UI integration before deciding whether to adopt Filament; this branch does not claim the replacement is complete.
+
 ## Goal
 
 Build a 3D version of RollerCoaster Tycoon 2 by adding a viewing mode, not by replacing the game. The original 2D renderer stays the default and must keep working on its own. The original rules, ticks, and most of the codebase stay. From the View menu, the player can switch the main park view to 3D and switch it back.
 
 ## Where the code lives
 
-Keep changes to the original codebase as small and as few as possible. Everything for the 3D renderer goes in `src/openrct2-3d/`: the bgfx setup, the scene extractor, meshes, the camera, and the UI composite.
+Keep changes to the original codebase as small and as few as possible. Everything for the 3D renderer goes in `src/openrct2-3d/`: renderer setup (currently bgfx, with Filament to be tested here), the scene extractor, meshes, the camera, and the UI composite.
 
 bgfx itself is vendored there as submodules, not copied into `src/openrct2/` or `src/openrct2-ui/`:
 
@@ -28,13 +36,13 @@ When the toggle is off, those hooks do nothing and the original paint path runs 
 
 ## Renderer
 
-Use [bgfx](https://github.com/bkaradzic/bgfx). It is an existing cross-platform rendering library (Direct3D, Metal, OpenGL, Vulkan) by Branimir Karadžić, licensed BSD-2-Clause. It draws meshes and textures. It does not own a game loop, physics, or a scene graph.
+The current implementation uses [bgfx](https://github.com/bkaradzic/bgfx). It is an existing cross-platform rendering library (Direct3D, Metal, OpenGL, Vulkan) by Branimir Karadžić, licensed BSD-2-Clause. It draws meshes and textures. It does not own a game loop, physics, or a scene graph. This branch evaluates Filament as its replacement, not as a replacement for OpenRCT2's simulation.
 
 The code this project writes is the translation layer and the camera. bgfx only receives what to draw after each tick.
 
 `OpenGLDrawingEngine` (`src/openrct2-ui/drawing/engines/opengl/`) is the wrong place to hang the 3D world. It requires OpenGL 3.3 and composites paletted sprites, UI rectangles, and dirty screen blocks. It never sees the park as geometry. The 3D mode is a second view of `GameState`, beside that engine.
 
-A prototype may draw through the SDL window's existing OpenGL 3.3 context. The extractor below does not change if that prototype later moves onto bgfx. The committed direction is bgfx.
+The earlier prototype direction was to draw through the SDL window's existing OpenGL 3.3 context and move onto bgfx. On this branch, renderer and window integration may change for Filament, but the read-only simulation boundary below must remain.
 
 Unity, Unreal, and Godot are rejected. Each expects to own the frame and the scene, which fights `gameStateTick()`.
 
@@ -46,7 +54,7 @@ The 3D mode keeps calling that tick, then reads the result. It does not send gam
 
 ## Translation layer
 
-One read-only extractor sits between the simulation and bgfx. It does not call game commands and it does not allocate tile elements.
+One read-only extractor sits between the simulation and the 3D renderer (currently bgfx). It does not call game commands and it does not allocate tile elements.
 
 ```
 gameStateTick()
@@ -59,7 +67,7 @@ SceneExtractor
   actor transforms     EntityBase position and orientation
         │
         ▼
-Viewer3D (bgfx)        camera, meshes, materials
+Viewer3D              camera, meshes, materials (bgfx now; Filament experiment)
 ```
 
 The world is already spatial:
@@ -95,11 +103,11 @@ Both modes call the same `gameStateTick()`. The 3D camera starts from the main v
 
 ## UI over the 3D view
 
-Keep the original UI code in both modes. While the View menu toggle is on 3D, bgfx draws that UI on top of the 3D park. While it is on 2D, the UI is drawn exactly as it is today. Do not reimplement widgets in bgfx.
+Keep the original UI code in both modes. While the View menu toggle is on 3D, bgfx currently draws that UI on top of the 3D park; the Filament experiment must preserve the overlay. While it is on 2D, the UI is drawn exactly as it is today. Do not reimplement widgets in either renderer.
 
 `Painter::Paint()` (`src/openrct2/paint/Painter.cpp`) calls `PaintWindows()`. Each window paints widgets into one paletted screen buffer. The park is only the viewport widget: `WindowDrawViewport()` calls `ViewportRender()` (`src/openrct2/interface/Viewport.cpp`). Palette index 0 is `PaletteIndex::transparent` (`src/openrct2/drawing/PaletteIndex.h`). Sprites already skip that index. The giant-screenshot path clears a viewport to it with `VIEWPORT_FLAG_TRANSPARENT_BACKGROUND`.
 
-Frame order:
+Current bgfx frame order (the Filament integration must preserve the same UI behavior):
 
 1. bgfx draws the 3D park into the window.
 2. The existing window code draws toolbars, panels, buttons, and text into the paletted buffer.

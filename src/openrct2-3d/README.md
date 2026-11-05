@@ -2,7 +2,9 @@
 
 All of the 3D viewer lives in this directory. The original OpenRCT2 sources stay as they are, apart from the small hooks that open this view.
 
-bgfx is already in this folder, as pinned submodules:
+The `Filament` branch, created from `develop`, tests [Google Filament](https://github.com/google/filament) in place of bgfx for improved lighting, ambient occlusion, shadows, and reflections. Filament integration belongs in this directory and must preserve the existing simulation, default 2D view, and UI overlay. See [the branch scope](../../docs/3d-viewer.md#filament-branch-scope).
+
+Filament is not integrated yet. The current code and build still use bgfx, which is already in this folder as pinned submodules:
 
 - `third_party/bgfx.cmake` builds the library with CMake
 - `third_party/bx`, `third_party/bimg`, and `third_party/bgfx` are the renderer sources

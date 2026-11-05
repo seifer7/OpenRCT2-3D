@@ -10,6 +10,8 @@
 
 <h3 align="center">An attempt to build a 3D version of RollerCoaster Tycoon 2. The original 2D game stays, and the View menu can switch the park to 3D.</h3>
 
+**Filament experiment:** This branch (`Filament`), created from `develop`, tests [Google Filament](https://github.com/google/filament) in place of bgfx for the 3D view, with the aim of improving lighting, ambient occlusion, shadows, and reflections while keeping the existing OpenRCT2 simulation, UI, and default 2D renderer intact. Filament is not integrated yet; the code and build instructions still use bgfx. See [the branch scope](docs/3d-viewer.md#filament-branch-scope).
+
 ---
 
 ![Still from the v0.5.0 title sequence](https://github.com/user-attachments/assets/fa893cc8-1484-4751-94be-4ead00a6c8f9)
@@ -63,7 +65,7 @@ If you want to help translate the game to your language, please stop by the Loca
 
 # 1. Introduction
 
-**This project is an attempt to build a 3D version of RollerCoaster Tycoon 2.** It is based on OpenRCT2. The original 2D renderer remains the normal way to play, and it must keep working. Guests, rides, park economy, and the original game tick stay in that simulation. The View menu gains an option that switches the main park view to 3D, drawn with the existing [bgfx](https://github.com/bkaradzic/bgfx) renderer, and switches it back to the original 2D renderer. The original interface stays. In 3D it is drawn over the view, with the main park viewport left transparent. Implementation notes are in [docs/3d-viewer.md](docs/3d-viewer.md).
+**This project is an attempt to build a 3D version of RollerCoaster Tycoon 2.** It is based on OpenRCT2. The original 2D renderer remains the normal way to play, and it must keep working. Guests, rides, park economy, and the original game tick stay in that simulation. The View menu gains an option that switches the main park view to 3D, currently drawn with [bgfx](https://github.com/bkaradzic/bgfx) pending the Filament experiment, and switches it back to the original 2D renderer. The original interface stays. In 3D it is drawn over the view, with the main park viewport left transparent. Implementation notes are in [docs/3d-viewer.md](docs/3d-viewer.md).
 
 The paragraphs below describe the OpenRCT2 simulation this fork builds on.
 

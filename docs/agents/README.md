@@ -1,6 +1,8 @@
 # Agent notes
 
-Project notes, memories, decisions, surveys, and other working documents live in this folder (`docs/agents/`) on `develop` and must be committed here. Write new notes in this folder. The Agent Store is not a substitute.
+Project notes, memories, decisions, surveys, and other working documents live in this folder (`docs/agents/`) and must be committed here, including work on the `Filament` experimental branch. Write new notes in this folder. The Agent Store is not a substitute.
+
+`Filament` was branched from `develop` to test Google Filament in place of bgfx while retaining the existing OpenRCT2 game engine. Filament is not integrated yet. The [3D viewer branch scope](../3d-viewer.md#filament-branch-scope) describes the experiment; the existing notes below retain their historical bgfx/develop context.
 
 - `notes.md` — task list
 - `project-context.md` — project context, repo facts, and decisions

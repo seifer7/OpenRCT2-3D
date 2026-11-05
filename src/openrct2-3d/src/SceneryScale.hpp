@@ -28,7 +28,7 @@ namespace OpenRCT2::View3D
     constexpr uint32_t kSlabVertices = 65535u;
     constexpr uint32_t kSlabIndices = 262144u;
     constexpr uint32_t kMaxGeometrySlabs = 32u;
-    // Atlas pages plus the 1x1 white texture. Well under bgfx's 4096-handle cap.
+    // Atlas pages plus the 1x1 white texture. Keep the existing allocation budget.
     constexpr uint32_t kAtlasSize = 2048u;
     constexpr uint32_t kMaxAtlasPages = 8u;
     constexpr uint32_t kUploadsPerFrame = 2u;

@@ -1,0 +1,24 @@
+material {
+    name : sprite,
+    shadingModel : unlit,
+    flipUV : false,
+    blending : masked,
+    doubleSided : true,
+    parameters : [
+        { type : sampler2d, name : albedo },
+        { type : float4, name : uvRect },
+        { type : bool, name : clampUv }
+    ],
+    requires : [ uv0 ]
+}
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        vec2 uv = getUV0();
+        if (materialParams.clampUv) {
+            uv = clamp(uv, vec2(0.0), vec2(1.0));
+        }
+        uv = uv * materialParams.uvRect.xy + materialParams.uvRect.zw;
+        material.baseColor = texture(materialParams_albedo, uv);
+    }
+}

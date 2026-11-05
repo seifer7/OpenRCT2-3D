@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Target Name="FetchFilamentSdk" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(Platform)'=='Win32'" Text="The Filament desktop viewer requires a 64-bit build. Select x64." />
+    <Error Condition="'$(Platform)'!='x64' and !Exists('$(FilamentLibraryDir)\filament.lib')" Text="The pinned Windows Filament SDK is x64 only. Supply FilamentSdk and FilamentLibraryDir for a matching custom ARM64 SDK." />
+    <Exec Condition="!Exists('$(FilamentSdk)\include\filament\Engine.h')" Command="&quot;$(View3DCMake)&quot; -DFILAMENT_PLATFORM=windows &quot;-DFILAMENT_SDK=$(FilamentSdk)&quot; -P &quot;$(View3DRoot)cmake\FetchFilament.cmake&quot;" />
+    <Error Condition="!Exists('$(FilamentLibraryDir)\filament.lib')" Text="Filament libraries are missing at $(FilamentLibraryDir). Use the matching Filament 1.80.0 SDK and C runtime." />
+    <Error Condition="!Exists('$(FilamentSdk)\bin\matc.exe') or !Exists('$(FilamentSdk)\bin\resgen.exe')" Text="The Filament SDK must include its matching matc.exe and resgen.exe tools." />
+  </Target>
+  <Target Name="CompileFilamentMaterials" BeforeTargets="ClCompile" DependsOnTargets="FetchFilamentSdk"
+          Inputs="$(View3DRoot)materials\mesh.mat;$(View3DRoot)materials\sprite.mat;$(View3DRoot)materials\terrain.mat;$(View3DRoot)cmake\CompileMaterials.cmake;$(FilamentSdk)\bin\matc.exe;$(FilamentSdk)\bin\resgen.exe"
+          Outputs="$(IntDir)filament-materials\view3d_materials.c;$(IntDir)filament-materials\view3d_materials.h">
+    <Exec Command="&quot;$(View3DCMake)&quot; &quot;-DFILAMENT_SDK=$(FilamentSdk)&quot; &quot;-DOUTPUT_DIR=$(IntDir)filament-materials&quot; -P &quot;$(View3DRoot)cmake\CompileMaterials.cmake&quot;" />
+    <ItemGroup>
+      <FileWrites Include="$(IntDir)filament-materials\*" />
+    </ItemGroup>
+  </Target>
+  <Target Name="CopyFilamentLicense" AfterTargets="Build">
+    <Copy SourceFiles="$(FilamentSdk)\LICENSE" DestinationFiles="$(OutDir)filament-LICENSE.txt" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

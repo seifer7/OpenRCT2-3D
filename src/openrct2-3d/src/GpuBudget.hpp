@@ -27,8 +27,8 @@ namespace OpenRCT2::View3D
         uint32_t count = 0;
     };
 
-    // Stored indices are mesh-local. bgfx adds the vertex-buffer start once.
-    // This helper is that sum, applied one time: base + local.
+    // Filament binds the entire shared slab. Rebase mesh-local indices once
+    // when uploading them: base + local.
     constexpr uint32_t slabVertexIndex(uint32_t vertexStart, uint32_t localIndex)
     {
         return vertexStart + localIndex;

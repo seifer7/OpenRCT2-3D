@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <View3DRoot>$(MSBuildThisFileDirectory)</View3DRoot>
+    <FilamentSdk Condition="'$(FilamentSdk)'=='' and '$(FILAMENT_SDK)'!=''">$(FILAMENT_SDK)</FilamentSdk>
+    <FilamentSdk Condition="'$(FilamentSdk)'==''">$(View3DRoot)..\..\lib\filament-v1.80.0</FilamentSdk>
+    <FilamentCrt>mt</FilamentCrt>
+    <FilamentCrt Condition="'$(UseSharedLibs)'=='true'">md</FilamentCrt>
+    <FilamentCrt Condition="'$(Configuration)'=='Debug'">$(FilamentCrt)d</FilamentCrt>
+    <FilamentArch>x86_64</FilamentArch>
+    <FilamentArch Condition="'$(Platform)'=='arm64'">arm64</FilamentArch>
+    <FilamentLibraryDir Condition="'$(FilamentLibraryDir)'==''">$(FilamentSdk)\lib\$(FilamentArch)\$(FilamentCrt)</FilamentLibraryDir>
+    <FilamentLibraries>$(FilamentLibraryDir)\filament.lib;$(FilamentLibraryDir)\backend.lib;$(FilamentLibraryDir)\filaflat.lib;$(FilamentLibraryDir)\filabridge.lib;$(FilamentLibraryDir)\bluegl.lib;$(FilamentLibraryDir)\bluevk.lib;$(FilamentLibraryDir)\smol-v.lib;$(FilamentLibraryDir)\utils.lib;$(FilamentLibraryDir)\zstd.lib;$(FilamentLibraryDir)\abseil.lib</FilamentLibraries>
+    <IncludePath>$(FilamentSdk)\include;$(IncludePath)</IncludePath>
+    <View3DCMake Condition="'$(View3DCMake)'=='' and Exists('$(ProgramW6432)\CMake\bin\cmake.exe')">$(ProgramW6432)\CMake\bin\cmake.exe</View3DCMake>
+    <View3DCMake Condition="'$(View3DCMake)'=='' and Exists('$(VSInstallDir)Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe')">$(VSInstallDir)Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe</View3DCMake>
+    <View3DCMake Condition="'$(View3DCMake)'==''">cmake</View3DCMake>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalOptions>/external:I &quot;$(FilamentSdk)\include&quot; /external:W0 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>$(FilamentLibraries);opengl32.lib;gdi32.lib;user32.lib;shlwapi.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+</Project>

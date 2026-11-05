@@ -88,8 +88,8 @@ namespace OpenRCT2::View3D
         float uvOffY = 0.0f;
     };
 
-    // Shaders and GPU buffers for GLB meshes and crossed sprites. Safe to call
-    // shutdown before bgfx::init, and after a failed init.
+    // Filament materials and GPU buffers for GLB meshes and crossed sprites.
+    // Safe to call shutdown before device creation, and after a failed init.
     bool meshDrawInit();
     void meshDrawShutdown();
 
@@ -109,6 +109,7 @@ namespace OpenRCT2::View3D
     };
 
     MeshUpload meshDrawUploadModel(const CpuMesh& mesh);
+    uint32_t meshDrawGpuBytes(const CpuMesh& mesh);
     // Frees one uploaded model's ranges and any texture it owns. The id can be reused.
     void meshDrawReleaseModel(int32_t id);
     // Drops sprite textures. Called on park load so the previous park's images do not linger.

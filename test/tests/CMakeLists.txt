@@ -14,18 +14,9 @@ set(test_files
    "${CMAKE_CURRENT_SOURCE_DIR}/CryptTests.cpp"
    "${CMAKE_CURRENT_SOURCE_DIR}/Endianness.cpp"
    "${CMAKE_CURRENT_SOURCE_DIR}/EnumMapTest.cpp"
+   "${CMAKE_CURRENT_SOURCE_DIR}/FilamentRendererTests.cpp"
    "${CMAKE_CURRENT_SOURCE_DIR}/FormattingTests.cpp"
    "${CMAKE_CURRENT_SOURCE_DIR}/GlbMeshTests.cpp"
-   "${ROOT_DIR}/src/openrct2-3d/src/GlbMesh.cpp"
-   "${ROOT_DIR}/src/openrct2-3d/src/ModelCache.cpp"
-   "${ROOT_DIR}/src/openrct2-3d/src/SceneryChunk.cpp"
-   "${ROOT_DIR}/src/openrct2-3d/src/GpuBudget.cpp"
-   "${ROOT_DIR}/src/openrct2-3d/src/ModelLoadQueue.cpp"
-   "${ROOT_DIR}/src/openrct2-3d/src/MeshDraw.cpp"
-   "${ROOT_DIR}/src/openrct2-3d/src/SceneryDraw.cpp"
-   "${ROOT_DIR}/src/openrct2-3d/src/ParkView.cpp"
-   "${ROOT_DIR}/src/openrct2-3d/third_party/cgltf/cgltf.cpp"
-   "${ROOT_DIR}/src/openrct2-3d/third_party/stb_image_impl.cpp"
    "${CMAKE_CURRENT_SOURCE_DIR}/ModelCacheTests.cpp"
    "${CMAKE_CURRENT_SOURCE_DIR}/SceneryScaleTests.cpp"
    "${CMAKE_CURRENT_SOURCE_DIR}/ImageImporterTests.cpp"
@@ -56,7 +47,7 @@ set(test_files
 add_executable(OpenRCT2Tests ${test_files})
 add_executable(OpenRCT2::OpenRCT2Tests ALIAS OpenRCT2Tests)
 
-target_link_libraries(OpenRCT2Tests GTest::gtest GTest::gtest_main libopenrct2 bgfx bx)
+target_link_libraries(OpenRCT2Tests GTest::gtest GTest::gtest_main libopenrct2 openrct2-3d)
 target_include_directories(
     OpenRCT2Tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../src" "${ROOT_DIR}/src/openrct2-3d/src"
                           "${ROOT_DIR}/src/openrct2-3d/third_party/cgltf"

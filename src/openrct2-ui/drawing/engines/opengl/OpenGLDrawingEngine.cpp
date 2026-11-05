@@ -263,6 +263,14 @@ public:
         }
         View3D::shutdown();
         SDL_GL_MakeCurrent(_window, _context);
+        // Member destructors must release their GL resources before the context is deleted.
+        _tempFramebuffer.reset();
+        _smoothScaleFramebuffer.reset();
+        _scaleFramebuffer.reset();
+        _screenFramebuffer.reset();
+        _copyRectShader.reset();
+        _applyPaletteShader.reset();
+        _drawingContext.reset();
         SDL_GL_DeleteContext(_context);
     }
 
@@ -412,8 +420,6 @@ void main()
 
     void Initialise() override
     {
-        // bgfx compiles its park shaders as GLSL 430 and borrows this context. Fall back to the
-        // drawing engine's own minimum when 4.3 is not available; the 3D view then stays off.
         const auto tryContext = [this](int32_t major, int32_t minor) {
             SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, major);
             SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, minor);
@@ -421,13 +427,9 @@ void main()
             _context = SDL_GL_CreateContext(_window);
             return _context != nullptr;
         };
-        if (!tryContext(4, 3))
+        if (!tryContext(kOpenGLMinimumRequiredVersion.Major, kOpenGLMinimumRequiredVersion.Minor))
         {
-            SDL_ClearError();
-            if (!tryContext(kOpenGLMinimumRequiredVersion.Major, kOpenGLMinimumRequiredVersion.Minor))
-            {
-                throw std::runtime_error("OpenGL 3.3 not available.");
-            }
+            throw std::runtime_error("OpenGL 3.3 not available.");
         }
         SDL_GL_MakeCurrent(_window, _context);
 
@@ -527,8 +529,7 @@ void main()
         bool parkUnderUi = false;
         if (View3D::isActive() && !View3D::hasFailed())
         {
-            // Borrow this context. A second GL context on the window replaces the picture with black,
-            // and the following glGetError call then never returns.
+            // Filament renders independently; the existing OpenGL presenter keeps the game window.
             std::vector<uint8_t> rgba(static_cast<size_t>(_mainRT.width) * static_cast<size_t>(_mainRT.height) * 4);
             parkUnderUi = View3D::renderPark(_window, _mainRT.width, _mainRT.height, rgba.data());
             SDL_GL_MakeCurrent(_window, _context);
@@ -553,7 +554,7 @@ void main()
         }
         else if (View3D::hasDevice())
         {
-            // Leave the device up. Shutting it down while the window still has this GL context stalls on Windows.
+            // Keep the independent 3D device available for the next toggle.
             SDL_GL_MakeCurrent(_window, _context);
             OpenGLState::Reset();
         }

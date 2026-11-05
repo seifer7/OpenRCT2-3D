@@ -10,12 +10,12 @@
 // Offscreen render of one GLB on a ground quad, with a crossed sprite beside it.
 // Usage: openrct2-3d-preview <model.glb> <output-directory>
 
+#include "FilamentRenderer.hpp"
 #include "GlbMesh.hpp"
 #include "MeshDraw.hpp"
 #include "SpriteQuad.hpp"
 #include "ViewerScale.hpp"
 
-#include <bgfx/bgfx.h>
 #include <bx/math.h>
 #include <cmath>
 #include <cstdint>
@@ -29,46 +29,6 @@ namespace
 {
     constexpr uint16_t kWidth = 1280;
     constexpr uint16_t kHeight = 720;
-    constexpr uint32_t kClear = 0x6FA8DCff;
-
-    bgfx::FrameBufferHandle _frame = BGFX_INVALID_HANDLE;
-    bgfx::TextureHandle _readback = BGFX_INVALID_HANDLE;
-
-    bool createTargets()
-    {
-        const uint64_t colourFlags = BGFX_TEXTURE_RT | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
-        const uint64_t depthFlags = BGFX_TEXTURE_RT_WRITE_ONLY;
-        const bgfx::TextureHandle colour = bgfx::createTexture2D(
-            kWidth, kHeight, false, 1, bgfx::TextureFormat::RGBA8, colourFlags);
-        const bgfx::TextureFormat::Enum depthFormats[] = {
-            bgfx::TextureFormat::D24,
-            bgfx::TextureFormat::D32F,
-            bgfx::TextureFormat::D16,
-            bgfx::TextureFormat::D24S8,
-        };
-        bgfx::TextureHandle depth = BGFX_INVALID_HANDLE;
-        for (const bgfx::TextureFormat::Enum format : depthFormats)
-        {
-            if (!bgfx::isTextureValid(0, false, 1, format, depthFlags))
-            {
-                continue;
-            }
-            depth = bgfx::createTexture2D(kWidth, kHeight, false, 1, format, depthFlags);
-            if (bgfx::isValid(depth))
-            {
-                break;
-            }
-        }
-        if (!bgfx::isValid(colour) || !bgfx::isValid(depth))
-        {
-            return false;
-        }
-        const bgfx::TextureHandle attachments[] = { colour, depth };
-        _frame = bgfx::createFrameBuffer(2, attachments, true);
-        _readback = bgfx::createTexture2D(
-            kWidth, kHeight, false, 1, bgfx::TextureFormat::RGBA8, BGFX_TEXTURE_BLIT_DST | BGFX_TEXTURE_READ_BACK);
-        return bgfx::isValid(_frame) && bgfx::isValid(_readback);
-    }
 
     void setCamera(float eyeX, float eyeY, float eyeZ, float targetX, float targetY, float targetZ, bool mirrorX)
     {
@@ -83,8 +43,8 @@ namespace
             view[12] = -view[12];
         }
         const float aspect = static_cast<float>(kWidth) / static_cast<float>(kHeight);
-        bx::mtxProj(projection, 50.0f, aspect, 0.2f, 200.0f, bgfx::getCaps()->homogeneousDepth);
-        bgfx::setViewTransform(0, view, projection);
+        bx::mtxProj(projection, 50.0f, aspect, 0.2f, 8000.0f, true);
+        OpenRCT2::View3D::Gpu::setCamera(view, projection);
     }
 
     bool savePpm(const std::string& path, const std::vector<uint8_t>& rgba)
@@ -98,8 +58,7 @@ namespace
         const size_t stride = static_cast<size_t>(kWidth) * 4;
         for (uint16_t y = 0; y < kHeight; y++)
         {
-            // bgfx hands the bottom row back first.
-            const uint8_t* src = rgba.data() + (static_cast<size_t>(kHeight - 1 - y) * stride);
+            const uint8_t* src = rgba.data() + static_cast<size_t>(y) * stride;
             for (uint16_t x = 0; x < kWidth; x++)
             {
                 out.write(reinterpret_cast<const char*>(src + static_cast<size_t>(x) * 4), 3);
@@ -125,11 +84,8 @@ namespace
 
     bool renderShot(const std::string& path, int32_t model, int32_t ground, const int32_t sprites[4])
     {
-        bgfx::setViewFrameBuffer(0, _frame);
-        bgfx::setViewRect(0, 0, 0, kWidth, kHeight);
-        bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, kClear, 1.0f, 0);
-        bgfx::setViewMode(0, bgfx::ViewMode::Sequential);
-        bgfx::touch(0);
+        OpenRCT2::View3D::Gpu::beginScene();
+        OpenRCT2::View3D::meshDrawBeginFrame();
 
         const OpenRCT2::View3D::MeshInstance groundInstance{ 0.0f, 0.0f, 0.0f, 0.0f };
         const OpenRCT2::View3D::MeshInstance tree{ 0.0f, 0.0f, 0.0f, 0.0f };
@@ -141,22 +97,8 @@ namespace
             OpenRCT2::View3D::meshDrawSprite(sprites[face], &cross, 1);
         }
 
-        bgfx::TextureRegion source;
-        source.init(bgfx::getTexture(_frame), 0, 0, kWidth, kHeight);
-        bgfx::TextureRegion destination;
-        destination.init(_readback, 0, 0, kWidth, kHeight);
-        bgfx::blit(2, destination, source);
-
         std::vector<uint8_t> pixels(static_cast<size_t>(kWidth) * kHeight * 4);
-        bgfx::TextureRegion readRegion;
-        readRegion.init(_readback, 0, 0, kWidth, kHeight);
-        const uint32_t ready = bgfx::read(readRegion, pixels.data());
-        uint32_t presented = bgfx::frame();
-        for (int extra = 0; extra < 3 && presented < ready; extra++)
-        {
-            presented = bgfx::frame();
-        }
-        if (presented < ready)
+        if (!OpenRCT2::View3D::Gpu::render(kWidth, kHeight, pixels.data()))
         {
             std::fprintf(stderr, "preview: readback did not finish for %s\n", path.c_str());
             return false;
@@ -253,25 +195,12 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    bgfx::Init init;
-    init.type = bgfx::RendererType::OpenGL;
-    init.fallback = false;
-    init.reset = BGFX_RESET_NONE;
-    init.swapChain.width = 0;
-    init.swapChain.height = 0;
-    bgfx::renderFrame();
-    if (!bgfx::init(init))
+    if (!OpenRCT2::View3D::Gpu::initialize())
     {
-        std::fprintf(stderr, "preview: bgfx init failed\n");
+        std::fprintf(stderr, "preview: Filament init failed\n");
         return 1;
     }
-    std::fprintf(stderr, "preview: renderer %s\n", bgfx::getRendererName(bgfx::getRendererType()));
-    if (!createTargets())
-    {
-        std::fprintf(stderr, "preview: framebuffer failed\n");
-        bgfx::shutdown();
-        return 1;
-    }
+    std::fprintf(stderr, "preview: renderer Filament\n");
 
     const OpenRCT2::View3D::MeshUpload uploaded = OpenRCT2::View3D::meshDrawUploadModel(*mesh);
     const int32_t model = uploaded.status == OpenRCT2::View3D::MeshUploadStatus::ready ? uploaded.id : -1;
@@ -294,7 +223,7 @@ int main(int argc, char** argv)
     {
         std::fprintf(stderr, "preview: upload failed\n");
         OpenRCT2::View3D::meshDrawShutdown();
-        bgfx::shutdown();
+        OpenRCT2::View3D::Gpu::shutdown();
         return 1;
     }
 
@@ -317,14 +246,6 @@ int main(int argc, char** argv)
     ok = renderShot(outDir + "/scenery-top.ppm", model, ground, sprites) && ok;
 
     OpenRCT2::View3D::meshDrawShutdown();
-    if (bgfx::isValid(_frame))
-    {
-        bgfx::destroy(_frame);
-    }
-    if (bgfx::isValid(_readback))
-    {
-        bgfx::destroy(_readback);
-    }
-    bgfx::shutdown();
+    OpenRCT2::View3D::Gpu::shutdown();
     return ok ? 0 : 1;
 }

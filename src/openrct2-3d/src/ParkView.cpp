@@ -9,11 +9,11 @@
 
 #include "ParkView.hpp"
 
+#include "FilamentRenderer.hpp"
 #include "SceneryDraw.hpp"
 #include "ViewerScale.hpp"
 
 #include <algorithm>
-#include <bgfx/bgfx.h>
 #include <bx/math.h>
 #include <chrono>
 #include <cmath>
@@ -46,8 +46,6 @@ namespace OpenRCT2::View3D::Park
 {
     namespace
     {
-        constexpr uint32_t kVaryingHash = 0x71A3C0DEu;
-        constexpr uint8_t kShaderVersion = 0x0c;
         constexpr int32_t kTextureSize = 32;
         // Flat land sprites are a 64x31 diamond. A 64 square keeps the grid lines and the chequerboard.
         constexpr int32_t kSurfaceSize = 64;
@@ -311,139 +309,6 @@ namespace OpenRCT2::View3D::Park
             clampFly();
         }
 
-        constexpr const char kSurfacesName[] = "s_surfaces";
-        constexpr const char kIndexName[] = "s_index";
-        constexpr const char kWaterName[] = "s_water";
-        constexpr const char kPathsName[] = "s_paths";
-        constexpr const char kParamsName[] = "u_params";
-        constexpr const char kExtraName[] = "u_extra";
-
-        constexpr const char kVertexShader[] = "uniform mat4 u_modelViewProj;\n"
-                                               "in vec3 a_position;\n"
-                                               "in vec3 a_normal;\n"
-                                               "in vec2 a_texcoord0;\n"
-                                               "in vec4 a_color0;\n"
-                                               "out vec3 v_world;\n"
-                                               "out vec3 v_normal;\n"
-                                               "out vec2 v_uv;\n"
-                                               "out vec4 v_colour;\n"
-                                               "void main()\n"
-                                               "{\n"
-                                               "    v_world = a_position;\n"
-                                               "    v_normal = a_normal;\n"
-                                               "    v_uv = a_texcoord0;\n"
-                                               "    v_colour = a_color0;\n"
-                                               "    gl_Position = u_modelViewProj * vec4(a_position, 1.0);\n"
-                                               "}\n";
-
-        constexpr const char kFragmentShader[]
-            = "uniform sampler2DArray s_surfaces;\n"
-              "uniform sampler2D s_index;\n"
-              "uniform sampler2D s_water;\n"
-              "uniform sampler2DArray s_paths;\n"
-              "uniform vec4 u_params;\n"
-              "uniform vec4 u_extra;\n"
-              "in vec3 v_world;\n"
-              "in vec3 v_normal;\n"
-              "in vec2 v_uv;\n"
-              "in vec4 v_colour;\n"
-              "layout(location = 0) out vec4 bgfx_FragColor;\n"
-              "int layerAt(ivec2 tile)\n"
-              "{\n"
-              "    if (tile.x < 0 || tile.y < 0 || float(tile.x) >= u_params.x || float(tile.y) >= u_params.y)\n"
-              "    {\n"
-              "        return -1;\n"
-              "    }\n"
-              "    return int(texelFetch(s_index, tile, 0).r * 255.0 + 0.5);\n"
-              "}\n"
-              "vec3 sampleSurface(int layer, vec2 uv)\n"
-              "{\n"
-              "    return texture(s_surfaces, vec3(uv, float(layer))).rgb;\n"
-              "}\n"
-              "void main()\n"
-              "{\n"
-              "    float kind = v_colour.g * 255.0;\n"
-              "    vec3 colour;\n"
-              "    if (kind > 2.5)\n"
-              "    {\n"
-              "        float layer = float(int(v_colour.r * 255.0 + 0.5));\n"
-              "        vec4 pathSample = texture(s_paths, vec3(v_uv, layer));\n"
-              "        if (pathSample.a < 0.5)\n"
-              "        {\n"
-              "            discard;\n"
-              "        }\n"
-              "        colour = pathSample.rgb;\n"
-              "    }\n"
-              "    else if (kind > 1.5)\n"
-              "    {\n"
-              "        colour = texture(s_water, v_uv).rgb;\n"
-              "    }\n"
-              "    else if (kind > 0.5)\n"
-              "    {\n"
-              "        colour = sampleSurface(int(v_colour.r * 255.0 + 0.5), v_uv);\n"
-              "    }\n"
-              "    else\n"
-              "    {\n"
-              "        vec2 tile = floor(v_world.xy);\n"
-              "        vec2 cell = fract(v_world.xy);\n"
-              "        int id = layerAt(ivec2(tile));\n"
-              "        colour = sampleSurface(max(id, 0), v_uv);\n"
-              "        float margin = 0.18;\n"
-              "        if (cell.x < margin)\n"
-              "        {\n"
-              "            int other = layerAt(ivec2(tile) + ivec2(-1, 0));\n"
-              "            if (other >= 0)\n"
-              "            {\n"
-              "                colour = mix(sampleSurface(other, v_uv), colour, smoothstep(0.0, margin, cell.x));\n"
-              "            }\n"
-              "        }\n"
-              "        else if (cell.x > 1.0 - margin)\n"
-              "        {\n"
-              "            int other = layerAt(ivec2(tile) + ivec2(1, 0));\n"
-              "            if (other >= 0)\n"
-              "            {\n"
-              "                colour = mix(sampleSurface(other, v_uv), colour, smoothstep(0.0, margin, 1.0 - cell.x));\n"
-              "            }\n"
-              "        }\n"
-              "        if (cell.y < margin)\n"
-              "        {\n"
-              "            int other = layerAt(ivec2(tile) + ivec2(0, -1));\n"
-              "            if (other >= 0)\n"
-              "            {\n"
-              "                colour = mix(sampleSurface(other, v_uv), colour, smoothstep(0.0, margin, cell.y));\n"
-              "            }\n"
-              "        }\n"
-              "        else if (cell.y > 1.0 - margin)\n"
-              "        {\n"
-              "            int other = layerAt(ivec2(tile) + ivec2(0, 1));\n"
-              "            if (other >= 0)\n"
-              "            {\n"
-              "                colour = mix(sampleSurface(other, v_uv), colour, smoothstep(0.0, margin, 1.0 - cell.y));\n"
-              "            }\n"
-              "        }\n"
-              "    }\n"
-              "    if (u_params.z > 0.5 && kind < 0.5)\n"
-              "    {\n"
-              "        vec2 cell = fract(v_world.xy);\n"
-              "        float dx = min(cell.x, 1.0 - cell.x);\n"
-              "        float dy = min(cell.y, 1.0 - cell.y);\n"
-              "        float px = max(length(vec2(dFdx(v_world.x), dFdy(v_world.x))), 0.0001);\n"
-              "        float py = max(length(vec2(dFdx(v_world.y), dFdy(v_world.y))), 0.0001);\n"
-              "        float dist = min(dx / px, dy / py);\n"
-              "        float line = 1.0 - smoothstep(0.85, 1.7, dist);\n"
-              "        float tilePixels = min(1.0 / px, 1.0 / py);\n"
-              "        float coverage = mix(0.65, 1.0, smoothstep(2.5, 6.0, tilePixels));\n"
-              "        colour = mix(colour, colour * 0.45, line * coverage * 0.42);\n"
-              "    }\n"
-              "    vec3 normal = normalize(v_normal);\n"
-              "    float lit = clamp(dot(normal, normalize(vec3(-0.35, -0.45, 0.82))), 0.0, 1.0);\n"
-              "    bool water = kind > 1.5 && kind < 2.5;\n"
-              "    float ambient = water ? 0.72 : 0.4;\n"
-              "    colour *= (ambient + (1.0 - ambient) * lit) * u_extra.x;\n"
-              "    float alpha = water ? u_extra.y : 1.0;\n"
-              "    bgfx_FragColor = vec4(colour, alpha);\n"
-              "}\n";
-
         struct Vertex
         {
             float x;
@@ -471,21 +336,15 @@ namespace OpenRCT2::View3D::Park
 
         bool _failed = false;
         bool _logged = false;
-        bgfx::ProgramHandle _program = BGFX_INVALID_HANDLE;
-        bgfx::UniformHandle _surfacesSampler = BGFX_INVALID_HANDLE;
-        bgfx::UniformHandle _indexSampler = BGFX_INVALID_HANDLE;
-        bgfx::UniformHandle _waterSampler = BGFX_INVALID_HANDLE;
-        bgfx::UniformHandle _params = BGFX_INVALID_HANDLE;
-        bgfx::UniformHandle _extra = BGFX_INVALID_HANDLE;
-        bgfx::TextureHandle _surfaces = BGFX_INVALID_HANDLE;
-        bgfx::TextureHandle _index = BGFX_INVALID_HANDLE;
-        bgfx::TextureHandle _water = BGFX_INVALID_HANDLE;
-        bgfx::UniformHandle _pathSampler = BGFX_INVALID_HANDLE;
-        bgfx::TextureHandle _paths = BGFX_INVALID_HANDLE;
-        bgfx::DynamicVertexBufferHandle _land = BGFX_INVALID_HANDLE;
-        bgfx::DynamicVertexBufferHandle _lake = BGFX_INVALID_HANDLE;
-        bgfx::DynamicVertexBufferHandle _pathMesh = BGFX_INVALID_HANDLE;
-        bgfx::VertexLayout _layout;
+        filament::MaterialInstance* _terrainMaterial = nullptr;
+        filament::MaterialInstance* _waterMaterial = nullptr;
+        Gpu::Texture _surfaces;
+        Gpu::Texture _index;
+        Gpu::Texture _water;
+        Gpu::Texture _paths;
+        Gpu::Geometry _land;
+        Gpu::Geometry _lake;
+        Gpu::Geometry _pathMesh;
         uint16_t _indexWidth = 0;
         uint16_t _indexHeight = 0;
         uint16_t _meshWidth = 0;
@@ -520,86 +379,6 @@ namespace OpenRCT2::View3D::Park
             }
             _logged = true;
             std::fprintf(stderr, "View3D: %s\n", message);
-        }
-
-        void appendU8(std::vector<uint8_t>& out, uint8_t value)
-        {
-            out.push_back(value);
-        }
-
-        void appendU16(std::vector<uint8_t>& out, uint16_t value)
-        {
-            out.push_back(static_cast<uint8_t>(value));
-            out.push_back(static_cast<uint8_t>(value >> 8));
-        }
-
-        void appendU32(std::vector<uint8_t>& out, uint32_t value)
-        {
-            out.push_back(static_cast<uint8_t>(value));
-            out.push_back(static_cast<uint8_t>(value >> 8));
-            out.push_back(static_cast<uint8_t>(value >> 16));
-            out.push_back(static_cast<uint8_t>(value >> 24));
-        }
-
-        void appendName(std::vector<uint8_t>& out, const char* name)
-        {
-            const auto size = static_cast<uint8_t>(std::strlen(name));
-            appendU8(out, size);
-            out.insert(out.end(), name, name + size);
-        }
-
-        void appendSampler(std::vector<uint8_t>& out, const char* name, uint16_t regIndex, uint8_t dimension)
-        {
-            appendName(out, name);
-            appendU8(out, static_cast<uint8_t>(bgfx::UniformType::Sampler));
-            appendU8(out, 1);
-            appendU16(out, regIndex);
-            appendU16(out, 1);
-            appendU8(out, 0);
-            appendU8(out, dimension);
-            appendU16(out, 0);
-        }
-
-        void appendVec4(std::vector<uint8_t>& out, const char* name, uint16_t regIndex)
-        {
-            appendName(out, name);
-            appendU8(out, static_cast<uint8_t>(bgfx::UniformType::Vec4));
-            appendU8(out, 1);
-            appendU16(out, regIndex);
-            appendU16(out, 1);
-            appendU16(out, 0);
-            appendU16(out, 0);
-        }
-
-        bgfx::ShaderHandle createShader(char stage, uint32_t hashIn, uint32_t hashOut, bool fragment, const char* source)
-        {
-            std::vector<uint8_t> out;
-            appendU8(out, static_cast<uint8_t>(stage));
-            appendU8(out, static_cast<uint8_t>('S'));
-            appendU8(out, static_cast<uint8_t>('H'));
-            appendU8(out, kShaderVersion);
-            appendU32(out, hashIn);
-            appendU32(out, hashOut);
-            appendU32(out, 0);
-            appendU32(out, 0);
-            if (fragment)
-            {
-                appendU16(out, 6);
-                appendSampler(out, kSurfacesName, 0, 3);
-                appendSampler(out, kIndexName, 1, 2);
-                appendSampler(out, kWaterName, 2, 2);
-                appendSampler(out, kPathsName, 3, 3);
-                appendVec4(out, kParamsName, 0);
-                appendVec4(out, kExtraName, 1);
-            }
-            else
-            {
-                appendU16(out, 0);
-            }
-            const auto sourceSize = static_cast<uint32_t>(std::strlen(source) + 1);
-            appendU32(out, sourceSize);
-            out.insert(out.end(), source, source + sourceSize);
-            return bgfx::createShader(bgfx::copy(out.data(), static_cast<uint32_t>(out.size())));
         }
 
         ViewOptions readOptions()
@@ -955,10 +734,9 @@ namespace OpenRCT2::View3D::Park
             resampleFlatTile(sprite->width, sprite->height);
         }
 
-        void uploadTexture(bgfx::TextureHandle texture, uint16_t layer, uint16_t size)
+        void uploadTexture(Gpu::Texture texture, uint16_t layer, uint16_t size)
         {
-            const bgfx::Memory* memory = bgfx::copy(_rgba.data(), static_cast<uint32_t>(_rgba.size()));
-            bgfx::updateTexture2D(texture, layer, 0, 0, 0, size, size, memory);
+            Gpu::updateTexture(texture, _rgba.data(), size, size, 0, 0, layer);
         }
 
         // The overlay sprite is the same isometric diamond as a land tile. Stretching that rectangle
@@ -988,7 +766,7 @@ namespace OpenRCT2::View3D::Park
         void refreshWaterTexture()
         {
             if (_waterIndices.size() != static_cast<size_t>(kTextureSize) * static_cast<size_t>(kTextureSize)
-                || !bgfx::isValid(_water))
+                || _water.handle == nullptr)
             {
                 return;
             }
@@ -1088,53 +866,22 @@ namespace OpenRCT2::View3D::Park
             {
                 return false;
             }
-            if (bgfx::isValid(_program))
+            if (_terrainMaterial != nullptr)
             {
                 return true;
             }
-
-            _surfacesSampler = bgfx::createUniform(kSurfacesName, bgfx::UniformType::Sampler);
-            _indexSampler = bgfx::createUniform(kIndexName, bgfx::UniformType::Sampler);
-            _waterSampler = bgfx::createUniform(kWaterName, bgfx::UniformType::Sampler);
-            _pathSampler = bgfx::createUniform(kPathsName, bgfx::UniformType::Sampler);
-            _params = bgfx::createUniform(kParamsName, bgfx::UniformType::Vec4);
-            _extra = bgfx::createUniform(kExtraName, bgfx::UniformType::Vec4);
-            const bgfx::ShaderHandle vertex = createShader('V', 0, kVaryingHash, false, kVertexShader);
-            const bgfx::ShaderHandle fragment = createShader('F', kVaryingHash, 0, true, kFragmentShader);
-            _program = bgfx::createProgram(vertex, fragment, true);
-            if (!bgfx::isValid(_program))
+            _terrainMaterial = Gpu::createMaterial(Gpu::MaterialKind::terrain);
+            _waterMaterial = Gpu::createMaterial(Gpu::MaterialKind::water);
+            if (_terrainMaterial == nullptr || _waterMaterial == nullptr)
             {
-                logOnce("terrain shader failed");
+                logOnce("Filament terrain material failed");
                 _failed = true;
                 return false;
             }
-
-            _layout.begin(bgfx::RendererType::OpenGL)
-                .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
-                .add(bgfx::Attrib::Normal, 3, bgfx::AttribType::Float)
-                .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
-                .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
-                .end();
-            static_assert(sizeof(Vertex) == 36);
-            if (_layout.getStride() != sizeof(Vertex))
-            {
-                logOnce("terrain vertex layout does not match");
-                _failed = true;
-                return false;
-            }
-
-            const uint64_t tileFlags = BGFX_SAMPLER_POINT;
-            _surfaces = bgfx::createTexture2D(
-                kSurfaceSize, kSurfaceSize, false, kSurfaceLayers, bgfx::TextureFormat::RGBA8, tileFlags);
-            _water = bgfx::createTexture2D(kTextureSize, kTextureSize, false, 1, bgfx::TextureFormat::RGBA8, tileFlags);
-            const uint64_t pathFlags = BGFX_SAMPLER_POINT | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
-            _paths = bgfx::createTexture2D(
-                kSurfaceSize, kSurfaceSize, false, kPathLayers, bgfx::TextureFormat::RGBA8, pathFlags);
-            _land = bgfx::createDynamicVertexBuffer(1, _layout, BGFX_BUFFER_ALLOW_RESIZE);
-            _lake = bgfx::createDynamicVertexBuffer(1, _layout, BGFX_BUFFER_ALLOW_RESIZE);
-            _pathMesh = bgfx::createDynamicVertexBuffer(1, _layout, BGFX_BUFFER_ALLOW_RESIZE);
-            if (!bgfx::isValid(_surfaces) || !bgfx::isValid(_water) || !bgfx::isValid(_paths) || !bgfx::isValid(_land)
-                || !bgfx::isValid(_lake) || !bgfx::isValid(_pathMesh))
+            _surfaces = Gpu::createTexture(kSurfaceSize, kSurfaceSize, kSurfaceLayers, true, false);
+            _water = Gpu::createTexture(kTextureSize, kTextureSize, 1, true, false);
+            _paths = Gpu::createTexture(kSurfaceSize, kSurfaceSize, kPathLayers);
+            if (_surfaces.handle == nullptr || _water.handle == nullptr || _paths.handle == nullptr)
             {
                 logOnce("terrain resources failed");
                 _failed = true;
@@ -1146,17 +893,15 @@ namespace OpenRCT2::View3D::Park
 
         void ensureIndexTexture(uint16_t width, uint16_t height)
         {
-            if (bgfx::isValid(_index) && (_indexWidth != width || _indexHeight != height))
+            if (_index.handle != nullptr && (_indexWidth != width || _indexHeight != height))
             {
-                bgfx::destroy(_index);
-                _index = BGFX_INVALID_HANDLE;
+                Gpu::destroy(_index);
             }
-            if (bgfx::isValid(_index))
+            if (_index.handle != nullptr)
             {
                 return;
             }
-            _index = bgfx::createTexture2D(
-                width, height, false, 1, bgfx::TextureFormat::R8, BGFX_SAMPLER_POINT | BGFX_SAMPLER_UVW_CLAMP);
+            _index = Gpu::createTexture(width, height, 1, true, true, true);
             _indexWidth = width;
             _indexHeight = height;
         }
@@ -1203,14 +948,19 @@ namespace OpenRCT2::View3D::Park
             return true;
         }
 
-        void uploadMesh(bgfx::DynamicVertexBufferHandle buffer, const std::vector<Vertex>& vertices)
+        void uploadMesh(Gpu::Geometry& geometry, const std::vector<Vertex>& vertices)
         {
-            if (vertices.empty() || !bgfx::isValid(buffer))
+            std::vector<Gpu::Vertex> converted(vertices.size());
+            for (size_t i = 0; i < vertices.size(); ++i)
             {
-                return;
+                const auto& v = vertices[i];
+                converted[i] = { v.x, v.y, v.z, v.nx, v.ny, v.nz, v.u, v.v, v.surface, v.kind, v.pad0, v.pad1 };
             }
-            const bgfx::Memory* memory = bgfx::copy(vertices.data(), static_cast<uint32_t>(vertices.size() * sizeof(Vertex)));
-            bgfx::update(buffer, 0, memory);
+            if (!Gpu::uploadGeometry(geometry, converted.data(), static_cast<uint32_t>(converted.size())))
+            {
+                _failed = true;
+                logOnce("Filament terrain upload failed");
+            }
         }
 
         // The 2D sprite is drawn from the top corner of the diamond. One pixel of dilation closes the
@@ -1397,7 +1147,7 @@ namespace OpenRCT2::View3D::Park
         void rebuildPaths(const TileCoordsXY& mapSize)
         {
             _pathVerts.clear();
-            if (!bgfx::isValid(_paths))
+            if (_paths.handle == nullptr)
             {
                 return;
             }
@@ -1486,8 +1236,7 @@ namespace OpenRCT2::View3D::Park
                 }
             }
 
-            const bgfx::Memory* indices = bgfx::copy(_indexBytes.data(), static_cast<uint32_t>(_indexBytes.size()));
-            bgfx::updateTexture2D(_index, 0, 0, 0, 0, width, height, indices);
+            Gpu::updateTexture(_index, _indexBytes.data(), width, height);
             uploadMesh(_land, _landVerts);
             uploadMesh(_lake, _lakeVerts);
             rebuildPaths(mapSize);
@@ -1504,22 +1253,21 @@ namespace OpenRCT2::View3D::Park
         }
 
         void submitMesh(
-            bgfx::DynamicVertexBufferHandle buffer, uint32_t count, uint32_t depth, uint64_t state, const float* params,
-            const float* extra)
+            const Gpu::Geometry& geometry, filament::MaterialInstance* material, const float* params,
+            const float* extra, bool shadows = true)
         {
-            if (count == 0 || !bgfx::isValid(buffer))
+            if (geometry.count == 0 || material == nullptr)
             {
                 return;
             }
-            bgfx::setState(state);
-            bgfx::setTexture(0, _surfacesSampler, _surfaces);
-            bgfx::setTexture(1, _indexSampler, _index);
-            bgfx::setTexture(2, _waterSampler, _water);
-            bgfx::setTexture(3, _pathSampler, _paths);
-            bgfx::setUniform(_params, params);
-            bgfx::setUniform(_extra, extra);
-            bgfx::setVertexBuffer(0, buffer, 0, count);
-            bgfx::submit(0, _program, depth);
+            Gpu::setTexture(material, "surfaces", _surfaces);
+            Gpu::setTexture(material, "tileIndex", _index);
+            Gpu::setTexture(material, "water", _water);
+            Gpu::setTexture(material, "paths", _paths);
+            Gpu::setFloat4(material, "params", params);
+            Gpu::setFloat4(material, "extra", extra);
+            const filament::math::mat4f identity;
+            Gpu::draw(geometry, material, &identity, 1, shadows);
         }
 
         void lookAtMainView(uint16_t backWidth, uint16_t backHeight)
@@ -1541,12 +1289,11 @@ namespace OpenRCT2::View3D::Park
             float view[16];
             float projection[16];
             commitView(backWidth, backHeight, view, projection);
-            bgfx::setViewTransform(0, view, projection);
+            Gpu::setCamera(view, projection);
         }
 
-        // CPU cull reads _viewProj. bgfx multiplies the view and projection passed to
-        // setViewTransform as projection * view. bx::mtxMul(result, a, b) stores b * a,
-        // so the arguments are view then projection.
+        // CPU cull reads projection * view. bx::mtxMul(result, a, b) stores b * a,
+        // so the arguments are view then projection. Filament receives the same clip transform.
         void commitView(uint16_t backWidth, uint16_t backHeight, float view[16], float projection[16])
         {
             float forwardX;
@@ -1566,7 +1313,7 @@ namespace OpenRCT2::View3D::Park
             const float aspect = backHeight > 0 ? static_cast<float>(backWidth) / static_cast<float>(backHeight) : 1.0f;
             // bx::mtxProj converts this angle with toRad, so the value is degrees. Passing radians
             // collapses the field of view to under one degree and fills the window with one tile.
-            bx::mtxProj(projection, kFovDegrees, aspect, 0.2f, 8000.0f, bgfx::getCaps()->homogeneousDepth);
+            bx::mtxProj(projection, kFovDegrees, aspect, 0.2f, 8000.0f, true);
             bx::mtxMul(_viewProj, view, projection);
             _eyeX = _fly.eyeX;
             _eyeY = _fly.eyeY;
@@ -1723,45 +1470,15 @@ namespace OpenRCT2::View3D::Park
         _resyncView = true;
         _failed = false;
         _logged = false;
-        auto destroyTexture = [](bgfx::TextureHandle& handle) {
-            if (bgfx::isValid(handle))
-            {
-                bgfx::destroy(handle);
-            }
-            handle = BGFX_INVALID_HANDLE;
-        };
-        auto destroyUniform = [](bgfx::UniformHandle& handle) {
-            if (bgfx::isValid(handle))
-            {
-                bgfx::destroy(handle);
-            }
-            handle = BGFX_INVALID_HANDLE;
-        };
-        auto destroyBuffer = [](bgfx::DynamicVertexBufferHandle& handle) {
-            if (bgfx::isValid(handle))
-            {
-                bgfx::destroy(handle);
-            }
-            handle = BGFX_INVALID_HANDLE;
-        };
-        destroyTexture(_surfaces);
-        destroyTexture(_index);
-        destroyTexture(_water);
-        destroyTexture(_paths);
-        destroyBuffer(_land);
-        destroyBuffer(_lake);
-        destroyBuffer(_pathMesh);
-        if (bgfx::isValid(_program))
-        {
-            bgfx::destroy(_program);
-        }
-        _program = BGFX_INVALID_HANDLE;
-        destroyUniform(_surfacesSampler);
-        destroyUniform(_indexSampler);
-        destroyUniform(_waterSampler);
-        destroyUniform(_pathSampler);
-        destroyUniform(_params);
-        destroyUniform(_extra);
+        Gpu::destroy(_terrainMaterial);
+        Gpu::destroy(_waterMaterial);
+        Gpu::destroy(_land);
+        Gpu::destroy(_lake);
+        Gpu::destroy(_pathMesh);
+        Gpu::destroy(_surfaces);
+        Gpu::destroy(_index);
+        Gpu::destroy(_water);
+        Gpu::destroy(_paths);
         _indexWidth = 0;
         _indexHeight = 0;
         _meshWidth = 0;
@@ -1797,7 +1514,7 @@ namespace OpenRCT2::View3D::Park
         const auto width = static_cast<uint16_t>(mapSize.x);
         const auto height = static_cast<uint16_t>(mapSize.y);
         ensureIndexTexture(width, height);
-        if (!bgfx::isValid(_index))
+        if (_index.handle == nullptr)
         {
             return false;
         }
@@ -1811,22 +1528,19 @@ namespace OpenRCT2::View3D::Park
 
         refreshWaterTexture();
         lookAtMainView(backWidth, backHeight);
-        bgfx::setViewMode(0, bgfx::ViewMode::Sequential);
 
         const float darken = options.underground ? 0.62f : 1.0f;
         const float waterAlpha = options.transparentWater ? 0.45f : 0.9f;
         const float extra[4] = { darken, waterAlpha, 0.0f, 0.0f };
         const float params[4] = { static_cast<float>(width), static_cast<float>(height), options.grid ? 1.0f : 0.0f, 0.0f };
 
-        const uint64_t opaque = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS;
-        const uint64_t blended = opaque | BGFX_STATE_BLEND_ALPHA;
         // Paths go on before the water. A path under the surface then shows through it, and a path
         // at the same height covers it. Discarded path texels leave the land depth alone.
-        submitMesh(_land, _landCount, 0, opaque, params, extra);
-        submitMesh(_pathMesh, _pathCount, 1, opaque, params, extra);
+        submitMesh(_land, _terrainMaterial, params, extra);
+        submitMesh(_pathMesh, _terrainMaterial, params, extra);
         // Scenery before the water, so a translucent lake can cover a trunk standing in it.
         drawScenery();
-        submitMesh(_lake, _lakeCount, 2, blended, params, extra);
-        return true;
+        submitMesh(_lake, _waterMaterial, params, extra, false);
+        return !_failed;
     }
 } // namespace OpenRCT2::View3D::Park

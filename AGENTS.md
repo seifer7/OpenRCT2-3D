@@ -1,6 +1,6 @@
 # OpenRCT2 3D
 
-This branch (`Filament`), created from `develop`, tests Google Filament in place of bgfx for OpenRCT2's 3D viewing mode. Filament is not integrated yet; the current code and build still use bgfx. Read [docs/3d-viewer.md](docs/3d-viewer.md) before changing rendering, the viewport, or the frame loop. That document records the experiment's scope and the existing implementation.
+This branch (`Filament`), created from `develop`, uses Google Filament instead of bgfx for OpenRCT2's experimental 3D viewing mode. Read [docs/3d-viewer.md](docs/3d-viewer.md) and [the integration notes](docs/agents/filament-renderer.md) before changing rendering, the viewport, or the frame loop. In-game visual validation remains a user task.
 
 ## Rule
 
@@ -11,16 +11,16 @@ Keep changes to the original codebase as small and as few as possible. All 3D re
 - The original 2D renderer is the default and must keep working. 3D is a second view of the same park, not a replacement.
 - The switch lives in the existing View menu on the top toolbar (`WIDX_VIEW_MENU` in `src/openrct2-ui/windows/TopToolbar.cpp`, tooltip “View options”). Choosing it turns the main park view to 3D. Choosing it again returns to the original 2D renderer. Both modes call the same `gameStateTick()`.
 - `gameStateTick()` remains the only park simulation. Guests, vehicles, rides, economy, and networking stay there. The 3D view reads the result. It does not advance the park.
-- Evaluate [Google Filament](https://github.com/google/filament) as the 3D renderer on this branch, replacing bgfx only in the visualization layer. The current implementation still uses [bgfx](https://github.com/bkaradzic/bgfx), whose sources are submodules under `src/openrct2-3d/third_party/`. Do not write a renderer, and do not embed Unity, Unreal, or Godot. Until build integration changes, run `git submodule update --init --recursive` after a fresh clone.
+- Use [Google Filament](https://github.com/google/filament) 1.80.0 for the visualization layer. Keep its SDK and material compiler versions matched. Do not write a replacement graphics engine or embed Unity, Unreal, or Godot. Run `git submodule update --init --recursive` for the remaining bx/stb utilities; see `src/openrct2-3d/README.md` for SDK setup.
 - Do not grow the 3D world inside `OpenGLDrawingEngine`. That engine composites the 2D paletted screen.
-- The original UI stays. The 3D renderer must composite its paletted buffer over the 3D image, as bgfx currently does. The main viewport is the transparent hole. Ride, guest, and staff windows may keep their small 2D viewports.
+- The original UI and presenter stay. Filament renders an independent offscreen image; the existing OpenRCT2 display path composites the UI over it. Never hand the game window or its GL context to Filament. The main viewport is the transparent hole. Ride, guest, and staff windows may keep their small 2D viewports.
 - Do not commit RollerCoaster Tycoon 2 game data. The commercial files (`Data/g1.dat` and the rest of an install) stay outside the repository.
 
 ## Where the frame is split
 
 - Simulation tick: `GameScene::Tick()` calls `gameStateTick()` in `src/openrct2/GameState.cpp`. The logical rate is 40 Hz (`kGameUpdateFPS`).
 - UI and isometric park paint: `Painter::Paint()` calls `PaintWindows()`. The park image is the viewport widget, drawn by `WindowDrawViewport()` → `ViewportRender()`.
-- A 3D mode skips that isometric viewport paint, runs a read-only extractor over `GameState`, and currently draws with bgfx. The Filament experiment must preserve this simulation boundary.
+- A 3D mode skips that isometric viewport paint, runs a read-only extractor over `GameState`, and draws with Filament. Preserve this simulation boundary.
 
 ## Build and run
 

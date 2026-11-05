@@ -9,88 +9,30 @@
 
 #include "MeshDraw.hpp"
 
+#include "FilamentRenderer.hpp"
 #include "GpuBudget.hpp"
 #include "SceneryScale.hpp"
 
 #include <algorithm>
-#include <bgfx/bgfx.h>
 #include <cstdint>
 #include <cstring>
-#include <stb_image.h>
+#include <limits>
 #include <vector>
 
 namespace OpenRCT2::View3D
 {
     namespace
     {
-        constexpr uint32_t kVaryingHash = 0x5C3E91B1u;
-        constexpr uint8_t kShaderVersion = 0x0c;
-        constexpr uint16_t kInstanceStride = 16;
-        constexpr const char kSamplerName[] = "s_albedo";
-        constexpr const char kParamsName[] = "u_params";
-        constexpr const char kUvRectName[] = "u_uvRect";
-
-        constexpr const char kVertexShader[] = "uniform mat4 u_modelViewProj;\n"
-                                               "in vec3 a_position;\n"
-                                               "in vec3 a_normal;\n"
-                                               "in vec2 a_texcoord0;\n"
-                                               "in vec4 i_data0;\n"
-                                               "out vec3 v_normal;\n"
-                                               "out vec2 v_uv;\n"
-                                               "void main()\n"
-                                               "{\n"
-                                               "    float c = cos(i_data0.w);\n"
-                                               "    float s = sin(i_data0.w);\n"
-                                               "    vec3 p = a_position;\n"
-                                               "    vec3 rotated = vec3(c * p.x - s * p.y, s * p.x + c * p.y, p.z);\n"
-                                               "    vec3 n = a_normal;\n"
-                                               "    v_normal = vec3(c * n.x - s * n.y, s * n.x + c * n.y, n.z);\n"
-                                               "    v_uv = a_texcoord0;\n"
-                                               "    vec3 world = rotated + i_data0.xyz;\n"
-                                               "    gl_Position = u_modelViewProj * vec4(world, 1.0);\n"
-                                               "}\n";
-
-        constexpr const char kFragmentShader[] = "uniform sampler2D s_albedo;\n"
-                                                 "uniform vec4 u_params;\n"
-                                                 "uniform vec4 u_uvRect;\n"
-                                                 "in vec3 v_normal;\n"
-                                                 "in vec2 v_uv;\n"
-                                                 "layout(location = 0) out vec4 bgfx_FragColor;\n"
-                                                 "void main()\n"
-                                                 "{\n"
-                                                 "    vec2 uv = v_uv;\n"
-                                                 "    if (u_params.w > 0.5)\n"
-                                                 "    {\n"
-                                                 "        uv = clamp(uv, vec2(0.0), vec2(1.0));\n"
-                                                 "        uv = uv * u_uvRect.xy + u_uvRect.zw;\n"
-                                                 "    }\n"
-                                                 "    vec4 colour = texture(s_albedo, uv);\n"
-                                                 "    if (colour.a < u_params.x)\n"
-                                                 "    {\n"
-                                                 "        discard;\n"
-                                                 "    }\n"
-                                                 "    vec3 normal = normalize(v_normal);\n"
-                                                 "    float lit = abs(dot(normal, normalize(vec3(-0.35, -0.45, 0.82))));\n"
-                                                 "    float shade = mix(1.0, 0.55 + 0.45 * lit, u_params.y);\n"
-                                                 "    colour.rgb *= shade;\n"
-                                                 "    float alpha = u_params.z > 0.5 ? colour.a : 1.0;\n"
-                                                 "    bgfx_FragColor = vec4(colour.rgb, alpha);\n"
-                                                 "}\n";
-
         struct DrawPrimitive
         {
-            bgfx::DynamicVertexBufferHandle vertices = BGFX_INVALID_HANDLE;
-            bgfx::DynamicIndexBufferHandle indices = BGFX_INVALID_HANDLE;
-            uint32_t vertexStart = 0;
-            uint32_t vertexCount = 0;
-            uint32_t indexStart = 0;
-            uint32_t indexCount = 0;
+            Gpu::Geometry geometry;
+            filament::MaterialInstance* material = nullptr;
             BufferRange vertexRange;
             BufferRange indexRange;
             bool inArena = false;
             bool inAtlas = false;
             AtlasSlot atlasSlot;
-            bgfx::TextureHandle texture = BGFX_INVALID_HANDLE;
+            Gpu::Texture texture;
             bool ownsTexture = false;
             float uvScaleX = 1.0f;
             float uvScaleY = 1.0f;
@@ -108,143 +50,47 @@ namespace OpenRCT2::View3D
             std::vector<DrawPrimitive> primitives;
         };
 
-        bgfx::ProgramHandle _program = BGFX_INVALID_HANDLE;
-        bgfx::UniformHandle _sampler = BGFX_INVALID_HANDLE;
-        bgfx::UniformHandle _params = BGFX_INVALID_HANDLE;
-        bgfx::UniformHandle _uvRect = BGFX_INVALID_HANDLE;
-        bgfx::VertexLayout _layout;
         GeometryArena _arena(kSlabVertices, kSlabIndices, kMaxGeometrySlabs);
         AtlasPacker _atlas(kAtlasSize, kMaxAtlasPages, kAtlasGutter);
         struct SlabGpu
         {
-            bgfx::DynamicVertexBufferHandle vertices = BGFX_INVALID_HANDLE;
-            bgfx::DynamicIndexBufferHandle indices = BGFX_INVALID_HANDLE;
+            filament::VertexBuffer* vertices = nullptr;
+            filament::IndexBuffer* indices = nullptr;
         };
         std::vector<SlabGpu> _slabs;
-        std::vector<bgfx::TextureHandle> _atlasPages;
-        bgfx::TextureHandle _white = BGFX_INVALID_HANDLE;
+        std::vector<Gpu::Texture> _atlasPages;
+        Gpu::Texture _white;
         std::vector<DrawModel> _models;
         std::vector<int32_t> _freeModelIds;
         std::vector<DrawPrimitive> _sprites;
         SpriteIdPool _spriteIds;
-        DrawPrimitive _faceQuad[4];
-        bool _faceQuadReady[4] = {};
-        bgfx::ProgramHandle _distantProgram = BGFX_INVALID_HANDLE;
+        struct DistantBatch
+        {
+            Gpu::Geometry geometry;
+            filament::MaterialInstance* material = nullptr;
+            uint32_t capacity = 0;
+        };
+        std::vector<DistantBatch> _distantBatches;
+        size_t _distantUsed = 0;
         uint32_t _ownedTextures = 0;
-
-        constexpr const char kDistantVertexShader[] = "uniform mat4 u_modelViewProj;\n"
-                                                      "in vec3 a_position;\n"
-                                                      "in vec3 a_normal;\n"
-                                                      "in vec2 a_texcoord0;\n"
-                                                      "in vec4 i_data0;\n"
-                                                      "in vec4 i_data1;\n"
-                                                      "in vec4 i_data2;\n"
-                                                      "out vec3 v_normal;\n"
-                                                      "out vec2 v_uv;\n"
-                                                      "void main()\n"
-                                                      "{\n"
-                                                      "    float across = mix(i_data1.x, i_data1.y, a_position.x);\n"
-                                                      "    float up = mix(i_data1.z, i_data1.w, a_position.y);\n"
-                                                      "    vec3 side = vec3(-a_normal.y, a_normal.x, 0.0);\n"
-                                                      "    vec3 world = i_data0.xyz + side * across + vec3(0.0, 0.0, up);\n"
-                                                      "    v_normal = a_normal;\n"
-                                                      "    v_uv = a_texcoord0 * i_data2.xy + i_data2.zw;\n"
-                                                      "    gl_Position = u_modelViewProj * vec4(world, 1.0);\n"
-                                                      "}\n";
         bool _ready = false;
 
         uint32_t estimatedHandles()
         {
             uint32_t count = static_cast<uint32_t>(_slabs.size()) * 2u + static_cast<uint32_t>(_atlasPages.size());
             count += _ownedTextures;
-            if (bgfx::isValid(_white))
+            if (_white.handle != nullptr)
             {
                 count++;
             }
-            // Program, three uniforms, and a little slack for the terrain pass.
+            // Reserve room for materials, frame targets, and terrain resources.
             count += kHandleHeadroom;
             return count;
         }
 
-        void appendU8(std::vector<uint8_t>& out, uint8_t value)
-        {
-            out.push_back(value);
-        }
-
-        void appendU16(std::vector<uint8_t>& out, uint16_t value)
-        {
-            out.push_back(static_cast<uint8_t>(value));
-            out.push_back(static_cast<uint8_t>(value >> 8));
-        }
-
-        void appendU32(std::vector<uint8_t>& out, uint32_t value)
-        {
-            out.push_back(static_cast<uint8_t>(value));
-            out.push_back(static_cast<uint8_t>(value >> 8));
-            out.push_back(static_cast<uint8_t>(value >> 16));
-            out.push_back(static_cast<uint8_t>(value >> 24));
-        }
-
-        void appendName(std::vector<uint8_t>& out, const char* name)
-        {
-            const auto size = static_cast<uint8_t>(std::strlen(name));
-            appendU8(out, size);
-            out.insert(out.end(), name, name + size);
-        }
-
-        void appendSampler(std::vector<uint8_t>& out, const char* name)
-        {
-            appendName(out, name);
-            appendU8(out, static_cast<uint8_t>(bgfx::UniformType::Sampler));
-            appendU8(out, 1);
-            appendU16(out, 0);
-            appendU16(out, 1);
-            appendU8(out, 0);
-            appendU8(out, 2);
-            appendU16(out, 0);
-        }
-
-        void appendVec4(std::vector<uint8_t>& out, const char* name)
-        {
-            appendName(out, name);
-            appendU8(out, static_cast<uint8_t>(bgfx::UniformType::Vec4));
-            appendU8(out, 1);
-            appendU16(out, 0);
-            appendU16(out, 1);
-            appendU16(out, 0);
-            appendU16(out, 0);
-        }
-
-        bgfx::ShaderHandle createShader(char stage, uint32_t hashIn, uint32_t hashOut, bool fragment, const char* source)
-        {
-            std::vector<uint8_t> out;
-            appendU8(out, static_cast<uint8_t>(stage));
-            appendU8(out, static_cast<uint8_t>('S'));
-            appendU8(out, static_cast<uint8_t>('H'));
-            appendU8(out, kShaderVersion);
-            appendU32(out, hashIn);
-            appendU32(out, hashOut);
-            appendU32(out, 0);
-            appendU32(out, 0);
-            if (fragment)
-            {
-                appendU16(out, 3);
-                appendSampler(out, kSamplerName);
-                appendVec4(out, kParamsName);
-                appendVec4(out, kUvRectName);
-            }
-            else
-            {
-                appendU16(out, 0);
-            }
-            const auto sourceSize = static_cast<uint32_t>(std::strlen(source) + 1);
-            appendU32(out, sourceSize);
-            out.insert(out.end(), source, source + sourceSize);
-            return bgfx::createShader(bgfx::copy(out.data(), static_cast<uint32_t>(out.size())));
-        }
-
         void destroyPrimitive(DrawPrimitive& primitive)
         {
+            Gpu::destroy(primitive.material);
             if (primitive.inArena)
             {
                 _arena.free(primitive.vertexRange, primitive.indexRange);
@@ -253,9 +99,9 @@ namespace OpenRCT2::View3D
             {
                 _atlas.free(primitive.atlasSlot);
             }
-            if (primitive.ownsTexture && bgfx::isValid(primitive.texture) && primitive.texture.idx != _white.idx)
+            if (primitive.ownsTexture && primitive.texture.handle != nullptr && primitive.texture.handle != _white.handle)
             {
-                bgfx::destroy(primitive.texture);
+                Gpu::destroy(primitive.texture);
                 if (_ownedTextures > 0)
                 {
                     _ownedTextures--;
@@ -269,13 +115,13 @@ namespace OpenRCT2::View3D
             while (_slabs.size() <= slab)
             {
                 SlabGpu gpu;
-                gpu.vertices = bgfx::createDynamicVertexBuffer(kSlabVertices, _layout);
-                gpu.indices = bgfx::createDynamicIndexBuffer(kSlabIndices);
+                gpu.vertices = Gpu::createVertices(kSlabVertices);
+                gpu.indices = Gpu::createIndices(kSlabIndices);
                 _slabs.push_back(gpu);
             }
         }
 
-        void blitAtlas(bgfx::TextureHandle texture, const AtlasSlot& slot, const uint8_t* rgba, int32_t width, int32_t height)
+        void blitAtlas(Gpu::Texture texture, const AtlasSlot& slot, const uint8_t* rgba, int32_t width, int32_t height)
         {
             const int32_t gutter = static_cast<int32_t>(kAtlasGutter);
             const int32_t paddedW = width + gutter * 2;
@@ -294,54 +140,35 @@ namespace OpenRCT2::View3D
                     std::memcpy(dst, src, 4);
                 }
             }
-            bgfx::updateTexture2D(
-                texture, 0, 0, static_cast<uint16_t>(slot.x - static_cast<uint32_t>(gutter)),
-                static_cast<uint16_t>(slot.y - static_cast<uint32_t>(gutter)), static_cast<uint16_t>(paddedW),
-                static_cast<uint16_t>(paddedH), bgfx::copy(padded.data(), static_cast<uint32_t>(padded.size())));
+            Gpu::updateTexture(texture, padded.data(), static_cast<uint32_t>(paddedW), static_cast<uint32_t>(paddedH),
+                slot.x - static_cast<uint32_t>(gutter), slot.y - static_cast<uint32_t>(gutter));
         }
 
-        bgfx::TextureHandle atlasTexture(uint32_t page)
+        Gpu::Texture atlasTexture(uint32_t page)
         {
             while (_atlasPages.size() <= page)
             {
-                const uint64_t flags = BGFX_SAMPLER_UVW_CLAMP | BGFX_SAMPLER_POINT;
-                _atlasPages.push_back(
-                    bgfx::createTexture2D(
-                        static_cast<uint16_t>(kAtlasSize), static_cast<uint16_t>(kAtlasSize), false, 1,
-                        bgfx::TextureFormat::RGBA8, flags, nullptr));
+                _atlasPages.push_back(Gpu::createTexture(kAtlasSize, kAtlasSize));
             }
             return _atlasPages[page];
         }
 
-        bgfx::TextureHandle uploadRgba(const uint8_t* rgba, uint16_t width, uint16_t height, bool nearest, bool clamp)
+        Gpu::Texture uploadRgba(const uint8_t* rgba, uint16_t width, uint16_t height, bool nearest, bool clamp)
         {
             if (rgba == nullptr || width == 0 || height == 0)
             {
-                return BGFX_INVALID_HANDLE;
+                return {};
             }
-            const bgfx::Caps* caps = bgfx::getCaps();
-            if (caps != nullptr && (width > caps->limits.maxTextureSize || height > caps->limits.maxTextureSize))
-            {
-                return BGFX_INVALID_HANDLE;
-            }
-            uint64_t flags = BGFX_SAMPLER_UVW_CLAMP;
-            if (!clamp)
-            {
-                flags = 0;
-            }
-            if (nearest)
-            {
-                flags |= BGFX_SAMPLER_POINT | BGFX_SAMPLER_MIP_POINT;
-            }
-            const uint32_t bytes = static_cast<uint32_t>(width) * static_cast<uint32_t>(height) * 4u;
-            return bgfx::createTexture2D(width, height, false, 1, bgfx::TextureFormat::RGBA8, flags, bgfx::copy(rgba, bytes));
+            Gpu::Texture texture = Gpu::createTexture(width, height, 1, nearest, clamp);
+            Gpu::updateTexture(texture, rgba, width, height);
+            return texture;
         }
 
         bool uploadPrimitive(
-            const std::vector<MeshVertex>& vertices, const std::vector<uint32_t>& indices, bgfx::TextureHandle texture,
+            const std::vector<MeshVertex>& vertices, const std::vector<uint32_t>& indices, Gpu::Texture texture,
             float alphaCutoff, float light, bool blend, bool doubleSided, DrawPrimitive& out)
         {
-            if (vertices.empty() || indices.empty() || vertices.size() > 65535 || !bgfx::isValid(texture))
+            if (vertices.empty() || indices.empty() || vertices.size() > 65535 || texture.handle == nullptr)
             {
                 return false;
             }
@@ -353,30 +180,41 @@ namespace OpenRCT2::View3D
                 return false;
             }
             ensureSlab(vertexRange.slab);
-            std::vector<uint16_t> index16(indices.size());
+            std::vector<uint32_t> slabIndices(indices.size());
             for (size_t i = 0; i < indices.size(); i++)
             {
-                // Mesh-local. bgfx::setVertexBuffer's start vertex is the base (renderer_gl bindAttributes).
-                index16[i] = static_cast<uint16_t>(indices[i]);
+                if (indices[i] >= vertices.size())
+                {
+                    _arena.free(vertexRange, indexRange);
+                    return false;
+                }
+                slabIndices[i] = slabVertexIndex(vertexRange.offset, indices[i]);
             }
             const SlabGpu& slab = _slabs[vertexRange.slab];
-            if (!bgfx::isValid(slab.vertices) || !bgfx::isValid(slab.indices))
+            if (slab.vertices == nullptr || slab.indices == nullptr)
             {
                 _arena.free(vertexRange, indexRange);
                 return false;
             }
-            bgfx::update(
-                slab.vertices, vertexRange.offset,
-                bgfx::copy(vertices.data(), static_cast<uint32_t>(vertices.size() * sizeof(MeshVertex))));
-            bgfx::update(
-                slab.indices, indexRange.offset,
-                bgfx::copy(index16.data(), static_cast<uint32_t>(index16.size() * sizeof(uint16_t))));
-            out.vertices = slab.vertices;
-            out.indices = slab.indices;
-            out.vertexStart = vertexRange.offset;
-            out.vertexCount = vertexRange.count;
-            out.indexStart = indexRange.offset;
-            out.indexCount = indexRange.count;
+            std::vector<Gpu::Vertex> converted(vertices.size());
+            for (size_t i = 0; i < vertices.size(); ++i)
+            {
+                const auto& v = vertices[i];
+                converted[i] = { v.x, v.y, v.z, v.nx, v.ny, v.nz, v.u, v.v };
+            }
+            Gpu::updateVertices(slab.vertices, converted.data(), vertexRange.count, vertexRange.offset);
+            Gpu::updateIndices(slab.indices, slabIndices.data(), indexRange.count, indexRange.offset);
+            out.geometry = { slab.vertices, slab.indices, indexRange.offset, indexRange.count,
+                Gpu::bounds(converted.data(), vertexRange.count) };
+            const auto kind = light == 0.0f ? Gpu::MaterialKind::sprite : blend ? Gpu::MaterialKind::blended
+                : alphaCutoff > 0.0f ? Gpu::MaterialKind::masked : Gpu::MaterialKind::opaque;
+            out.material = Gpu::createMaterial(kind);
+            if (out.material == nullptr)
+            {
+                _arena.free(vertexRange, indexRange);
+                out = {};
+                return false;
+            }
             out.vertexRange = vertexRange;
             out.indexRange = indexRange;
             out.inArena = true;
@@ -385,56 +223,25 @@ namespace OpenRCT2::View3D
             out.light = light;
             out.blend = blend;
             out.doubleSided = doubleSided;
-            return bgfx::isValid(out.vertices) && bgfx::isValid(out.indices);
+            return true;
         }
 
         void submitPrimitive(const DrawPrimitive& primitive, const MeshInstance* instances, uint32_t count)
         {
-            if (count == 0 || !bgfx::isValid(primitive.vertices) || !bgfx::isValid(_program))
+            if (count == 0 || instances == nullptr || primitive.geometry.vertices == nullptr || primitive.material == nullptr)
             {
                 return;
             }
-            uint32_t drawn = 0;
-            while (drawn < count)
+            std::vector<filament::math::mat4f> transforms(count);
+            for (uint32_t i = 0; i < count; ++i)
             {
-                const uint32_t avail = bgfx::getAvailInstanceDataBuffer(count - drawn, kInstanceStride);
-                if (avail == 0)
-                {
-                    break;
-                }
-                bgfx::InstanceDataBuffer buffer;
-                bgfx::allocInstanceDataBuffer(&buffer, avail, kInstanceStride);
-                std::memcpy(buffer.data, instances + drawn, static_cast<size_t>(avail) * kInstanceStride);
-
-                uint64_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_DEPTH_TEST_LESS;
-                if (!primitive.blend)
-                {
-                    state |= BGFX_STATE_WRITE_Z;
-                }
-                else
-                {
-                    state |= BGFX_STATE_BLEND_ALPHA;
-                }
-                // Keep the counter-clockwise side. That is the side whose normal
-                // points at the isometric camera. bgfx's projection and ParkView's
-                // mirrored camera X both reverse winding, so they cancel.
-                if (!primitive.doubleSided)
-                {
-                    state |= BGFX_STATE_CULL_CW;
-                }
-                const float params[4] = { primitive.alphaCutoff, primitive.light, primitive.blend ? 1.0f : 0.0f,
-                                          primitive.clampUv ? 1.0f : 0.0f };
-                const float uvRect[4] = { primitive.uvScaleX, primitive.uvScaleY, primitive.uvOffX, primitive.uvOffY };
-                bgfx::setState(state);
-                bgfx::setTexture(0, _sampler, primitive.texture);
-                bgfx::setUniform(_params, params);
-                bgfx::setUniform(_uvRect, uvRect);
-                bgfx::setVertexBuffer(0, primitive.vertices, primitive.vertexStart, primitive.vertexCount);
-                bgfx::setIndexBuffer(primitive.indices, primitive.indexStart, primitive.indexCount);
-                bgfx::setInstanceDataBuffer(&buffer);
-                bgfx::submit(0, _program);
-                drawn += avail;
+                const auto& instance = instances[i];
+                transforms[i] = Gpu::instanceTransform(instance.x, instance.y, instance.z, instance.yaw);
             }
+            const float uvRect[4] = { primitive.uvScaleX, primitive.uvScaleY, primitive.uvOffX, primitive.uvOffY };
+            Gpu::configureMesh(primitive.material, primitive.texture, uvRect, primitive.clampUv,
+                primitive.alphaCutoff, primitive.doubleSided);
+            Gpu::draw(primitive.geometry, primitive.material, transforms.data(), count, primitive.light != 0.0f);
         }
     } // namespace
 
@@ -442,27 +249,16 @@ namespace OpenRCT2::View3D
     {
         if (_ready)
         {
-            return bgfx::isValid(_program) && bgfx::isValid(_distantProgram);
+            return Gpu::ready() && _white.handle != nullptr;
         }
-        _ready = true;
-        _sampler = bgfx::createUniform(kSamplerName, bgfx::UniformType::Sampler);
-        _params = bgfx::createUniform(kParamsName, bgfx::UniformType::Vec4);
-        _uvRect = bgfx::createUniform(kUvRectName, bgfx::UniformType::Vec4);
-        const bgfx::ShaderHandle vertex = createShader('V', 0, kVaryingHash, false, kVertexShader);
-        const bgfx::ShaderHandle fragment = createShader('F', kVaryingHash, 0, true, kFragmentShader);
-        _program = bgfx::createProgram(vertex, fragment, true);
-        const bgfx::ShaderHandle distantVertex = createShader('V', 0, kVaryingHash, false, kDistantVertexShader);
-        const bgfx::ShaderHandle distantFragment = createShader('F', kVaryingHash, 0, true, kFragmentShader);
-        _distantProgram = bgfx::createProgram(distantVertex, distantFragment, true);
-        _layout.begin(bgfx::RendererType::OpenGL)
-            .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
-            .add(bgfx::Attrib::Normal, 3, bgfx::AttribType::Float)
-            .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
-            .end();
+        if (!Gpu::ready())
+        {
+            return false;
+        }
         const uint8_t white[4] = { 255, 255, 255, 255 };
         _white = uploadRgba(white, 1, 1, true, true);
-        return bgfx::isValid(_program) && bgfx::isValid(_distantProgram) && bgfx::isValid(_sampler) && bgfx::isValid(_params)
-            && bgfx::isValid(_white);
+        _ready = _white.handle != nullptr;
+        return _ready;
     }
 
     void meshDrawShutdown()
@@ -482,62 +278,23 @@ namespace OpenRCT2::View3D
         }
         _spriteIds.clear();
         _sprites.clear();
-        for (int face = 0; face < 4; face++)
+        for (auto& batch : _distantBatches)
         {
-            if (_faceQuadReady[face])
-            {
-                destroyPrimitive(_faceQuad[face]);
-            }
-            _faceQuadReady[face] = false;
+            Gpu::destroy(batch.material);
+            Gpu::destroy(batch.geometry);
         }
-        if (bgfx::isValid(_white))
-        {
-            bgfx::destroy(_white);
-        }
-        _white = BGFX_INVALID_HANDLE;
-        if (bgfx::isValid(_program))
-        {
-            bgfx::destroy(_program);
-        }
-        _program = BGFX_INVALID_HANDLE;
-        if (bgfx::isValid(_distantProgram))
-        {
-            bgfx::destroy(_distantProgram);
-        }
-        _distantProgram = BGFX_INVALID_HANDLE;
-        if (bgfx::isValid(_sampler))
-        {
-            bgfx::destroy(_sampler);
-        }
-        _sampler = BGFX_INVALID_HANDLE;
-        if (bgfx::isValid(_params))
-        {
-            bgfx::destroy(_params);
-        }
-        _params = BGFX_INVALID_HANDLE;
-        if (bgfx::isValid(_uvRect))
-        {
-            bgfx::destroy(_uvRect);
-        }
-        _uvRect = BGFX_INVALID_HANDLE;
+        _distantBatches.clear();
+        _distantUsed = 0;
+        Gpu::destroy(_white);
         for (SlabGpu& slab : _slabs)
         {
-            if (bgfx::isValid(slab.vertices))
-            {
-                bgfx::destroy(slab.vertices);
-            }
-            if (bgfx::isValid(slab.indices))
-            {
-                bgfx::destroy(slab.indices);
-            }
+            Gpu::destroy(slab.vertices);
+            Gpu::destroy(slab.indices);
         }
         _slabs.clear();
-        for (bgfx::TextureHandle page : _atlasPages)
+        for (auto& page : _atlasPages)
         {
-            if (bgfx::isValid(page))
-            {
-                bgfx::destroy(page);
-            }
+            Gpu::destroy(page);
         }
         _atlasPages.clear();
         _arena = GeometryArena(kSlabVertices, kSlabIndices, kMaxGeometrySlabs);
@@ -573,6 +330,7 @@ namespace OpenRCT2::View3D
     void meshDrawBeginFrame()
     {
         _spriteIds.nextFrame();
+        _distantUsed = 0;
     }
 
     void meshDrawReleaseSprite(int32_t id)
@@ -585,9 +343,24 @@ namespace OpenRCT2::View3D
         _spriteIds.release(id);
     }
 
+    uint32_t meshDrawGpuBytes(const CpuMesh& mesh)
+    {
+        uint64_t bytes = 0;
+        for (const auto& primitive : mesh.primitives)
+        {
+            bytes += static_cast<uint64_t>(primitive.vertices.size()) * Gpu::vertexStride();
+            bytes += static_cast<uint64_t>(primitive.indices.size()) * sizeof(uint32_t);
+        }
+        for (const auto& image : mesh.images)
+        {
+            bytes += image.rgba.size();
+        }
+        return static_cast<uint32_t>(std::min(bytes, static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())));
+    }
+
     MeshUpload meshDrawUploadModel(const CpuMesh& mesh)
     {
-        if (!meshDrawInit() || !bgfx::isValid(_program))
+        if (!meshDrawInit())
         {
             return { MeshUploadStatus::capacity, -1 };
         }
@@ -602,7 +375,7 @@ namespace OpenRCT2::View3D
         };
         for (const MeshPrimitive& primitive : mesh.primitives)
         {
-            bgfx::TextureHandle texture = BGFX_INVALID_HANDLE;
+            Gpu::Texture texture;
             bool sharedTexture = false;
             bool packed = false;
             bool clampUv = true;
@@ -643,7 +416,7 @@ namespace OpenRCT2::View3D
                     }
                     packed = true;
                     texture = atlasTexture(slot.page);
-                    sharedTexture = bgfx::isValid(texture);
+                    sharedTexture = texture.handle != nullptr;
                     if (sharedTexture)
                     {
                         blitAtlas(texture, slot, image.rgba.data(), image.width, image.height);
@@ -667,7 +440,7 @@ namespace OpenRCT2::View3D
                     texture = uploadRgba(
                         image.rgba.data(), static_cast<uint16_t>(image.width), static_cast<uint16_t>(image.height),
                         image.nearest, image.clamp);
-                    if (!bgfx::isValid(texture))
+                    if (texture.handle == nullptr)
                     {
                         return abandon();
                     }
@@ -687,15 +460,15 @@ namespace OpenRCT2::View3D
                 {
                     _atlas.free(slot);
                 }
-                else if (bgfx::isValid(texture) && texture.idx != _white.idx)
+                else if (texture.handle != nullptr && texture.handle != _white.handle)
                 {
-                    bgfx::destroy(texture);
+                    Gpu::destroy(texture);
                 }
                 return abandon();
             }
             gpu.inAtlas = sharedTexture;
             gpu.atlasSlot = slot;
-            gpu.ownsTexture = !sharedTexture && texture.idx != _white.idx;
+            gpu.ownsTexture = !sharedTexture && texture.handle != _white.handle;
             gpu.clampUv = clampUv;
             if (gpu.ownsTexture)
             {
@@ -734,7 +507,7 @@ namespace OpenRCT2::View3D
         {
             return place;
         }
-        bgfx::TextureHandle texture = BGFX_INVALID_HANDLE;
+        Gpu::Texture texture;
         bool sharedTexture = false;
         float uvScaleX = 1.0f;
         float uvScaleY = 1.0f;
@@ -746,7 +519,7 @@ namespace OpenRCT2::View3D
         if (fitsAtlas)
         {
             texture = atlasTexture(slot.page);
-            sharedTexture = bgfx::isValid(texture);
+            sharedTexture = texture.handle != nullptr;
             if (sharedTexture)
             {
                 blitAtlas(texture, slot, rgba, width, height);
@@ -768,7 +541,7 @@ namespace OpenRCT2::View3D
             }
             texture = uploadRgba(rgba, static_cast<uint16_t>(width), static_cast<uint16_t>(height), true, true);
         }
-        if (!bgfx::isValid(texture))
+        if (texture.handle == nullptr)
         {
             return place;
         }
@@ -798,9 +571,9 @@ namespace OpenRCT2::View3D
             {
                 _atlas.free(slot);
             }
-            else if (bgfx::isValid(texture))
+            else if (texture.handle != nullptr)
             {
-                bgfx::destroy(texture);
+                Gpu::destroy(texture);
             }
             return place;
         }
@@ -837,86 +610,73 @@ namespace OpenRCT2::View3D
         return place;
     }
 
-    static void ensureFaceQuad(int face)
-    {
-        const int index = face & 3;
-        if (_faceQuadReady[index])
-        {
-            return;
-        }
-        constexpr float kInvSqrt2 = 0.7071067811865476f;
-        const float nx = kSpriteEyeX[index] * kInvSqrt2;
-        const float ny = kSpriteEyeY[index] * kInvSqrt2;
-        std::vector<MeshVertex> vertices(4);
-        const float corner[4][2] = { { 0.0f, 0.0f }, { 1.0f, 0.0f }, { 1.0f, 1.0f }, { 0.0f, 1.0f } };
-        const float uv[4][2] = { { 0.0f, 1.0f }, { 1.0f, 1.0f }, { 1.0f, 0.0f }, { 0.0f, 0.0f } };
-        for (int i = 0; i < 4; i++)
-        {
-            vertices[static_cast<size_t>(i)].x = corner[i][0];
-            vertices[static_cast<size_t>(i)].y = corner[i][1];
-            vertices[static_cast<size_t>(i)].z = 0.0f;
-            vertices[static_cast<size_t>(i)].nx = nx;
-            vertices[static_cast<size_t>(i)].ny = ny;
-            vertices[static_cast<size_t>(i)].nz = 0.0f;
-            vertices[static_cast<size_t>(i)].u = uv[i][0];
-            vertices[static_cast<size_t>(i)].v = uv[i][1];
-        }
-        const std::vector<uint32_t> indices = { 0, 1, 2, 0, 2, 3 };
-        DrawPrimitive gpu;
-        if (!uploadPrimitive(vertices, indices, _white, 0.5f, 0.0f, false, false, gpu))
-        {
-            return;
-        }
-        gpu.clampUv = false;
-        _faceQuad[index] = gpu;
-        _faceQuadReady[index] = true;
-    }
-
     void meshDrawDistantSprites(int32_t page, int face, const DistantSpriteInstance* instances, uint32_t count)
     {
-        if (instances == nullptr || count == 0 || page < 0 || !meshDrawInit() || !bgfx::isValid(_distantProgram))
+        if (instances == nullptr || count == 0 || count > UINT32_MAX / 6 || page < 0 || !meshDrawInit())
         {
             return;
         }
-        ensureFaceQuad(face);
-        const int index = face & 3;
-        if (!_faceQuadReady[index])
+        const Gpu::Texture texture = atlasTexture(static_cast<uint32_t>(page));
+        if (texture.handle == nullptr)
         {
             return;
         }
-        const bgfx::TextureHandle texture = atlasTexture(static_cast<uint32_t>(page));
-        if (!bgfx::isValid(texture))
+        if (_distantUsed == _distantBatches.size())
         {
-            return;
+            _distantBatches.push_back({});
         }
-        DrawPrimitive& primitive = _faceQuad[index];
-        constexpr uint16_t kStride = static_cast<uint16_t>(sizeof(DistantSpriteInstance));
-        static_assert(sizeof(DistantSpriteInstance) == 48);
-        uint32_t drawn = 0;
-        while (drawn < count)
+        auto& batch = _distantBatches[_distantUsed++];
+        if (batch.material == nullptr)
         {
-            const uint32_t avail = bgfx::getAvailInstanceDataBuffer(count - drawn, kStride);
-            if (avail == 0)
+            batch.material = Gpu::createMaterial(Gpu::MaterialKind::sprite);
+        }
+        const uint32_t vertexCount = count * 6;
+        if (batch.capacity < vertexCount)
+        {
+            Gpu::destroy(batch.geometry);
+            batch.capacity = 0;
+            batch.geometry.vertices = Gpu::createVertices(vertexCount);
+            batch.geometry.indices = Gpu::createIndices(vertexCount);
+            if (batch.geometry.vertices == nullptr || batch.geometry.indices == nullptr)
             {
-                break;
+                Gpu::destroy(batch.geometry);
+                return;
             }
-            bgfx::InstanceDataBuffer buffer;
-            bgfx::allocInstanceDataBuffer(&buffer, avail, kStride);
-            std::memcpy(buffer.data, instances + drawn, static_cast<size_t>(avail) * kStride);
-            uint64_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS
-                | BGFX_STATE_CULL_CW;
-            const float params[4] = { 0.5f, 0.0f, 0.0f, 0.0f };
-            const float uvRect[4] = { 1.0f, 1.0f, 0.0f, 0.0f };
-            bgfx::setState(state);
-            bgfx::setTexture(0, _sampler, texture);
-            bgfx::setUniform(_params, params);
-            bgfx::setUniform(_uvRect, uvRect);
-            bgfx::setVertexBuffer(0, primitive.vertices, primitive.vertexStart, primitive.vertexCount);
-            bgfx::setIndexBuffer(primitive.indices, primitive.indexStart, primitive.indexCount);
-            bgfx::setInstanceDataBuffer(&buffer);
-            bgfx::submit(0, _distantProgram);
-            drawn += avail;
+            std::vector<uint32_t> indices(vertexCount);
+            for (uint32_t i = 0; i < vertexCount; ++i)
+            {
+                indices[i] = i;
+            }
+            Gpu::updateIndices(batch.geometry.indices, indices.data(), vertexCount);
+            batch.capacity = vertexCount;
         }
+        constexpr float kInvSqrt2 = 0.7071067811865476f;
+        const float nx = kSpriteEyeX[face & 3] * kInvSqrt2;
+        const float ny = kSpriteEyeY[face & 3] * kInvSqrt2;
+        const uint32_t corners[] = { 0, 1, 2, 0, 2, 3 };
+        std::vector<Gpu::Vertex> vertices(vertexCount);
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            const auto& sprite = instances[i];
+            for (uint32_t j = 0; j < 6; ++j)
+            {
+                const uint32_t corner = corners[j];
+                const bool right = corner == 1 || corner == 2;
+                const bool top = corner >= 2;
+                const float across = right ? sprite.right : sprite.left;
+                vertices[i * 6 + j] = { sprite.x - ny * across, sprite.y + nx * across,
+                    sprite.z + (top ? sprite.top : sprite.bottom), nx, ny, 0.0f,
+                    sprite.uvOffX + (right ? sprite.uvScaleX : 0.0f),
+                    sprite.uvOffY + (top ? 0.0f : sprite.uvScaleY) };
+            }
+        }
+        Gpu::updateVertices(batch.geometry.vertices, vertices.data(), vertexCount);
+        batch.geometry.count = vertexCount;
+        batch.geometry.bounds = Gpu::bounds(vertices.data(), vertexCount);
+        const float uvRect[] = { 1.0f, 1.0f, 0.0f, 0.0f };
+        Gpu::configureMesh(batch.material, texture, uvRect, false, 0.5f, false);
+        const filament::math::mat4f identity;
+        Gpu::draw(batch.geometry, batch.material, &identity, 1, false);
     }
 
     void meshDrawModel(int32_t id, const MeshInstance* instances, uint32_t count)

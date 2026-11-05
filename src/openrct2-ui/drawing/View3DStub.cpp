@@ -53,10 +53,7 @@ namespace OpenRCT2::View3D
     {
     }
 
-    bool present(
-        [[maybe_unused]] void* sdlWindow, [[maybe_unused]] const uint8_t* indexed, [[maybe_unused]] int32_t width,
-        [[maybe_unused]] int32_t height, [[maybe_unused]] int32_t pitch, [[maybe_unused]] const ColourBGRA* palette,
-        [[maybe_unused]] void* glContext, [[maybe_unused]] bool world)
+    bool renderPark(void*, int32_t, int32_t, uint8_t*)
     {
         return false;
     }

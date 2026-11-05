@@ -22,7 +22,7 @@ namespace OpenRCT2::View3D
         uint8_t alpha;
     };
 
-    // The View menu toggle. While this is set, the main park viewport is a hole and bgfx presents the frame.
+    // The View menu toggle. While this is set, the main park viewport reveals the Filament image.
     bool isActive();
     void toggle();
 
@@ -36,32 +36,23 @@ namespace OpenRCT2::View3D
     void cameraTurnQuarter(int32_t direction);
     void cameraSetMovement(bool forward, bool back, bool left, bool right);
 
-    // True after bgfx has created a device. Cheap to call when the device is down.
+    // True after Filament has created a device. Cheap to call when the device is down.
     bool hasDevice();
 
-    // True after bgfx refused to start. Stays set until shutdown(), so the game can keep the original present path.
+    // True after Filament failed. Cleared by shutdown() or another attempt to enable the 3D view.
     bool hasFailed();
 
-    // Drops the bgfx device. Does nothing when no device exists.
+    // Drops the Filament device. Does nothing when no device exists.
     void shutdown();
 
-    // Draws the paletted UI over the window. When world is true, index 0 is discarded and the 3D park is drawn
-    // behind it. When world is false, the indexed image is opaque so the original 2D frame can stay on a device
-    // that was created for the 3D view. glContext is null when bgfx should create the context, or an existing GL
-    // context that is current on this thread. Returns false if the frame was not presented.
-    bool present(
-        void* sdlWindow, const uint8_t* indexed, int32_t width, int32_t height, int32_t pitch, const ColourBGRA* palette,
-        void* glContext, bool world);
-
     // Draws the 3D park and the paletted UI into rgba (width * height * 4, R, G, B, A, top row first).
-    // bgfx keeps a private GL context, so the game window's existing presenter stays in place. Returns
-    // false until a frame is ready or the device cannot start.
+    // Filament owns an independent offscreen target; the game's presenter stays in place.
+    // Palette index 0 reveals the park. Returns false until a complete frame is available.
     bool capture(
         void* sdlWindow, const uint8_t* indexed, int32_t width, int32_t height, int32_t pitch, const ColourBGRA* palette,
         uint8_t* rgba);
 
     // Draws the 3D park into rgba (width * height * 4, top row first) with the caller's GL context left
-    // current. bgfx borrows that context; it does not create a second one on the window. GL state afterwards
-    // belongs to bgfx, so the caller resets it before drawing again. Returns false when the frame was not drawn.
+    // current. Filament never adopts or presents the game window's context. Returns false when the frame was not drawn.
     bool renderPark(void* sdlWindow, int32_t width, int32_t height, uint8_t* rgba);
 } // namespace OpenRCT2::View3D

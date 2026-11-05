@@ -10,7 +10,7 @@
 
 <h3 align="center">An attempt to build a 3D version of RollerCoaster Tycoon 2. The original 2D game stays, and the View menu can switch the park to 3D.</h3>
 
-**Filament experiment:** This branch (`Filament`), created from `develop`, tests [Google Filament](https://github.com/google/filament) in place of bgfx for the 3D view, with the aim of improving lighting, ambient occlusion, shadows, and reflections while keeping the existing OpenRCT2 simulation, UI, and default 2D renderer intact. Filament is not integrated yet; the code and build instructions still use bgfx. See [the branch scope](docs/3d-viewer.md#filament-branch-scope).
+**Filament experiment:** This branch (`Filament`), created from `develop`, uses [Google Filament](https://github.com/google/filament) in place of bgfx for the 3D view while keeping the existing OpenRCT2 simulation, UI, and default 2D renderer. The integration enables physically based lighting, sun shadows, ambient occlusion, and screen-space reflections. Visual quality and platform behavior still need in-game evaluation. See [build requirements and limitations](src/openrct2-3d/README.md) and [the branch scope](docs/3d-viewer.md#filament-branch-scope).
 
 ---
 
@@ -65,7 +65,7 @@ If you want to help translate the game to your language, please stop by the Loca
 
 # 1. Introduction
 
-**This project is an attempt to build a 3D version of RollerCoaster Tycoon 2.** It is based on OpenRCT2. The original 2D renderer remains the normal way to play, and it must keep working. Guests, rides, park economy, and the original game tick stay in that simulation. The View menu gains an option that switches the main park view to 3D, currently drawn with [bgfx](https://github.com/bkaradzic/bgfx) pending the Filament experiment, and switches it back to the original 2D renderer. The original interface stays. In 3D it is drawn over the view, with the main park viewport left transparent. Implementation notes are in [docs/3d-viewer.md](docs/3d-viewer.md).
+**This project is an attempt to build a 3D version of RollerCoaster Tycoon 2.** It is based on OpenRCT2. The original 2D renderer remains the normal way to play, and it must keep working. Guests, rides, park economy, and the original game tick stay in that simulation. The View menu switches the main park view to 3D, drawn with Filament, and back to the original 2D renderer. The original interface stays. In 3D it is drawn over the view, with the main park viewport left transparent. Implementation notes are in [docs/3d-viewer.md](docs/3d-viewer.md).
 
 The paragraphs below describe the OpenRCT2 simulation this fork builds on.
 
@@ -96,6 +96,8 @@ Some \*BSD operating systems offer native packages:
 ---
 
 # 3. Building the game
+This branch additionally requires the pinned Filament 1.80.0 SDK and its material tools. See [the 3D viewer build instructions](src/openrct2-3d/README.md); Windows builds use MSVC x64, not Win32 or MinGW.
+
 - [Building OpenRCT2 on Linux](https://github.com/OpenRCT2/OpenRCT2/wiki/Building-OpenRCT2-on-Linux)
 - [Building OpenRCT2 on macOS using CMake](https://github.com/OpenRCT2/OpenRCT2/wiki/Building-OpenRCT2-on-macOS-using-CMake)
 - [Building OpenRCT2 on Windows](https://github.com/OpenRCT2/OpenRCT2/wiki/Building-OpenRCT2-on-Windows)

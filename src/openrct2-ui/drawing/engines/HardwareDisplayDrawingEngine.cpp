@@ -308,20 +308,6 @@ protected:
     }
 
 private:
-    bool rendererIsOpenGL() const
-    {
-        if (_sdlRenderer == nullptr)
-        {
-            return false;
-        }
-        SDL_RendererInfo info{};
-        if (SDL_GetRendererInfo(_sdlRenderer, &info) != 0 || info.name == nullptr)
-        {
-            return false;
-        }
-        return std::strncmp(info.name, "opengl", 6) == 0;
-    }
-
     void logRendererOnce()
     {
         static bool logged = false;
@@ -343,42 +329,6 @@ private:
     {
         logRendererOnce();
 
-        // OpenGL hardware display (Linux) hands the game window to bgfx. That path already showed the park.
-        // Direct3D (the Windows default) keeps its presenter and copies the frame in: replacing that window
-        // with GL freezes the last picture, and tearing the context down on toggle-off stalls the process.
-        const bool handWindowToBgfx = _sdlRenderer == nullptr || rendererIsOpenGL();
-        if (handWindowToBgfx && (View3D::hasDevice() || (View3D::isActive() && !View3D::hasFailed())))
-        {
-            if (_sdlRenderer != nullptr)
-            {
-                releaseGpuDisplay();
-            }
-            const bool presented = View3D::present(
-                _window, reinterpret_cast<const uint8_t*>(_bits), static_cast<int32_t>(_width), static_cast<int32_t>(_height),
-                static_cast<int32_t>(_pitch), reinterpret_cast<const View3D::ColourBGRA*>(gPalette.data()), nullptr,
-                View3D::isActive());
-            if (presented)
-            {
-                return;
-            }
-            if (_sdlRenderer == nullptr)
-            {
-                restoreGpuDisplay();
-            }
-        }
-        else if (handWindowToBgfx && !View3D::isActive() && View3D::hasFailed())
-        {
-            View3D::shutdown();
-            if (_sdlRenderer == nullptr)
-            {
-                restoreGpuDisplay();
-            }
-        }
-        else if (!handWindowToBgfx && !View3D::isActive() && View3D::hasFailed() && !View3D::hasDevice())
-        {
-            View3D::shutdown();
-        }
-
         if (_sdlRenderer == nullptr || _screenTexture == nullptr)
         {
             if (_sdlRenderer == nullptr)
@@ -392,7 +342,7 @@ private:
         }
 
         bool showed3d = false;
-        if (!handWindowToBgfx && View3D::isActive() && !View3D::hasFailed())
+        if (View3D::isActive() && !View3D::hasFailed())
         {
             std::vector<uint8_t> rgba(static_cast<size_t>(_width) * _height * 4);
             showed3d = View3D::capture(

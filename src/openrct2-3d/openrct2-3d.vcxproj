@@ -1,10 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <!--
-    Static library for the 3D view. Visual Studio builds this with the rest of openrct2.sln.
-    bx and bgfx are their amalgamated sources. bimg is image.cpp only, which is what bgfx links.
-    Only the OpenGL renderer is compiled. The viewer creates an OpenGL context on the SDL window,
-    and the other bgfx backends would pull in Direct3D, Vulkan, and WebGPU.
+    Static library for the Filament 3D viewer. Filament.targets compiles embedded materials.
+    bx remains camera math; bimg supplies only stb_image.h.
   -->
   <PropertyGroup>
     <SolutionDir Condition="'$(SolutionDir)'==''">..\..\</SolutionDir>
@@ -56,24 +54,22 @@
     <ConfigurationType>StaticLibrary</ConfigurationType>
   </PropertyGroup>
   <Import Project="..\..\openrct2.common.props" />
+  <Import Project="Filament.props" />
   <!--
     The rest of this solution finds headers through IncludePath. MSBuildThisFileDirectory is the
     directory of this vcxproj, with a trailing slash, so these paths stay absolute.
   -->
   <PropertyGroup>
-    <View3DIncludes>$(MSBuildThisFileDirectory)src;$(MSBuildThisFileDirectory)third_party\cgltf;$(MSBuildThisFileDirectory)third_party\bimg\3rdparty\stb;$(MSBuildThisFileDirectory)third_party\bgfx\include;$(MSBuildThisFileDirectory)third_party\bgfx\3rdparty;$(MSBuildThisFileDirectory)third_party\bgfx\3rdparty\khronos;$(MSBuildThisFileDirectory)third_party\bx\include;$(MSBuildThisFileDirectory)third_party\bx\3rdparty;$(MSBuildThisFileDirectory)third_party\bx\include\compat\msvc;$(MSBuildThisFileDirectory)third_party\bimg\include</View3DIncludes>
+    <View3DIncludes>$(MSBuildThisFileDirectory)src;$(IntDir)filament-materials;$(MSBuildThisFileDirectory)third_party\cgltf;$(MSBuildThisFileDirectory)third_party\bimg\3rdparty\stb;$(MSBuildThisFileDirectory)third_party\bx\include;$(MSBuildThisFileDirectory)third_party\bx\3rdparty;$(MSBuildThisFileDirectory)third_party\bx\include\compat\msvc</View3DIncludes>
     <IncludePath>$(View3DIncludes);$(IncludePath)</IncludePath>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <!-- bgfx headers warn under the solution's warnings-as-errors setting. -->
-      <TreatWarningAsError>false</TreatWarningAsError>
       <AdditionalOptions>/Zc:__cplusplus /Zc:preprocessor %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>$(View3DIncludes);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;__STDC_CONSTANT_MACROS;BGFX_CONFIG_RENDERER_OPENGL=43;BGFX_CONFIG_MULTITHREADED=1;BGFX_CONFIG_VIDEO=0;BIMG_CONFIG_DECODE_ASTC=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <PreprocessorDefinitions Condition="'$(Configuration)'=='Debug'">BX_CONFIG_DEBUG=1;BGFX_CONFIG_DEBUG_ANNOTATION=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <PreprocessorDefinitions Condition="'$(Configuration)'!='Debug'">BX_CONFIG_DEBUG=0;BGFX_CONFIG_DEBUG_ANNOTATION=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)'=='Debug'">BX_CONFIG_DEBUG=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)'!='Debug'">BX_CONFIG_DEBUG=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Lib>
       <TargetMachine Condition="'$(Platform)'=='Win32'">MachineX86</TargetMachine>
@@ -82,7 +78,7 @@
     </Lib>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="src\BgfxRenderer.hpp" />
+    <ClInclude Include="src\FilamentRenderer.hpp" />
     <ClInclude Include="src\GlbMesh.hpp" />
     <ClInclude Include="src\MeshDraw.hpp" />
     <ClInclude Include="src\GpuBudget.hpp" />
@@ -94,9 +90,10 @@
     <ClInclude Include="src\SceneryDraw.hpp" />
     <ClInclude Include="src\SpriteQuad.hpp" />
     <ClInclude Include="src\ViewerScale.hpp" />
+    <ClInclude Include="src\PaletteComposite.hpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\BgfxRenderer.cpp" />
+    <ClCompile Include="src\FilamentRenderer.cpp" />
     <ClCompile Include="src\GlbMesh.cpp" />
     <ClCompile Include="src\GpuBudget.cpp" />
     <ClCompile Include="src\MeshDraw.cpp" />
@@ -105,21 +102,12 @@
     <ClCompile Include="src\SceneryChunk.cpp" />
     <ClCompile Include="src\ParkView.cpp" />
     <ClCompile Include="src\SceneryDraw.cpp" />
-    <ClCompile Include="src\View3D.cpp" />
+    <ClCompile Include="src\FilamentView.cpp" />
     <ClCompile Include="third_party\cgltf\cgltf.cpp">
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
     </ClCompile>
     <ClCompile Include="third_party\stb_image_impl.cpp">
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
-    </ClCompile>
-    <ClCompile Include="third_party\bimg\src\image.cpp">
-      <WarningLevel>TurnOffAllWarnings</WarningLevel>
-      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
-    </ClCompile>
-    <ClCompile Include="third_party\bgfx\src\amalgamated.cpp">
-      <WarningLevel>TurnOffAllWarnings</WarningLevel>
-      <ObjectFileName>$(IntDir)bgfx_amalgamated.obj</ObjectFileName>
-      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <ClCompile Include="third_party\bx\src\amalgamated.cpp">
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
@@ -128,6 +116,13 @@
       <PreprocessorDefinitions>_HAS_EXCEPTIONS=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
+    <ClCompile Include="$(IntDir)filament-materials\view3d_materials.c">
+      <CompileAs>CompileAsC</CompileAs>
+      <LanguageStandard>
+      </LanguageStandard>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\openrct2-deps\openrct2-deps.vcxproj">
@@ -135,19 +130,29 @@
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <Target Name="InitView3DSubmodules" Condition="!Exists('$(MSBuildThisFileDirectory)third_party\bgfx\include\bgfx\bgfx.h') Or !Exists('$(MSBuildThisFileDirectory)third_party\bx\include\bx\bx.h') Or !Exists('$(MSBuildThisFileDirectory)third_party\bimg\include\bimg\bimg.h')">
+  <Target Name="InitView3DSubmodules" Condition="!Exists('$(MSBuildThisFileDirectory)third_party\bx\include\bx\bx.h') Or !Exists('$(MSBuildThisFileDirectory)third_party\bimg\3rdparty\stb\stb_image.h')">
     <PropertyGroup>
       <View3DGit Condition="'$(View3DGit)' == '' and Exists('$(ProgramW6432)\Git\cmd\git.exe')">$(ProgramW6432)\Git\cmd\git.exe</View3DGit>
       <View3DGit Condition="'$(View3DGit)' == '' and Exists('$(ProgramFiles)\Git\cmd\git.exe')">$(ProgramFiles)\Git\cmd\git.exe</View3DGit>
       <View3DGit Condition="'$(View3DGit)' == '' and Exists('$(VsInstallRoot)\Common7\IDE\CommonExtensions\Microsoft\TeamFoundation\Team Explorer\Git\cmd\git.exe')">$(VsInstallRoot)\Common7\IDE\CommonExtensions\Microsoft\TeamFoundation\Team Explorer\Git\cmd\git.exe</View3DGit>
       <View3DGit Condition="'$(View3DGit)' == ''">git</View3DGit>
     </PropertyGroup>
-    <Message Importance="high" Text="Fetching bx, bimg, and bgfx. These are git submodules and are not in the clone until this step." />
-    <Exec Command="&quot;$(View3DGit)&quot; -C &quot;$(MSBuildThisFileDirectory)..\..&quot; submodule update --init -- src/openrct2-3d/third_party/bx src/openrct2-3d/third_party/bimg src/openrct2-3d/third_party/bgfx src/openrct2-3d/third_party/bgfx.cmake" />
+    <Message Importance="high" Text="Fetching bx math and stb image utility submodules." />
+    <Exec Command="&quot;$(View3DGit)&quot; -C &quot;$(MSBuildThisFileDirectory)..\..&quot; submodule update --init -- src/openrct2-3d/third_party/bx src/openrct2-3d/third_party/bimg" />
   </Target>
   <Target Name="CheckView3DSources" BeforeTargets="PrepareForBuild" DependsOnTargets="InitView3DSubmodules">
-    <Error Condition="!Exists('$(MSBuildThisFileDirectory)third_party\bgfx\include\bgfx\bgfx.h')" Text="bgfx headers are still missing at $(MSBuildThisFileDirectory)third_party\bgfx\include\bgfx\bgfx.h. The fetch step did not populate the submodule. From the repository root, run: git submodule update --init -- src/openrct2-3d/third_party/bx src/openrct2-3d/third_party/bimg src/openrct2-3d/third_party/bgfx" />
-    <Error Condition="!Exists('$(MSBuildThisFileDirectory)third_party\bx\include\bx\bx.h')" Text="bx headers are still missing at $(MSBuildThisFileDirectory)third_party\bx\include\bx\bx.h. From the repository root, run: git submodule update --init -- src/openrct2-3d/third_party/bx src/openrct2-3d/third_party/bimg src/openrct2-3d/third_party/bgfx" />
-    <Error Condition="!Exists('$(MSBuildThisFileDirectory)third_party\bimg\include\bimg\bimg.h')" Text="bimg headers are still missing at $(MSBuildThisFileDirectory)third_party\bimg\include\bimg\bimg.h. From the repository root, run: git submodule update --init -- src/openrct2-3d/third_party/bx src/openrct2-3d/third_party/bimg src/openrct2-3d/third_party/bgfx" />
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)third_party\bx\include\bx\bx.h')" Text="Missing third_party\bx\include\bx\bx.h. Run git submodule update --init --recursive." />
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)third_party\bimg\3rdparty\stb\stb_image.h')" Text="Missing third_party\bimg\3rdparty\stb\stb_image.h. Run git submodule update --init --recursive." />
   </Target>
+  <ItemGroup>
+    <None Include="cmake\TestMaterialUvs.cmake" />
+    <None Include="materials\mesh.mat" />
+    <None Include="materials\sprite.mat" />
+    <None Include="materials\terrain.mat" />
+    <None Include="Filament.props" />
+    <None Include="Filament.targets" />
+    <None Include="cmake\CompileMaterials.cmake" />
+    <None Include="cmake\FetchFilament.cmake" />
+  </ItemGroup>
+  <Import Project="Filament.targets" />
 </Project>

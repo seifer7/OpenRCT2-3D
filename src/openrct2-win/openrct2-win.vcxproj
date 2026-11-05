@@ -50,6 +50,7 @@
     <ConfigurationType>Application</ConfigurationType>
   </PropertyGroup>
   <Import Project="..\..\openrct2.common.props" />
+  <Import Project="..\openrct2-3d\Filament.props" />
   <PropertyGroup>
     <TargetName>openrct2</TargetName>
     <LibraryPath>$(SolutionDir)bin;$(LibraryPath)</LibraryPath>

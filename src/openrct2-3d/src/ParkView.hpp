@@ -13,7 +13,7 @@
 
 namespace OpenRCT2::View3D::Park
 {
-    // Drops terrain meshes, the cached terrain images, and the free camera. Safe before bgfx::shutdown.
+    // Drops terrain meshes, the cached terrain images, and the free camera before Filament shutdown.
     void release();
 
     // Next draw places the camera on the main viewport: same centre, 2:1 pitch, rotation, and tile size.
@@ -32,11 +32,11 @@ namespace OpenRCT2::View3D::Park
     // Scroll Map held state. Applied on the next draw, along the current view, without turning or changing height.
     void cameraSetMovement(bool forward, bool back, bool left, bool right);
 
-    // Draws terrain, water, path tiles, and small scenery into view 0. Surface and water images are
+    // Adds terrain, water, path tiles, and small scenery to the Filament scene. Surface and water images are
     // copied from the graphics the 2D view has loaded, once, when the 3D view starts. The mesh is
     // rebuilt when the land or the paths change. Small scenery uses a GLB when one is installed for
     // that object, and the original direction sprites otherwise. Returns false when the terrain
-    // shaders are unavailable; the caller still clears the sky and draws the UI.
+    // materials are unavailable; the caller can return to the original 2D view.
     bool draw(uint16_t backWidth, uint16_t backHeight);
 
     // The pose lookAtMainView takes on the first frame: map centre, zoom 0, this back-buffer size.

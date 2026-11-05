@@ -170,16 +170,16 @@ namespace OpenRCT2::View3D::Park
     // The next draw rebuilds every chunk. Park load already does this when it is not headless.
     void markAllSceneryDirty();
 
-    // Noop device so a test can run the real upload and submit path without a window.
+    // Filament's no-op device lets tests run uploads and submissions without a window or GPU.
     bool initSceneryTestDevice(uint16_t width, uint16_t height);
     void sceneryTestFrame();
     void shutdownSceneryTestDevice();
 
-    // Drops scenery meshes and sprite textures. Safe before bgfx::shutdown.
+    // Drops scenery meshes and sprite textures before Filament shutdown.
     void releaseScenery();
 
     // Small scenery. An object with a GLB is instanced from that mesh. Anything
-    // else is four original direction sprites on two crossed quads. Submitted to
-    // view 0, so the caller sets the camera first.
+    // else is four original direction sprites on two crossed quads. Added to the
+    // Filament scene, so the caller sets the camera first.
     void drawScenery();
 } // namespace OpenRCT2::View3D::Park

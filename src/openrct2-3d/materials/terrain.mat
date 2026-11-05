@@ -1,0 +1,84 @@
+material {
+    name : terrain,
+    shadingModel : lit,
+    flipUV : false,
+    blending : ${BLENDING},
+    doubleSided : true,
+    parameters : [
+        { type : sampler2dArray, name : surfaces },
+        { type : sampler2d, name : tileIndex },
+        { type : sampler2d, name : water },
+        { type : sampler2dArray, name : paths },
+        { type : float4, name : params },
+        { type : float4, name : extra }
+    ],
+    requires : [ uv0, uv1, color ]
+}
+fragment {
+    int layerAt(ivec2 tile) {
+        if (tile.x < 0 || tile.y < 0 || float(tile.x) >= materialParams.params.x || float(tile.y) >= materialParams.params.y) {
+            return -1;
+        }
+        return int(texelFetch(materialParams_tileIndex, tile, 0).r * 255.0 + 0.5);
+    }
+    vec3 sampleSurface(int layer, vec2 uv) {
+        return texture(materialParams_surfaces, vec3(uv, float(layer))).rgb;
+    }
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        vec2 uv = getUV0();
+        vec2 world = getUV1();
+        vec4 vertexColour = getColor();
+        float kind = vertexColour.g * 255.0;
+        vec3 colour;
+        float alpha = 1.0;
+        bool water = kind > 1.5 && kind < 2.5;
+        if (kind > 2.5) {
+            float layer = float(int(vertexColour.r * 255.0 + 0.5));
+            vec4 pathSample = texture(materialParams_paths, vec3(uv, layer));
+            colour = pathSample.rgb;
+            alpha = pathSample.a;
+        } else if (water) {
+            colour = texture(materialParams_water, uv).rgb;
+            alpha = materialParams.extra.y;
+        } else if (kind > 0.5) {
+            colour = sampleSurface(int(vertexColour.r * 255.0 + 0.5), uv);
+        } else {
+            ivec2 tile = ivec2(floor(world));
+            vec2 cell = fract(world);
+            int id = layerAt(tile);
+            colour = sampleSurface(max(id, 0), uv);
+            float margin = 0.18;
+            if (cell.x < margin) {
+                int other = layerAt(tile + ivec2(-1, 0));
+                if (other >= 0) colour = mix(sampleSurface(other, uv), colour, smoothstep(0.0, margin, cell.x));
+            } else if (cell.x > 1.0 - margin) {
+                int other = layerAt(tile + ivec2(1, 0));
+                if (other >= 0) colour = mix(sampleSurface(other, uv), colour, smoothstep(0.0, margin, 1.0 - cell.x));
+            }
+            if (cell.y < margin) {
+                int other = layerAt(tile + ivec2(0, -1));
+                if (other >= 0) colour = mix(sampleSurface(other, uv), colour, smoothstep(0.0, margin, cell.y));
+            } else if (cell.y > 1.0 - margin) {
+                int other = layerAt(tile + ivec2(0, 1));
+                if (other >= 0) colour = mix(sampleSurface(other, uv), colour, smoothstep(0.0, margin, 1.0 - cell.y));
+            }
+        }
+        if (materialParams.params.z > 0.5 && kind < 0.5) {
+            vec2 cell = fract(world);
+            float dx = min(cell.x, 1.0 - cell.x);
+            float dy = min(cell.y, 1.0 - cell.y);
+            float px = max(length(vec2(dFdx(world.x), dFdy(world.x))), 0.0001);
+            float py = max(length(vec2(dFdx(world.y), dFdy(world.y))), 0.0001);
+            float dist = min(dx / px, dy / py);
+            float line = 1.0 - smoothstep(0.85, 1.7, dist);
+            float tilePixels = min(1.0 / px, 1.0 / py);
+            float coverage = mix(0.65, 1.0, smoothstep(2.5, 6.0, tilePixels));
+            colour = mix(colour, colour * 0.45, line * coverage * 0.42);
+        }
+        material.baseColor = vec4(colour * materialParams.extra.x, alpha);
+        material.roughness = water ? 0.12 : 0.85;
+        material.metallic = 0.0;
+        material.reflectance = 0.5;
+    }
+}

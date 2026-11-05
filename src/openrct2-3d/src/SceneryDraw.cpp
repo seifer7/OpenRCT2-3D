@@ -9,6 +9,7 @@
 
 #include "SceneryDraw.hpp"
 
+#include "FilamentRenderer.hpp"
 #include "GlbMesh.hpp"
 #include "GpuBudget.hpp"
 #include "MeshDraw.hpp"
@@ -21,7 +22,6 @@
 #include "ViewerScale.hpp"
 
 #include <algorithm>
-#include <bgfx/bgfx.h>
 #include <cstdio>
 #include <cstring>
 #include <list>
@@ -877,20 +877,7 @@ namespace OpenRCT2::View3D::Park
 
         uint32_t meshBytesOf(const CpuMesh& mesh)
         {
-            uint32_t meshBytes = 0;
-            for (const MeshPrimitive& primitive : mesh.primitives)
-            {
-                meshBytes += static_cast<uint32_t>(primitive.vertices.size() * sizeof(MeshVertex));
-                meshBytes += static_cast<uint32_t>(primitive.indices.size() * sizeof(uint16_t));
-            }
-            for (const MeshImage& image : mesh.images)
-            {
-                if (!image.rgba.empty())
-                {
-                    meshBytes += static_cast<uint32_t>(image.rgba.size());
-                }
-            }
-            return meshBytes;
+            return meshDrawGpuBytes(mesh);
         }
 
         void releaseResident(uint32_t droppedId)
@@ -943,7 +930,7 @@ namespace OpenRCT2::View3D::Park
         bool uploadOne(uint32_t key, const std::string& identifier, CpuMesh mesh, bool allowEvict)
         {
             const uint32_t meshBytes = meshBytesOf(mesh);
-            if (_vram.used() + meshBytes > _vram.budget())
+            if (static_cast<uint64_t>(_vram.used()) + meshBytes > _vram.budget())
             {
                 if (allowEvict)
                 {
@@ -952,7 +939,7 @@ namespace OpenRCT2::View3D::Park
                         releaseResident(droppedId);
                     }
                 }
-                if (_vram.used() + meshBytes > _vram.budget())
+                if (static_cast<uint64_t>(_vram.used()) + meshBytes > _vram.budget())
                 {
                     noteSpace(key, std::move(mesh));
                     return true;
@@ -1318,23 +1305,20 @@ namespace OpenRCT2::View3D::Park
         _dirtyTiles.clear();
     }
 
-    bool initSceneryTestDevice(uint16_t width, uint16_t height)
+    bool initSceneryTestDevice(uint16_t, uint16_t)
     {
-        bgfx::Init device;
-        device.type = bgfx::RendererType::Noop;
-        device.swapChain.width = width;
-        device.swapChain.height = height;
-        return bgfx::init(device);
+        return Gpu::initialize(true);
     }
 
     void sceneryTestFrame()
     {
-        bgfx::frame();
+        Gpu::flush();
+        Gpu::beginScene();
     }
 
     void shutdownSceneryTestDevice()
     {
-        bgfx::shutdown();
+        Gpu::shutdown();
     }
 
     void drawScenery()

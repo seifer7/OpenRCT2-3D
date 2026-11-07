@@ -5,6 +5,9 @@ Project notes, memories, decisions, surveys, and other working documents live in
 `Filament` was branched from `develop` to test Google Filament in place of bgfx while retaining the existing OpenRCT2 game engine. The renderer and build now use Filament. The [integration notes](filament-renderer.md) and [3D viewer branch scope](../3d-viewer.md#filament-branch-scope) describe the current implementation; older notes retain their historical bgfx/develop context.
 
 - `filament-renderer.md` — Filament integration, resource ownership, validation, and limitations
+- [Working procedures and handoff](working-procedures.md) — repository-owned notes policy, modeling environment, validation/install steps, current handoff and migration limitations
+- [Squirrel topiary model](squirrel-topiary-model.md) — current authoring procedure, installed revision and review history
+- [Sprite-to-3D batch process](sprite-to-3d-batch-process.md) — batch authoring and validation procedure
 
 - `notes.md` — task list
 - `project-context.md` — project context, repo facts, and decisions

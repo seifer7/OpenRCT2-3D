@@ -1,0 +1,2 @@
+# Blender's numbered backup files are not source revisions.
+*.blend[0-9]*

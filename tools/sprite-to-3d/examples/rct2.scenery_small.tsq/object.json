@@ -1,0 +1,22 @@
+{
+  "object_id": "rct2.scenery_small.tsq",
+  "dat_name": "TSQ",
+  "display_name": "Squirrel Shaped Tree",
+  "archetype": "squirrel_topiary",
+  "size_class": "tree_quarter",
+  "footprint_tiles": [0.5, 0.5],
+  "height_sim": 36,
+  "base_sink_sim": 0,
+  "max_overhang_tiles": 0.15,
+  "direction_images": [0, 1, 2, 3],
+  "alignment": {"sprite_shift": [0, 0], "sprite_y_nudge": -1},
+  "recolour": {
+    "primary": false,
+    "secondary": false,
+    "tertiary": false,
+    "checked": "TSQ.DAT has no colour-remap flags; the few remap-range pixels in the reference are fixed colours. The procedural atlas uses the dominant green ramp only."
+  },
+  "triangle_justification": "Connected sculpted anatomy and curved tail decimated below the quarter-tree hard budget.",
+  "review": {"status": "pending", "note": "Awaiting owner visual and in-game review; numerical silhouette checks are not artistic approval."},
+  "notes": "Quarter-tile clipped topiary facing Blender -X. Build with revision2/author.py and revision2/params.json; the obsolete conifer-lump version has been removed. Original local RCT1 images were verified pixel-identical to the four TSQ.DAT directions. Geometry and atlas are authored procedurally; no original sprite pixels are embedded. Logical DAT height is 36 sim."
+}

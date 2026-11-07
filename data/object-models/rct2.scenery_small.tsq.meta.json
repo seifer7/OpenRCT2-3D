@@ -1,0 +1,390 @@
+{
+ "schema": "openrct2-3d.object-model.v1",
+ "tool_version": "sprite-to-3d 1",
+ "object_id": "rct2.scenery_small.tsq",
+ "dat_name": "TSQ",
+ "display_name": "Squirrel Shaped Tree",
+ "archetype": "squirrel_topiary",
+ "size_class": "tree_quarter",
+ "source_sprites": {
+  "image_indices": [
+   0,
+   1,
+   2,
+   3
+  ],
+  "offsets": [
+   {
+    "index": 0,
+    "width": 30,
+    "height": 38,
+    "x_offset": -15,
+    "y_offset": -36
+   },
+   {
+    "index": 1,
+    "width": 30,
+    "height": 41,
+    "x_offset": -15,
+    "y_offset": -38
+   },
+   {
+    "index": 2,
+    "width": 29,
+    "height": 40,
+    "x_offset": -16,
+    "y_offset": -37
+   },
+   {
+    "index": 3,
+    "width": 29,
+    "height": 39,
+    "x_offset": -13,
+    "y_offset": -37
+   }
+  ]
+ },
+ "alignment": {
+  "sprite_shift": [
+   0,
+   0
+  ],
+  "sprite_y_nudge": -1
+ },
+ "units": {
+  "blender_unit_per_tile": 1,
+  "sim_units_per_tile": 32,
+  "origin": "tile centre, z=0 at the element base",
+  "authored_up": "Z",
+  "exported_up": "Y",
+  "z_squash_in_file": false
+ },
+ "bounds_blender": {
+  "min": [
+   -0.3733553886413574,
+   -0.20666314661502838,
+   0.0
+  ],
+  "max": [
+   0.3922017216682434,
+   0.2097950428724289,
+   1.1606793403625488
+  ],
+  "size": [
+   0.7655571103096008,
+   0.4164581894874573,
+   1.1606793403625488
+  ]
+ },
+ "height_sim": 36,
+ "footprint_tiles": [
+  0.5,
+  0.5
+ ],
+ "max_overhang_tiles": 0.15,
+ "base_sink_sim": 0,
+ "triangles": 580,
+ "texture": {
+  "embedded": true,
+  "width": 128,
+  "height": 128,
+  "alpha_mode": "MASK",
+  "alpha_cutoff": 0.5,
+  "filter": "NEAREST",
+  "mipmaps": false,
+  "double_sided": true,
+  "tiles": {
+   "foliage": [
+    0,
+    0,
+    128,
+    128
+   ]
+  },
+  "justification": "",
+  "palette_source": "ImageImporter.h StandardPalette; dominant greens counted from local TSQ sprites"
+ },
+ "export": {
+  "exporter": "Blender 5.2.1 LTS",
+  "reference": "The approved rct2.scenery_small.tcrp.glb next to the loader is the Blender 4.2 LTS export (Khronos glTF Blender I/O v4.2.83), patched to nearest filtering and alpha MASK. --no-blender uses the Python writer, which welds vertices and writes u16 indices so the structure matches that file. The game does not read this meta."
+ },
+ "iou": {
+  "views": [
+   0.809,
+   0.835,
+   0.77,
+   0.777
+  ],
+  "mean": 0.798,
+  "kernel_px": 3,
+  "threshold_per_view": 0.7,
+  "threshold_mean": 0.75,
+  "source": "rebuild.py measurement (validator rasteriser, local sprites)",
+  "raw": {
+   "views": [
+    0.787,
+    0.813,
+    0.743,
+    0.769
+   ],
+   "mean": 0.778
+  }
+ },
+ "params": {
+  "voxel_size": 0.38,
+  "triangle_target": 580,
+  "parts": [
+   {
+    "name": "stem",
+    "center": [
+     0,
+     0,
+     3.8
+    ],
+    "radii": [
+     1.8,
+     1.8,
+     4.2
+    ]
+   },
+   {
+    "name": "haunches",
+    "center": [
+     0.8,
+     0,
+     10.5
+    ],
+    "radii": [
+     6.3,
+     5.6,
+     7.3
+    ]
+   },
+   {
+    "name": "belly",
+    "center": [
+     -1.6,
+     0,
+     17.4
+    ],
+    "radii": [
+     5.1,
+     4.6,
+     7.7
+    ],
+    "tilt": -12
+   },
+   {
+    "name": "neck",
+    "center": [
+     -3,
+     0,
+     24.5
+    ],
+    "radii": [
+     3.3,
+     3.4,
+     4.7
+    ],
+    "tilt": -12
+   },
+   {
+    "name": "head",
+    "center": [
+     -4.9,
+     0,
+     29
+    ],
+    "radii": [
+     4.9,
+     3.8,
+     4.3
+    ]
+   },
+   {
+    "name": "muzzle",
+    "center": [
+     -8.5,
+     0,
+     27.8
+    ],
+    "radii": [
+     3.3,
+     2.7,
+     2.1
+    ],
+    "tilt": -8
+   },
+   {
+    "name": "ears",
+    "center": [
+     -2.6,
+     2.15,
+     33.2
+    ],
+    "radii": [
+     1.6,
+     1.45,
+     3.6
+    ],
+    "tilt": 12,
+    "pair": true
+   },
+   {
+    "name": "thighs",
+    "center": [
+     0,
+     3.8,
+     9.3
+    ],
+    "radii": [
+     4.4,
+     2.9,
+     5.3
+    ],
+    "pair": true
+   },
+   {
+    "name": "feet",
+    "center": [
+     -4,
+     3.9,
+     5.3
+    ],
+    "radii": [
+     6.3,
+     2.1,
+     2
+    ],
+    "pair": true
+   },
+   {
+    "name": "elbows",
+    "center": [
+     -4.6,
+     3.1,
+     20.4
+    ],
+    "radii": [
+     2.1,
+     1.6,
+     3.2
+    ],
+    "tilt": -28,
+    "pair": true
+   },
+   {
+    "name": "forearms",
+    "center": [
+     -6.7,
+     2.7,
+     21.5
+    ],
+    "radii": [
+     3,
+     1.45,
+     1.65
+    ],
+    "tilt": 28,
+    "pair": true
+   },
+   {
+    "name": "paws",
+    "center": [
+     -8.7,
+     1.4,
+     22.4
+    ],
+    "radii": [
+     1.9,
+     1.5,
+     2
+    ],
+    "pair": true
+   }
+  ],
+  "tail": {
+   "sides": 20,
+   "rings": [
+    [
+     3.7,
+     0,
+     7.4,
+     2.9,
+     3.4
+    ],
+    [
+     7.4,
+     0,
+     10.5,
+     3.2,
+     3.9
+    ],
+    [
+     9,
+     0,
+     15.2,
+     3.6,
+     4.4
+    ],
+    [
+     9,
+     0,
+     21,
+     3.5,
+     4.8
+    ],
+    [
+     8.2,
+     0,
+     26,
+     3.9,
+     4.8
+    ],
+    [
+     6.8,
+     0,
+     29.3,
+     3.7,
+     4.3
+    ],
+    [
+     5.1,
+     0,
+     30.5,
+     3.1,
+     3.8
+    ],
+    [
+     3.8,
+     0,
+     29.8,
+     2.1,
+     2.8
+    ],
+    [
+     3.6,
+     0,
+     28.6,
+     0.3,
+     0.5
+    ]
+   ]
+  },
+  "atlas": {
+   "size": [
+    128,
+    128
+   ],
+   "seed": 736
+  }
+ },
+ "review": {
+  "status": "pending",
+  "note": "Revision 2: connected hedge sculpture and corrected foliage sampling. Prior conifer-lump model visually rejected. Awaiting owner review."
+ },
+ "files": {
+  "glb": "rct2.scenery_small.tsq.glb"
+ },
+ "triangle_justification": "Connected sculpted anatomy and curved tail decimated below the quarter-tree hard budget."
+}

@@ -31,3 +31,5 @@ Linux dependencies and the Ninja build are documented in the upstream wiki linke
 ## Agent notes
 
 Project notes, memories, decisions, surveys, and other working documents live in `docs/agents/` and must be committed there. Write new notes in that folder going forward, not only in the Agent Store or on a VM.
+
+This includes procedures, implementation plans and handoffs. If a tool stores a plan outside the repository, preserve its actionable content and outcome in the relevant repository document before finishing. See [working procedures](docs/agents/working-procedures.md) and the [agent documentation index](docs/agents/README.md).
